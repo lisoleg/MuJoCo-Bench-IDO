@@ -605,7 +605,13 @@ v0.3.0修复了mjviser Viewer的3个bug：
 v0.4.1–v0.4.2修复了mjviser Viewer的系列bug：
 - Bug D：viewer.run()在后台线程中调用signal.signal()抛ValueError → 手动调用_setup_gui()+_render()+_tick()循环规避signal限制
 - Bug E：独立sim_loop线程与Viewer _tick()并发写同一MjData → 使用Viewer step_fn参数注入stepping，消除数据竞争
-- Bug F：dm_control位置执行器太弱(gain=1,ctrlrange=[-1,1])无法撑住站立姿态 → v0.4.2实现PD站立控制器(KP=50,KD=15)，通过qfrc_applied直接施加关节力矩绕过弱执行器，加小幅正弦摆臂使机器人"活着"
+- Bug F：dm_control位置执行器太弱(gain=1,ctrlrange=[-1,1])无法撑住站立姿态 → 硬锁定root站立控制器：
+  - 关节PD通过qfrc_applied驱动21个铰链趋向target_qpos（KP=50, KD=15）
+  - 硬锁定root：每步仿真后直接重置qpos[0:7]和qvel[0:6] → root位置/朝向完全锁定，零漂移零抽搐
+  - 无周期性运动：机器人稳定直立，不晃不闪不四处走动
+  - dm_control humanoid有free root关节（7 qpos, 6 DOF，无执行器），总质量≈40.84kg
+  - PD-only root控制仍有xy漂移+周期动作太闪 → 硬锁定方案彻底解决
+  - 验证结果：root EXACTLY (0,0,1.5)，机器人直立 ≥20 模拟秒
 
 ### 4.4 Baseline集成
 
