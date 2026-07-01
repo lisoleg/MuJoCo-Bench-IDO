@@ -16,7 +16,7 @@ API Endpoints:
   GET  /user_manual.html — User manual HTML page
   GET  /mujoco_docs_cn.html — MuJoCo docs Chinese translation page
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.4.3
+Author: MuJoCo-Bench-IDO Webviz extension v0.4.4
 """
 
 import asyncio

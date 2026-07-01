@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO User Manual</title>
+  <title>MuJoCo-Bench-IDO User Manual v0.4.4</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
@@ -42,7 +42,7 @@
 
 <!-- LEFT SIDEBAR -->
 <nav class="sidebar">
-  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.3.1</div>
+  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.4.4</div>
   <a href="#sec1" data-i18n="nav_sec1">1. 项目简介</a>
   <a href="#sec2" data-i18n="nav_sec2">2. 环境要求</a>
   <a href="#sec3" data-i18n="nav_sec3">3. 快速开始</a>
@@ -62,7 +62,7 @@
 <!-- HEADER -->
 <div class="section-card" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: none; margin-bottom: 32px;">
   <h1 style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-bottom: 8px;" data-i18n="header_title">MuJoCo-Bench-IDO 用户手册</h1>
-  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.3.1 · 最后更新 2025-07-01 · IDO/TOMAS 连续物理基准验证平台</p>
+  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.4.4 · 最后更新 2025-07-02 · IDO/TOMAS 连续物理基准验证平台</p>
 </div>
 
 <!-- ═══ Section 1: 项目简介 ═══ -->
@@ -141,7 +141,7 @@ pip install nvidia-cosmos-predict1         # 需 CUDA + 7B+ 模型</code></pre>
 python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 3</code></pre>
 
   <p data-i18n="sec3_output_example">输出示例：</p>
-  <pre><code>=== MuJoCo-Bench-IDO v0.2.0 ===
+  <pre><code>=== MuJoCo-Bench-IDO v0.4.4 ===
 Task: reacher-easy | Episodes: 3 | Max steps: 1000
 Episode 1: steps=1000, final_eta=2.45, NV=0, time=3.2s
 Episode 2: steps=1000, final_eta=3.10, NV=0, time=3.1s
@@ -152,13 +152,23 @@ avg_steps: 1000.0
 total_noether_violations: 0</code></pre>
 
   <h3 class="sub-title" data-i18n="sec3_available_tasks">所有可用任务</h3>
+  <p data-i18n="sec3_task_intro">v0.4.4 支持分组任务选择，涵盖 dm_control.suite 全部主流任务：</p>
   <table>
-    <thead><tr><th data-i18n="th_task">任务名</th><th data-i18n="th_description">说明</th><th data-i18n="th_recommended">推荐入门</th></tr></thead>
+    <thead><tr><th data-i18n="th_category">类别</th><th data-i18n="th_tasks">任务列表</th><th data-i18n="th_recommended">推荐入门</th></tr></thead>
     <tbody>
-      <tr><td><code>reacher-easy</code></td><td data-i18n="sec3_reacher_desc">2-DOF 机械臂到达目标（最简单）</td><td><span class="badge badge-green">⭐ 推荐新手</span></td></tr>
-      <tr><td><code>hopper-stand</code></td><td data-i18n="sec3_hopper_desc">单腿跳跃机器人站立</td><td data-i18n="sec3_medium">中等难度</td></tr>
-      <tr><td><code>walker-run</code></td><td data-i18n="sec3_walker_desc">双足行走机器人跑步</td><td data-i18n="sec3_harder">较难</td></tr>
-      <tr><td><code>humanoid-stand</code></td><td data-i18n="sec3_humanoid_desc">人形机器人站立（21 自由度）</td><td data-i18n="sec3_hardest">最难</td></tr>
+      <tr><td data-i18n="cat_humanoid">人形机器人</td><td>humanoid-stand, humanoid-walk, humanoid-run</td><td><span class="badge badge-green">⭐ humanoid-stand</span></td></tr>
+      <tr><td data-i18n="cat_walker">行走者</td><td>walker-stand, walker-walk, walker-run</td><td data-i18n="sec3_medium">中等难度</td></tr>
+      <tr><td data-i18n="cat_hopper">跳跃者</td><td>hopper-stand, hopper-hop</td><td data-i18n="sec3_medium2">中等</td></tr>
+      <tr><td data-i18n="cat_cheetah">猎豹</td><td>cheetah-run</td><td data-i18n="sec3_harder">较难</td></tr>
+      <tr><td data-i18n="cat_cartpole">杆车</td><td>cartpole-balance, cartpole-swingup, cartpole-balance_sparse, cartpole-swingup_sparse</td><td><span class="badge badge-green">⭐ cartpole-balance</span></td></tr>
+      <tr><td data-i18n="cat_reacher">机械臂</td><td>reacher-easy, reacher-hard</td><td><span class="badge badge-green">⭐ reacher-easy</span></td></tr>
+      <tr><td data-i18n="cat_finger">手指</td><td>finger-spin, finger-turn_easy, finger-turn_hard</td><td data-i18n="sec3_medium2">中等</td></tr>
+      <tr><td data-i18n="cat_fish">鱼类</td><td>fish-swim</td><td data-i18n="sec3_harder">较难</td></tr>
+      <tr><td data-i18n="cat_swimmer">游泳者</td><td>swimmer-swim6, swimmer-swim15</td><td data-i18n="sec3_medium2">中等</td></tr>
+      <tr><td data-i18n="cat_ballcup">球杯</td><td>ball_in_cup-catch</td><td data-i18n="sec3_medium2">中等</td></tr>
+      <tr><td data-i18n="cat_manipulator">机械手</td><td>manipulator-bring_ball</td><td data-i18n="sec3_hardest">最难</td></tr>
+      <tr><td data-i18n="cat_acrobot">杂技</td><td>acrobot-swingup</td><td data-i18n="sec3_harder">较难</td></tr>
+      <tr><td data-i18n="cat_pendulum">摆</td><td>pendulum-swingup</td><td data-i18n="sec3_easy">简单</td></tr>
     </tbody>
   </table>
 
@@ -185,22 +195,35 @@ python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-st
   <h3 class="sub-title" data-i18n="sec4_top_nav">顶部导航栏</h3>
   <ul>
     <li data-i18n="sec4_nav_project"><strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz</li>
-    <li data-i18n="sec4_nav_version"><strong>版本号</strong>: v0.3.1</li>
+    <li data-i18n="sec4_nav_version"><strong>版本号</strong>: v0.4.4</li>
     <li data-i18n="sec4_nav_status"><strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行</li>
     <li data-i18n="sec4_nav_links"><strong>导航链接</strong>: 用户手册、MuJoCo文档（使用绝对URL http://localhost:8080/）</li>
     <li data-i18n="sec4_nav_lang"><strong>语言切换</strong>: 中/EN按钮切换界面语言</li>
   </ul>
 
   <h3 class="sub-title" data-i18n="sec4_left_panel">左侧控制面板</h3>
-  <p data-i18n="sec4_task_select"><strong>任务选择下拉框</strong>：选择要运行的 dm_control 任务（humanoid-stand / hopper-stand / walker-run / reacher-easy）。</p>
+  <p data-i18n="sec4_panel_intro">v0.4.4 控制面板包含分组任务选择、6种3D场景、解释性提示文字：</p>
+  <p data-i18n="sec4_task_select"><strong>任务选择下拉框</strong>：按类别分组选择 dm_control 任务（人形/行走者/跳跃者/猎豹/杆车/机械臂/手指/鱼/游泳者/球杯/机械手/杂技/摆），共 25+ 任务。每个类别有推荐入门标记。</p>
+  <p data-i18n="sec4_task_hint"><small style="color:#64748b;" data-i18n="sec4_task_hint_text">💡 任务选择决定基准环境和 GoalEML 不变量类型</small></p>
   <p data-i18n="sec4_episode_config"><strong>Episode 配置</strong>：</p>
   <ul>
-    <li data-i18n="sec4_ep_count"><strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）</li>
-    <li data-i18n="sec4_max_steps"><strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）</li>
+    <li data-i18n="sec4_ep_count"><strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）。<small style="color:#64748b;" data-i18n="sec4_ep_hint">💡 每个 episode 是一次完整运行周期</small></li>
+    <li data-i18n="sec4_max_steps"><strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）。<small style="color:#64748b;" data-i18n="sec4_steps_hint">💡 步数越多，仿真时间越长</small></li>
   </ul>
-  <p data-i18n="sec4_sip_toggle"><strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式（T0/T1/T2 三阶段）。</p>
-  <p data-i18n="sec4_3d_scene"><strong>3D 场景选择</strong>：下拉框选择 3D 可视化场景——"默认 (humanoid-stand)" 或 "障碍竞技场"。</p>
-  <p data-i18n="sec4_mjviser_btn"><strong>mjviser 3D 按钮</strong>：点击 "🎮 Open mjviser (8081)" 按钮，在端口 8081 启动 3D 物理可视化。机器人将在仿真循环中自动运动。</p>
+  <p data-i18n="sec4_sip_toggle"><strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式（T0/T1/T2 三阶段）。<small style="color:#64748b;" data-i18n="sec4_sip_hint">💡 SIP-Bench 测量学习→适应→保持三个阶段的性能变化</small></p>
+  <p data-i18n="sec4_kappa_hint"><strong>κ-Snap 阈值 (δ_K)</strong>：η 低于此阈值时触发 κ-Snap 执行。<small style="color:#64748b;" data-i18n="sec4_kappa_hint_text">💡 δ_K 越小，要求越精确才执行</small></p>
+  <p data-i18n="sec4_3d_scene"><strong>3D 场景选择</strong>：下拉框选择 mjviser 3D 可视化场景——共 6 种：</p>
+  <ul>
+    <li data-i18n="sec4_scene_plain">空白场景 (plain) — 标准 dm_control 环境</li>
+    <li data-i18n="sec4_scene_obstacle">障碍竞技场 (obstacle) — 墙体、圆柱、方块障碍物</li>
+    <li data-i18n="sec4_scene_ramp">斜坡挑战 (ramp) — 倾斜坡道地形</li>
+    <li data-i18n="sec4_scene_stairs">阶梯地形 (stairs) — 多级台阶地形</li>
+    <li data-i18n="sec4_scene_floating">浮台地形 (floating) — 悬浮平台跳跃场景</li>
+    <li data-i18n="sec4_scene_maze">迷宫场景 (maze) — 通道迷宫导航</li>
+  </ul>
+  <p data-i18n="sec4_scene_hint"><small style="color:#64748b;" data-i18n="sec4_scene_hint_text">💡 场景选择决定 mjviser 中加载的物理场景和障碍物布局</small></p>
+  <p data-i18n="sec4_scene_name"><strong>当前场景显示</strong>：选择场景后，面板显示当前加载的3D场景名称卡片（如"当前场景：障碍竞技场"）。</p>
+  <p data-i18n="sec4_mjviser_btn"><strong>mjviser 3D 按钮</strong>：点击 "🎮 打开 mjviser" 按钮，启动 3D 物理可视化。v0.4.3+ 机器人采用随机行走控制器 + 航点导航，自动四处走动。<small style="color:#64748b;" data-i18n="sec4_mjviser_hint">💡 启动后浏览器打开 3D 视窗，机器人直立走动</small></p>
   <p data-i18n="sec4_run_stop"><strong>运行 / 停止按钮</strong>：</p>
   <ul>
     <li data-i18n="sec4_run"><strong>Run</strong>: 开始 benchmark 运行</li>
@@ -240,10 +263,10 @@ python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-st
   <h3 class="sub-title" data-i18n="sec5_launch">启动步骤</h3>
   <ol>
     <li data-i18n="sec5_li1">安装 mjviser 和 viser：<code>pip install mjviser viser</code></li>
-    <li data-i18n="sec5_li2">在 Web 仪表盘中选择3D场景类型（默认或障碍竞技场）</li>
-    <li data-i18n="sec5_li3">点击 "🎮 Open mjviser (8081)" 按钮</li>
-    <li data-i18n="sec5_li4">等待几秒钟，mjviser 服务在端口 8081 启动</li>
-    <li data-i18n="sec5_li5">打开浏览器访问 <code>http://localhost:8081</code>，机器人将自动运动</li>
+    <li data-i18n="sec5_li2">在 Web 仪表盘中选择3D场景类型（6种场景可选）</li>
+    <li data-i18n="sec5_li3">点击 "🎮 打开 mjviser" 按钮</li>
+    <li data-i18n="sec5_li4">等待几秒钟，mjviser 服务启动</li>
+    <li data-i18n="sec5_li5">打开浏览器访问 mjviser URL（通常端口 8081），机器人将直立走动</li>
   </ol>
 
   <h3 class="sub-title" data-i18n="sec5_interaction">3D 交互操作</h3>
@@ -253,25 +276,45 @@ python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-st
     <li data-i18n="sec5_zoom"><strong>缩放</strong>: 鼼标滚轮</li>
     <li data-i18n="sec5_pan"><strong>平移</strong>: 鼼标右键拖拽</li>
     <li data-i18n="sec5_select"><strong>选择关节</strong>: 点击关节高亮</li>
-    <li data-i18n="sec5_realtime"><strong>实时仿真</strong>: 机器人通过仿真循环自动运动（随机动作或 IDO 策略）</li>
+    <li data-i18n="sec5_realtime"><strong>实时仿真</strong>: 机器人通过7层随机行走控制器自动四处走动（v0.4.3+）</li>
   </ul>
 
-  <h3 class="sub-title" data-i18n="sec5_scenes">3D 场景类型</h3>
-  <p data-i18n="sec5_scene_desc">v0.3.1 新增场景选择功能：</p>
+  <h3 class="sub-title" data-i18n="sec5_controller">行走控制器 (v0.4.3+)</h3>
+  <p data-i18n="sec5_ctrl_desc">v0.4.3 起 mjviser 采用 7 层随机行走控制器 + 航点导航：</p>
   <table>
-    <thead><tr><th data-i18n="th_scene">场景</th><th data-i18n="th_description">说明</th></tr></thead>
+    <thead><tr><th data-i18n="th_layer">层</th><th data-i18n="th_name">名称</th><th data-i18n="th_function">功能</th></tr></thead>
     <tbody>
-      <tr><td data-i18n="sec5_plain">默认 (humanoid-stand)</td><td data-i18n="sec5_plain_desc">标准 dm_control humanoid-stand 环境</td></tr>
-      <tr><td data-i18n="sec5_obstacle">障碍竞技场</td><td data-i18n="sec5_obstacle_desc">包含墙体、圆柱、方块障碍物和红色目标球的自定义场景</td></tr>
+      <tr><td>1</td><td data-i18n="sec5_l1">重力补偿</td><td data-i18n="sec5_l1_desc">补偿关节重力负载</td></tr>
+      <tr><td>2</td><td data-i18n="sec5_l2">水平移动</td><td data-i18n="sec5_l2_desc">PD 驱动 root 朝航点移动</td></tr>
+      <tr><td>3</td><td data-i18n="sec5_l3">倾斜稳定</td><td data-i18n="sec5_l3_desc">PD 稳定躯干 Z 轴朝上</td></tr>
+      <tr><td>4</td><td data-i18n="sec5_l4">航向转向</td><td data-i18n="sec5_l4_desc">PD 控制 yaw 角朝向航点</td></tr>
+      <tr><td>5</td><td data-i18n="sec5_l5">行走步态</td><td data-i18n="sec5_l5_desc">周期性髋膝摆动模拟步行</td></tr>
+      <tr><td>6</td><td data-i18n="sec5_l6">关节稳定</td><td data-i18n="sec5_l6_desc">PD 驱动关节到目标姿态</td></tr>
+      <tr><td>7</td><td data-i18n="sec5_l7">安全恢复</td><td data-i18n="sec5_l7_desc">root 高度过低时紧急拉起</td></tr>
+    </tbody>
+  </table>
+  <p data-i18n="sec5_waypoint">航点每 5 秒随机更换（半径 6m），机器人沿航点行走，路径自然、不僵硬。</p>
+
+  <h3 class="sub-title" data-i18n="sec5_scenes">3D 场景类型</h3>
+  <p data-i18n="sec5_scene_desc">v0.4.4 扩展为 6 种场景：</p>
+  <table>
+    <thead><tr><th data-i18n="th_scene">场景</th><th data-i18n="th_key">选择键</th><th data-i18n="th_description">说明</th></tr></thead>
+    <tbody>
+      <tr><td data-i18n="sec5_plain">空白场景</td><td><code>plain</code></td><td data-i18n="sec5_plain_desc">标准 dm_control 环境，无障碍物</td></tr>
+      <tr><td data-i18n="sec5_obstacle">障碍竞技场</td><td><code>obstacle</code></td><td data-i18n="sec5_obstacle_desc">墙体、圆柱、方块障碍物 + 红色目标球</td></tr>
+      <tr><td data-i18n="sec5_ramp">斜坡挑战</td><td><code>ramp</code></td><td data-i18n="sec5_ramp_desc">30° 倾斜坡道地形</td></tr>
+      <tr><td data-i18n="sec5_stairs">阶梯地形</td><td><code>stairs</code></td><td data-i18n="sec5_stairs_desc">多级台阶地形</td></tr>
+      <tr><td data-i18n="sec5_floating">浮台地形</td><td><code>floating</code></td><td data-i18n="sec5_floating_desc">悬浮平台跳跃场景</td></tr>
+      <tr><td data-i18n="sec5_maze">迷宫场景</td><td><code>maze</code></td><td data-i18n="sec5_maze_desc">通道迷宫导航</td></tr>
     </tbody>
   </table>
 
   <h3 class="sub-title" data-i18n="sec5_notes">注意事项</h3>
   <ul>
-    <li data-i18n="sec5_note1">mjviser 服务使用端口 <strong>8081</strong>，FastAPI 仪表盘使用端口 <strong>8080</strong>，两者不冲突</li>
+    <li data-i18n="sec5_note1">mjviser 服务端口动态分配（通常 <strong>8081</strong>），FastAPI 仪表盘使用 <strong>8080</strong></li>
     <li data-i18n="sec5_note2">mjviser 只能同时运行一个实例，重复点击按钮会返回 "already_running" 状态</li>
     <li data-i18n="sec5_note3">关闭浏览器页面不会停止 mjviser 服务和仿真循环</li>
-    <li data-i18n="sec5_note4">导航链接使用绝对URL（http://localhost:8080/），不会误解析到8081端口</li>
+    <li data-i18n="sec5_note4">v0.4.3+ 机器人启动时暂停（paused），需点击 Play 开始走动</li>
   </ul>
 
   <h3 class="sub-title" data-i18n="sec5_troubleshoot">故障排查</h3>
@@ -279,9 +322,9 @@ python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-st
     <thead><tr><th data-i18n="th_problem">问题</th><th data-i18n="th_solution">解决方案</th></tr></thead>
     <tbody>
       <tr><td data-i18n="sec5_prob1">按钮显示 "mjviser not installed"</td><td data-i18n="sec5_sol1">运行 <code>pip install mjviser viser</code></td></tr>
-      <tr><td data-i18n="sec5_prob2">8081 端口打不开</td><td data-i18n="sec5_sol2">检查防火墙，或等待 3-5 秒后刷新</td></tr>
-      <tr><td data-i18n="sec5_prob3">3D 视窗空白</td><td data-i18n="sec5_sol3">确认 dm_control 和 mujoco 正常安装</td></tr>
-      <tr><td data-i18n="sec5_prob4">机器人静止不动</td><td data-i18n="sec5_sol4">v0.3.1 已加入仿真循环，机器人应自动运动</td></tr>
+      <tr><td data-i18n="sec5_prob2">3D 视窗空白/机器人躺倒</td><td data-i18n="sec5_sol2">v0.4.1+ 已修复 viewer.run() bug；v0.4.3+ 机器人直立走动</td></tr>
+      <tr><td data-i18n="sec5_prob3">机器人不动</td><td data-i18n="sec5_sol3">点击 mjviser 界面中的 Play 按钮（启动时默认暂停）</td></tr>
+      <tr><td data-i18n="sec5_prob4">场景切换不生效</td><td data-i18n="sec5_sol4">切换场景后需要重新打开 mjviser</td></tr>
     </tbody>
   </table>
 </div>
@@ -582,8 +625,8 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
 
 <!-- FOOTER -->
 <div style="text-align: center; padding: 32px 0; color: #64748b; border-top: 1px solid #475569; margin-top: 40px;">
-  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.3.1 用户手册</p>
-  <p data-i18n="footer_line2">最后更新: 2025-07-01</p>
+  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.4.4 用户手册</p>
+  <p data-i18n="footer_line2">最后更新: 2025-07-02</p>
 </div>
 
 </div><!-- end main-content -->
@@ -595,14 +638,14 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
   const i18nDict = {
     zh: {
       lang_btn: "中/EN",
-      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.3.1",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.4.4",
       nav_sec1: "1. 项目简介", nav_sec2: "2. 环境要求", nav_sec3: "3. 快速开始",
       nav_sec4: "4. Web可视化仪表盘指南", nav_sec5: "5. mjviser 3D可视化指南",
       nav_sec6: "6. SIP-Bench模式", nav_sec7: "7. 核心概念通俗解释",
       nav_sec8: "8. Benchmark任务详解", nav_sec9: "9. Baseline对比使用",
       nav_sec10: "10. 物理/数学速查表", nav_sec11: "11. 常见问题与故障排查",
       header_title: "MuJoCo-Bench-IDO 用户手册",
-      header_subtitle: "版本 v0.3.1 · 最后更新 2025-07-01 · IDO/TOMAS 连续物理基准验证平台",
+      header_subtitle: "版本 v0.4.4 · 最后更新 2025-07-02 · IDO/TOMAS 连续物理基准验证平台",
       sec1_title: "1. 项目简介",
       sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。",
       sec1_what_is_ido: "什么是 IDO/TOMAS？",
@@ -636,18 +679,20 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec3_open_browser: "打开浏览器访问 <code>http://localhost:8080</code>，即可看到实时监控仪表盘。",
       sec4_title: "4. Web 可视化仪表盘指南", sec4_intro: "启动 Web 仪表盘后，浏览器将显示完整的监控界面。",
       sec4_top_nav: "顶部导航栏", sec4_nav_project: "<strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz",
-      sec4_nav_version: "<strong>版本号</strong>: v0.3.1",
+      sec4_nav_version: "<strong>版本号</strong>: v0.4.4",
       sec4_nav_status: "<strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行",
       sec4_nav_links: "<strong>导航链接</strong>: 用户手册、MuJoCo文档（使用绝对URL http://localhost:8080/）",
       sec4_nav_lang: "<strong>语言切换</strong>: 中/EN按钮切换界面语言",
       sec4_left_panel: "左侧控制面板",
-      sec4_task_select: "<strong>任务选择下拉框</strong>：选择要运行的 dm_control 任务。",
+      sec4_task_select: "<strong>任务选择下拉框</strong>：按类别分组选择 dm_control 任务（25+ 任务）。每个类别有推荐入门标记。",
+      sec4_task_hint: "💡 任务选择决定基准环境和 GoalEML 不变量类型",
       sec4_episode_config: "<strong>Episode 配置</strong>：",
       sec4_ep_count: "<strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）",
       sec4_max_steps: "<strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）",
       sec4_sip_toggle: "<strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式。",
-      sec4_3d_scene: "<strong>3D 场景选择</strong>：下拉框选择 3D 可视化场景——\"默认 (humanoid-stand)\" 或 \"障碍竞技场\"。",
-      sec4_mjviser_btn: "<strong>mjviser 3D 按钮</strong>：点击按钮启动 3D 物理可视化。机器人将在仿真循环中自动运动。",
+      sec4_3d_scene: "<strong>3D 场景选择</strong>：下拉框选择 mjviser 3D 可视化场景——共 6 种（空白/障碍/斜坡/阶梯/浮台/迷宫）。",
+      sec4_mjviser_btn: "<strong>mjviser 3D 按钮</strong>：点击按钮启动 3D 物理可视化。v0.4.3+ 机器人采用随机行走控制器 + 航点导航，自动四处走动。",
+      sec4_mjviser_hint: "💡 启动后浏览器打开 3D 视窗，机器人直立走动",
       sec4_run_stop: "<strong>运行 / 停止按钮</strong>：",
       sec4_run: "<strong>Run</strong>: 开始 benchmark 运行",
       sec4_stop: "<strong>Stop</strong>: 停止当前运行的 benchmark",
@@ -670,28 +715,64 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec4_bar_mjviser: "mjviser 可用状态",
       sec5_title: "5. mjviser 3D 可视化指南", sec5_launch: "启动步骤",
       sec5_li1: "安装 mjviser 和 viser：<code>pip install mjviser viser</code>",
-      sec5_li2: "在 Web 仪表盘中选择3D场景类型（默认或障碍竞技场）",
-      sec5_li3: "点击 \"🎮 Open mjviser (8081)\" 按钮",
-      sec5_li4: "等待几秒钟，mjviser 服务在端口 8081 启动",
-      sec5_li5: "打开浏览器访问 <code>http://localhost:8081</code>，机器人将自动运动",
+      sec5_li2: "在 Web 仪表盘中选择3D场景类型（6种场景可选）",
+      sec5_li3: "点击 \"🎮 打开 mjviser\" 按钮",
+      sec5_li4: "等待几秒钟，mjviser 服务启动",
+      sec5_li5: "打开浏览器访问 mjviser URL — 机器人将直立走动",
       sec5_interaction: "3D 交互操作", sec5_inter_desc: "在 mjviser 3D 视窗中，你可以：",
       sec5_rotate: "<strong>旋转视角</strong>: 鼼标左键拖拽", sec5_zoom: "<strong>缩放</strong>: 鼼标滚轮",
       sec5_pan: "<strong>平移</strong>: 鼼标右键拖拽", sec5_select: "<strong>选择关节</strong>: 点击关节高亮",
-      sec5_realtime: "<strong>实时仿真</strong>: 机器人通过仿真循环自动运动",
+      sec5_realtime: "<strong>实时仿真</strong>: 机器人通过7层随机行走控制器自动四处走动（v0.4.3+）",
       sec5_scenes: "3D 场景类型", sec5_scene_desc: "v0.3.1 新增场景选择功能：",
       th_scene: "场景", th_description: "说明",
-      sec5_plain: "默认 (humanoid-stand)", sec5_plain_desc: "标准 dm_control humanoid-stand 环境",
-      sec5_obstacle: "障碍竞技场", sec5_obstacle_desc: "包含墙体、圆柱、方块障碍物和红色目标球的自定义场景",
+      sec5_plain: "空白场景", sec5_plain_desc: "标准 dm_control 环境，无障碍物",
+      sec5_obstacle: "障碍竞技场", sec5_obstacle_desc: "墙体、圆柱、方块障碍物 + 红色目标球",
+      sec5_controller: "行走控制器 (v0.4.3+)", sec5_ctrl_desc: "v0.4.3 起 mjviser 采用 7 层随机行走控制器 + 航点导航：",
+      th_layer: "层", th_function: "功能",
+      sec5_l1: "重力补偿", sec5_l1_desc: "补偿关节重力负载",
+      sec5_l2: "水平移动", sec5_l2_desc: "PD 驱动 root 朝航点移动",
+      sec5_l3: "倾斜稳定", sec5_l3_desc: "PD 稳定躯干 Z 轴朝上",
+      sec5_l4: "航向转向", sec5_l4_desc: "PD 控制 yaw 角朝向航点",
+      sec5_l5: "行走步态", sec5_l5_desc: "周期性髋膝摆动模拟步行",
+      sec5_l6: "关节稳定", sec5_l6_desc: "PD 驱动关节到目标姿态",
+      sec5_l7: "安全恢复", sec5_l7_desc: "root 高度过低时紧急拉起",
+      sec5_waypoint: "航点每 5 秒随机更换（半径 6m），机器人沿航点行走，路径自然、不僵硬。",
+      th_key: "选择键",
+      sec5_ramp: "斜坡挑战", sec5_ramp_desc: "30° 倾斜坡道地形",
+      sec5_stairs: "阶梯地形", sec5_stairs_desc: "多级台阶地形",
+      sec5_floating: "浮台地形", sec5_floating_desc: "悬浮平台跳跃场景",
+      sec5_maze: "迷宫场景", sec5_maze_desc: "通道迷宫导航",
+      sec3_task_intro: "v0.4.4 支持分组任务选择，涵盖 dm_control.suite 全部主流任务：",
+      th_category: "类别", th_tasks: "任务列表",
+      cat_humanoid: "人形机器人", cat_walker: "行走者", cat_hopper: "跳跃者", cat_cheetah: "猎豹",
+      cat_cartpole: "杆车", cat_reacher: "机械臂", cat_finger: "手指", cat_fish: "鱼类",
+      cat_swimmer: "游泳者", cat_ballcup: "球杯", cat_manipulator: "机械手", cat_acrobot: "杂技",
+      cat_pendulum: "摆", sec3_medium2: "中等", sec3_easy: "简单",
+      sec4_panel_intro: "v0.4.4 控制面板包含分组任务选择、6种3D场景、解释性提示文字：",
+      sec4_task_hint_text: "💡 任务选择决定基准环境和 GoalEML 不变量类型",
+      sec4_ep_hint: "💡 每个 episode 是一次完整运行周期",
+      sec4_steps_hint: "💡 步数越多，仿真时间越长",
+      sec4_sip_hint: "💡 SIP-Bench 测量学习→适应→保持三个阶段的性能变化",
+      sec4_kappa_hint_text: "💡 δ_K 越小，要求越精确才执行",
+      sec4_scene_plain: "空白场景 (plain) — 标准 dm_control 环境",
+      sec4_scene_obstacle: "障碍竞技场 (obstacle) — 墙体、圆柱、方块障碍物",
+      sec4_scene_ramp: "斜坡挑战 (ramp) — 倾斜坡道地形",
+      sec4_scene_stairs: "阶梯地形 (stairs) — 多级台阶地形",
+      sec4_scene_floating: "浮台地形 (floating) — 悬浮平台跳跃场景",
+      sec4_scene_maze: "迷宫场景 (maze) — 通道迷宫导航",
+      sec4_scene_hint_text: "💡 场景选择决定 mjviser 中加载的物理场景和障碍物布局",
+      sec4_scene_name: "<strong>当前场景显示</strong>：选择场景后，面板显示当前加载的3D场景名称卡片。",
+      sec4_mjviser_hint: "💡 启动后浏览器打开 3D 视窗，机器人直立走动",
       sec5_notes: "注意事项",
-      sec5_note1: "mjviser 服务使用端口 <strong>8081</strong>，FastAPI 仪表盘使用端口 <strong>8080</strong>",
+      sec5_note1: "mjviser 端口动态分配（通常 8081），FastAPI 使用 8080",
       sec5_note2: "mjviser 只能同时运行一个实例",
       sec5_note3: "关闭浏览器不会停止仿真循环",
-      sec5_note4: "导航链接使用绝对URL（http://localhost:8080/），不会误解析到8081端口",
+      sec5_note4: "v0.4.3+ 机器人启动时暂停（paused），需点击 Play",
       sec5_troubleshoot: "故障排查", th_problem: "问题", th_solution: "解决方案",
       sec5_prob1: "按钮显示 \"mjviser not installed\"", sec5_sol1: "运行 <code>pip install mjviser viser</code>",
-      sec5_prob2: "8081 端口打不开", sec5_sol2: "检查防火墙，或等待 3-5 秒后刷新",
-      sec5_prob3: "3D 视窗空白", sec5_sol3: "确认 dm_control 和 mujoco 正常安装",
-      sec5_prob4: "机器人静止不动", sec5_sol4: "v0.3.1 已加入仿真循环，机器人应自动运动",
+      sec5_prob2: "3D 视窗空白/机器人躺倒", sec5_sol2: "v0.4.1+ 已修复 viewer.run() bug；v0.4.3+ 直立走动",
+      sec5_prob3: "机器人不动", sec5_sol3: "点击 mjviser 中的 Play 按钮",
+      sec5_prob4: "场景切换不生效", sec5_sol4: "切换场景后需重新打开 mjviser",
       sec6_title: "6. SIP-Bench 模式", sec6_what: "什么是 SIP-Bench？",
       sec6_desc: "SIP-Bench 是 IDO 的纵向评估协议，测量 Agent 在<strong>学习→适应→保持</strong>三个阶段的性能变化。",
       sec6_phases: "T0/T1/T2 三阶段", th_phase: "阶段", th_name: "名称",
@@ -814,19 +895,19 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec11_nv_r2: "能量预算参数需调优",
       sec11_nv_r3: "仅 reacher-easy 实现 NV ≡ 0",
       sec11_nv_improve: "<strong>改善方向</strong>: SIP-Bench 演化优化",
-      footer_line1: "MuJoCo-Bench-IDO v0.3.1 用户手册",
-      footer_line2: "最后更新: 2025-07-01",
+      footer_line1: "MuJoCo-Bench-IDO v0.4.4 用户手册",
+      footer_line2: "最后更新: 2025-07-02",
     },
     en: {
       lang_btn: "中/EN",
-      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.3.1",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.4.4",
       nav_sec1: "1. Project Overview", nav_sec2: "2. Requirements", nav_sec3: "3. Quick Start",
       nav_sec4: "4. Dashboard Guide", nav_sec5: "5. mjviser 3D Guide",
       nav_sec6: "6. SIP-Bench Mode", nav_sec7: "7. Core Concepts Explained",
       nav_sec8: "8. Benchmark Tasks", nav_sec9: "9. Baseline Comparison",
       nav_sec10: "10. Physics/Math Cheat Sheet", nav_sec11: "11. FAQ & Troubleshooting",
       header_title: "MuJoCo-Bench-IDO User Manual",
-      header_subtitle: "Version v0.3.1 · Last updated 2025-07-01 · IDO/TOMAS Continuous Physics Benchmark",
+      header_subtitle: "Version v0.4.4 · Last updated 2025-07-02 · IDO/TOMAS Continuous Physics Benchmark",
       sec1_title: "1. Project Overview",
       sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> is a benchmark platform that migrates the IDO/TOMAS architecture from discrete symbolic domain (ARC puzzles) to continuous physics control domain (MuJoCo robots).",
       sec1_what_is_ido: "What is IDO/TOMAS?",
@@ -861,18 +942,20 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec4_title: "4. Dashboard Guide", sec4_intro: "After launching the dashboard, the browser shows the full monitoring interface.",
       sec4_top_nav: "Top Navigation Bar",
       sec4_nav_project: "<strong>Project Name</strong>: MuJoCo-Bench-IDO Webviz",
-      sec4_nav_version: "<strong>Version</strong>: v0.3.1",
+      sec4_nav_version: "<strong>Version</strong>: v0.4.4",
       sec4_nav_status: "<strong>Status Indicator</strong>: Shows whether a benchmark is running",
       sec4_nav_links: "<strong>Navigation Links</strong>: User Manual, MuJoCo Docs (absolute URLs http://localhost:8080/)",
       sec4_nav_lang: "<strong>Language Toggle</strong>: 中/EN button switches UI language",
       sec4_left_panel: "Left Control Panel",
-      sec4_task_select: "<strong>Task Selector</strong>: Choose dm_control task to run.",
+      sec4_task_select: "<strong>Task Selector</strong>: Choose dm_control task by category (25+ tasks). Recommended entry points marked.",
+      sec4_task_hint: "💡 Task selection determines benchmark environment and GoalEML invariants",
       sec4_episode_config: "<strong>Episode Configuration</strong>:",
       sec4_ep_count: "<strong>Episodes</strong>: Number of episodes (default 5)",
       sec4_max_steps: "<strong>Max Steps</strong>: Max steps per episode (default 1000)",
       sec4_sip_toggle: "<strong>SIP-Bench Toggle</strong>: Switch to longitudinal evaluation mode (T0/T1/T2 phases).",
-      sec4_3d_scene: "<strong>3D Scene Selector</strong>: Choose visualization scene — Default or Obstacle Arena.",
-      sec4_mjviser_btn: "<strong>mjviser Button</strong>: Launch 3D physics viewer. Robot moves via simulation loop.",
+      sec4_3d_scene: "<strong>3D Scene Selector</strong>: Choose mjviser scene — 6 options (plain/obstacle/ramp/stairs/floating/maze).",
+      sec4_mjviser_btn: "<strong>mjviser Button</strong>: Launch 3D physics viewer. v0.4.3+ robot uses random walking controller + waypoint navigation.",
+      sec4_mjviser_hint: "💡 Opens 3D viewer, robot walks upright automatically",
       sec4_run_stop: "<strong>Run / Stop</strong>:",
       sec4_run: "<strong>Run</strong>: Start benchmark", sec4_stop: "<strong>Stop</strong>: Stop current run",
       sec4_right_dashboard: "Right Dashboard",
@@ -891,28 +974,65 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec4_bar_step: "Current step", sec4_bar_mjviser: "mjviser availability",
       sec5_title: "5. mjviser 3D Guide", sec5_launch: "Launch Steps",
       sec5_li1: "Install mjviser: <code>pip install mjviser viser</code>",
-      sec5_li2: "Select 3D scene type in dashboard (Default or Obstacle Arena)",
-      sec5_li3: "Click \"🎮 Open mjviser (8081)\" button",
-      sec5_li4: "Wait a few seconds for mjviser to start on port 8081",
-      sec5_li5: "Open browser at <code>http://localhost:8081</code> — robot moves automatically",
+      sec5_li2: "Select 3D scene type in dashboard (6 scenes available)",
+      sec5_li3: "Click \"🎮 Open mjviser\" button",
+      sec5_li4: "Wait a few seconds for mjviser to start",
+      sec5_li5: "Open browser at mjviser URL — robot walks upright",
       sec5_interaction: "3D Interaction", sec5_inter_desc: "In mjviser you can:",
       sec5_rotate: "<strong>Rotate</strong>: Left-click drag", sec5_zoom: "<strong>Zoom</strong>: Scroll wheel",
       sec5_pan: "<strong>Pan</strong>: Right-click drag", sec5_select: "<strong>Select joints</strong>: Click to highlight",
-      sec5_realtime: "<strong>Live simulation</strong>: Robot moves via simulation loop",
+      sec5_realtime: "<strong>Live simulation</strong>: Robot walks via 7-layer random walking controller (v0.4.3+)",
       sec5_scenes: "3D Scene Types", sec5_scene_desc: "v0.3.1 adds scene selection:",
       th_scene: "Scene", th_description: "Description",
-      sec5_plain: "Default (humanoid-stand)", sec5_plain_desc: "Standard dm_control humanoid-stand environment",
-      sec5_obstacle: "Obstacle Arena", sec5_obstacle_desc: "Custom scene with walls, cylinders, blocks, and red target sphere",
+      sec5_plain: "Plain", sec5_plain_desc: "Standard dm_control environment, no obstacles",
+      sec5_obstacle: "Obstacle Arena", sec5_obstacle_desc: "Walls, cylinders, blocks + red target sphere",
+      sec5_controller: "Walking Controller (v0.4.3+)", sec5_ctrl_desc: "v0.4.3 adopts 7-layer random walking controller + waypoint navigation:",
+      th_layer: "Layer", th_function: "Function",
+      sec5_l1: "Gravity Comp", sec5_l1_desc: "Compensate joint gravity load",
+      sec5_l2: "Horizontal Move", sec5_l2_desc: "PD drive root toward waypoint",
+      sec5_l3: "Tilt Stabilize", sec5_l3_desc: "PD stabilize torso Z-axis up",
+      sec5_l4: "Yaw Steer", sec5_l4_desc: "PD control yaw toward waypoint",
+      sec5_l5: "Walking Gait", sec5_l5_desc: "Periodic hip/knee oscillation for walking",
+      sec5_l6: "Joint Stabilize", sec5_l6_desc: "PD drive joints to target pose",
+      sec5_l7: "Safety Recovery", sec5_l7_desc: "Emergency lift when root height too low",
+      sec5_waypoint: "Waypoints change every 5s (radius 6m), robot walks naturally toward them.",
+      th_key: "Key",
+      sec5_ramp: "Ramp Challenge", sec5_ramp_desc: "30° inclined ramp terrain",
+      sec5_stairs: "Stairs Arena", sec5_stairs_desc: "Multi-step staircase terrain",
+      sec5_floating: "Floating Platforms", sec5_floating_desc: "Suspended platform jumping scene",
+      sec5_maze: "Maze Arena", sec5_maze_desc: "Channel maze navigation",
+      sec3_task_intro: "v0.4.4 supports grouped task selection, covering all mainstream dm_control.suite tasks:",
+      th_category: "Category", th_tasks: "Task List",
+      cat_humanoid: "Humanoid", cat_walker: "Walker", cat_hopper: "Hopper", cat_cheetah: "Cheetah",
+      cat_cartpole: "Cartpole", cat_reacher: "Reacher", cat_finger: "Finger", cat_fish: "Fish",
+      cat_swimmer: "Swimmer", cat_ballcup: "Ball-in-Cup", cat_manipulator: "Manipulator", cat_acrobot: "Acrobot",
+      cat_pendulum: "Pendulum", sec3_medium2: "Medium", sec3_easy: "Easy",
+      sec4_panel_intro: "v0.4.4 control panel: grouped task selector, 6 3D scenes, explanatory tooltips:",
+      sec4_task_hint: "💡 Task selection determines benchmark environment and GoalEML invariants",
+      sec4_task_hint_text: "💡 Task determines benchmark environment and GoalEML invariants",
+      sec4_ep_hint: "💡 Each episode is one complete run cycle",
+      sec4_steps_hint: "💡 More steps = longer simulation time",
+      sec4_sip_hint: "💡 SIP-Bench measures Learn → Adapt → Retain performance",
+      sec4_kappa_hint: "💡 κ-Snap threshold (δ_K)", sec4_kappa_hint_text: "💡 Smaller δ_K = more precise required to execute",
+      sec4_scene_plain: "Plain (plain) — standard dm_control environment",
+      sec4_scene_obstacle: "Obstacle Arena (obstacle) — walls, cylinders, blocks",
+      sec4_scene_ramp: "Ramp Challenge (ramp) — inclined ramp terrain",
+      sec4_scene_stairs: "Stairs Arena (stairs) — multi-step staircase terrain",
+      sec4_scene_floating: "Floating Platforms (floating) — suspended platform scene",
+      sec4_scene_maze: "Maze Arena (maze) — channel maze navigation",
+      sec4_scene_hint_text: "💡 Scene determines physical layout and obstacles in mjviser",
+      sec4_scene_name: "<strong>Current Scene</strong>: After selecting, panel shows current 3D scene name card.",
+      sec4_mjviser_hint: "💡 Opens 3D viewer, robot walks upright",
       sec5_notes: "Notes",
-      sec5_note1: "mjviser uses port <strong>8081</strong>, FastAPI dashboard uses <strong>8080</strong>",
-      sec5_note2: "Only one mjviser instance can run at a time",
-      sec5_note3: "Closing browser does not stop the simulation loop",
-      sec5_note4: "Nav links use absolute URLs (http://localhost:8080/), won't resolve to port 8081",
+      sec5_note1: "mjviser port dynamically assigned (usually 8081), FastAPI uses 8080",
+      sec5_note2: "Only one mjviser instance at a time",
+      sec5_note3: "Closing browser does not stop simulation",
+      sec5_note4: "v0.4.3+ robot starts paused, click Play to begin",
       sec5_troubleshoot: "Troubleshooting", th_problem: "Problem", th_solution: "Solution",
       sec5_prob1: "\"mjviser not installed\" button", sec5_sol1: "Run <code>pip install mjviser viser</code>",
-      sec5_prob2: "Port 8081 inaccessible", sec5_sol2: "Check firewall, wait 3-5 seconds",
-      sec5_prob3: "3D view blank", sec5_sol3: "Verify dm_control and mujoco installed",
-      sec5_prob4: "Robot static", sec5_sol4: "v0.3.1 adds simulation loop; robot should move",
+      sec5_prob2: "3D view blank / robot lying down", sec5_sol2: "viewer.run() bug fixed in v0.4.1; v0.4.3+ walks upright",
+      sec5_prob3: "Robot not moving", sec5_sol3: "Click Play button in mjviser (starts paused)",
+      sec5_prob4: "Scene switch not effective", sec5_sol4: "Re-open mjviser after switching scene",
       sec6_title: "6. SIP-Bench Mode", sec6_what: "What is SIP-Bench?",
       sec6_desc: "SIP-Bench is IDO's longitudinal evaluation protocol, measuring Agent performance across <strong>Learn → Adapt → Retain</strong> phases.",
       sec6_phases: "T0/T1/T2 Phases", th_phase: "Phase", th_name: "Name",
@@ -1039,8 +1159,8 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec11_nv_r2: "Energy budget parameters need tuning",
       sec11_nv_r3: "Only reacher-easy achieved NV ≡ 0",
       sec11_nv_improve: "<strong>Fix</strong>: SIP-Bench evolution optimization",
-      footer_line1: "MuJoCo-Bench-IDO v0.3.1 User Manual",
-      footer_line2: "Last updated: 2025-07-01",
+      footer_line1: "MuJoCo-Bench-IDO v0.4.4 User Manual",
+      footer_line2: "Last updated: 2025-07-02",
     }
   };
 
