@@ -1,0 +1,34 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest cache
+.pytest_cache/
+
+# Test results
+benchmarks/results/*.json
+benchmarks/results/*.csv
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual env
+venv/
+.venv/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# MuJoCo
+mujoco_*.dll
+
+# Logs
+*.log
