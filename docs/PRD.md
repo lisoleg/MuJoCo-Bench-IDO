@@ -136,6 +136,7 @@ MuJoCo中文文档：导航栏"📘 MuJoCo中文文档"链接 → /mujoco_docs_c
 *Date: 2025-07-01*
 *v0.3.0 update: 2025-07-01*
 *v0.3.1 update: 2025-07-01 — R23 语言切换, R24 实时3D仿真, R25 障碍物场景*
+*v0.4.0 update: 2025-07-01 — R26 皮克定理理论深化, R27 Hex-Nav benchmark, R28 Pick-Kernel模块*
 
 #### v0.3.1 — 语言切换 + 实时3D仿真 + 障碍物场景（新增）
 
@@ -144,6 +145,23 @@ MuJoCo中文文档：导航栏"📘 MuJoCo中文文档"链接 → /mujoco_docs_c
 | R23 | 中英文界面切换 | 三个HTML页面（dashboard.html、user_manual.html、mujoco_docs_cn.html）加右上角中/EN切换按钮，使用 data-i18n 属性 + i18nDict 字典，localStorage key: mujoco-bench-lang |
 | R24 | 实时3D仿真循环 | `launch_viewer()` 增加后台仿真线程，随机动作让机器人运动，viewer关闭时自动停止。plain场景用dm_control env.step，obstacle场景用mj.mj_step |
 | R25 | 障碍物场景 | `webviz/scenes/humanoid_obstacle_arena.xml` 新增障碍物竞技场场景，dashboard新增3D场景下拉框，server.py新增 `/api/mjviser/scene` API endpoint，全局变量 mjviser_scene_type |
+
+#### v0.4.0 — 皮克定理理论深化（新增）
+
+| ID | Requirement | Description |
+|----|-------------|-------------|
+| R26 | 皮克定理理论深化 | Appendix C.20: Pick↔Noether理论桥、加权Pick↔ψ-Anchor、Hex-Nav预言P5、格点审计操控任务 |
+| R27 | Hex-Nav benchmark任务 | v0.4.0新增六方格点障碍物导航任务，验证预言P5: Hex-Nav SER≥1.5×Rect-Nav |
+| R28 | Pick-Kernel模块 | IDO决策循环新增格点审计层: Inflow→PickCheck→EML→κ-Snap→Noether→Motor (v0.4.0架构决策) |
+
+#### v0.4.0 预言表更新
+
+| ID | Statement | Description | Status |
+|----|-----------|-------------|--------|
+| P4 | IDO Pick-Check NVR_pick ≡ 0 | 格点投影轨迹Pick残差≡0 ↔ Noether残差≡0 | 理论预测(待验证) |
+| P5 | Hex-Nav SER ≥ 1.5× Rect-Nav | 六方格点各向同构6-邻域优于方形4-邻域 | 理论预测(待Hex-Nav任务实现) |
+
+> 注：原VG-Pair结构性预言P4/P5（v0.2.x–v0.3.0）已验证PASS（VG-Pair V=物理定律、VG-Pair≠GAN），不再列为活跃预言。v0.4.0的P4/P5指皮克定理相关预言。
 
 #### v0.3.1 Bug修复
 

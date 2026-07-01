@@ -646,3 +646,64 @@ graph TB
     Dashboard -->|"http://localhost:8080"| MuJoCoDocs
     Mjviser --> FastAPI
 ```
+
+---
+
+### v0.4.0 理论模块 (规划中)
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `papers/mujoco_bench_ido_validation.md` C.20 | ★ 新增 | 皮克定理作为离散几何先验 (Pick↔Noether理论桥、Hex推广、加权Pick↔ψ-Anchor) |
+| `papers/mujoco_bench_ido_中文论文.md` §3.9 | ★ 新增 | 皮克定理：离散几何先验与IDO理论桥 |
+| `docs/用户手册.md` §7 Pick子节 | ★ 新增 | 皮克定理通俗解释 + IDO连接表格 |
+
+#### v0.4.0 模块关系图更新
+
+```mermaid
+graph TB
+    subgraph Core
+        GoalEML["GoalEML"]
+        KappaSnap["κ-Snap"]
+        Noether["Noether-Check"]
+    end
+
+    subgraph Theory_v040
+        PickCheck["Pick-Check<br/>格点守恒校验"]
+    end
+
+    subgraph Agent
+        IDOAgent["IDOMuJoCoAgent"]
+        PsiAnchor["ψ-Anchor"]
+    end
+
+    subgraph Webviz
+        FastAPI["FastAPI Server<br/>webviz/server.py"]
+        Dashboard["Dashboard<br/>webviz/dashboard.html"]
+        Mjviser["mjviser Viewer<br/>+ sim_loop"]
+        UserManual["用户手册<br/>webviz/user_manual.html"]
+        MuJoCoDocs["MuJoCo文档<br/>webviz/mujoco_docs_cn.html"]
+        ObstacleScene["障碍物场景<br/>webviz/scenes/humanoid_obstacle_arena.xml"]
+        I18nModule["语言切换模块<br/>data-i18n + i18nDict"]
+    end
+
+    Noether --> PickCheck
+    KappaSnap --> PickCheck
+    IDOAgent --> GoalEML
+    IDOAgent --> KappaSnap
+    IDOAgent --> Noether
+    IDOAgent --> PsiAnchor
+    IDOAgent --> PickCheck
+    PsiAnchor --> KappaSnap
+    KappaSnap --> GoalEML
+    Noether --> GoalEML
+
+    FastAPI --> Dashboard
+    FastAPI --> Mjviser
+    FastAPI --> ObstacleScene
+    Dashboard --> I18nModule
+    UserManual --> I18nModule
+    MuJoCoDocs --> I18nModule
+    Dashboard -->|"http://localhost:8080"| UserManual
+    Dashboard -->|"http://localhost:8080"| MuJoCoDocs
+    Mjviser --> FastAPI
+```

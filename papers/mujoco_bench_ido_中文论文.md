@@ -493,6 +493,68 @@ MuJoCo-Bench-IDO benchmark验证的是**具身引擎**（物理VG-Pair）：
 
 ---
 
+### 3.9 皮克定理：离散几何先验与IDO理论桥
+
+章锋(2026)最新工作"从皮克定理到工业智造"将经典皮克定理(Pick's Theorem, 1899)重构为IDO框架下的**离散几何先验**，建立了三个核心理论桥：
+
+#### 3.9.1 皮克定理 = 离散Gauss-Bonnet
+
+经典皮克定理：对于格点ℤ²上的简单多边形P：
+
+  A(P) = I + B/2 - 1
+
+其中A为面积，I为内部格点数，B为边界格点数。常数-1正是Euler特征数χ(P) = 1，因此：
+
+  A(P) = I + B/2 - χ(P)
+
+这直接对应连续Gauss-Bonnet定理 ∫K dA = 2πχ — 将离散格点计数与拓扑不变量统一。
+
+**IDO理论桥**：Noether-Check验证能量守恒ΔE≡0，而Pick-Check验证面积守恒A≡I+B/2-1。两者都是**离散不变量校验**：
+
+| 物理层(Noether) | 几何层(Pick) |
+|-----------------|-------------|
+| 能量守恒 ΔE = 0 | 面积守恒 A = I + B/2 - 1 |
+| 连续违规 NVR | 格点违规 NV_pick |
+| κ-Snap残差 ≡ 0 | Pick残差 = A - (I + B/2 - 1) ≡ 0 |
+
+**预言P4**：IDO Pick-Check在格点投影状态轨迹上产生NVR_pick≡0（当底层物理满足守恒律时）。原因：ΔE=0 → 状态空间轨迹投影到ℤ²保持格点拓扑 → Pick残差零 ↔ 拓扑保持 ↔ 守恒律成立。
+
+#### 3.9.2 六方密铺格点与Hex-Nav任务
+
+60°六方格点（三角密铺）是物理最优格点：
+- **最大堆积密度**：π/(2√3) ≈ 0.907 vs π/4 ≈ 0.785（方形格点）
+- **最小渗流阈值**：θ_c ≈ 0.653 vs 0.593（方形格点）
+- **各向同构协调**：6-邻域 vs 4-邻域（方形）
+
+**Hex-Nav benchmark**：设计六边形障碍物网格导航任务，测试IDO守恒优先循环是否利用各向同性优势。
+
+**预言P5**：Hex-Nav SER ≥ 1.5× Rect-Nav SER — IDO的κ-Snap受益于6-邻域各向同构结构。
+
+#### 3.9.3 加权皮克定理与ψ-Anchor分数权重
+
+加权皮克定理推广到分数格点权重：
+
+  A(P) = Σ w_i · I_i + Σ w_b · B_b/2 - χ(P)
+
+**ψ-Anchor连接**：
+- 当前δ_K演化策略(light/freeze)使用二值阈值
+- 加权Pick建议用分数格点权重替代：
+  - 内部格点 → 高置信η预测(w_i = 1)
+  - 边界格点 → 不确定η预测(w_b = 1/2，反映"半计数"语义)
+  - 为light/freeze决策提供有数学基础的分数权重
+
+#### 3.9.4 工业应用：格点审计操控任务
+
+Galbot S1产线抓取稳定性 = 格点审计：接触面积 → 格点计数 → Pick面积验证 → 抓取稳定性预测。
+
+**MuJoCo扩展**：操控benchmark任务，GoalEML不变量扩展几何项：
+
+  L_GEL_pick = λ_pick · |A_contact - (I + B/2 - 1)|²
+
+与现有GEL(§3.7)的Noether/接触/任务项并列增加**皮克几何项**。
+
+---
+
 ## 4 技术实现
 
 ### 4.1 代码架构
@@ -689,10 +751,10 @@ humanoid/hopper/walker的NV ≈ 2950（2000步×5 episode，约1.47/步），违
 | P1 | IDO NVR ≡ 0 | reacher-easy PASS；humanoid/hopper/walker待优化Primitive |
 | P2 | SER ≥ 1.2 (reach/walk) | 需训练baseline对比 |
 | P3 | Baseline NVR > 0 | 需训练baseline对比 |
-| P4 | VG-Pair V = 物理定律 | MuJoCo constraint solver = L2 Verifier PASS |
-| P5 | VG-Pair ≠ GAN | No minimax, No learned discriminator PASS |
+| P4 | IDO Pick-Check NVR_pick ≡ 0 | 理论预测(v0.4.0, 待验证)：格点投影轨迹Pick残差≡0 ↔ Noether残差≡0 |
+| P5 | Hex-Nav SER ≥ 1.5× Rect-Nav | 理论预测(v0.4.0, 待Hex-Nav任务实现)：六方格点各向同构6-邻域优于方形4-邻域 |
 
-P4和P5是架构结构性预言，已通过验证。P1在reacher-easy上通过。P2/P3需trained baseline数据。
+P4和P5是v0.4.0基于皮克定理(§3.9)的理论预测。VG-Pair结构性预言（原P4/P5，v0.2.x–v0.3.0）已验证PASS：VG-Pair V=物理定律（MuJoCo constraint solver = L2 Verifier）、VG-Pair≠GAN（无minimax，无学习判别器）。详见§3.6。
 
 ### 7.2 物理/数学→EML层映射
 
@@ -787,3 +849,5 @@ MuJoCo-Bench-IDO是首个物理域VG-Pair验证平台，为非冯架构AGI的连
 [16] 智谱 GLM-5.2: long-horizon CoT VG-Pair self-verify (digital engine). 2026.
 
 [17] 银河通用 Galbot S1 @ CATL: WAM+WBC VG-Pair verified (embodied engine). 7×24 autonomous operation >3 months, 2025-2026.
+
+[18] 章锋. 从皮克定理到工业智造：IDO/TOMAS下的离散几何先验. 微信公众号「复合体理学」, 2026.

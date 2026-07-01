@@ -227,12 +227,14 @@ solver's δ_K relaxation strategy.
 | P1 | IDO NVR ≡ 0 | No conservation violations across all episodes | Measured NVR = 0 (reacher-easy PASS; humanoid/hopper/walker CHECK) |
 | P2 | SER ≥ 1.2 (reach/walk) | IDO reaches goals faster than baselines | SER comparison (TBD — requires trained baselines) |
 | P3 | Baseline NVR > 0 | RL baselines violate conservation | Baseline NVR > 0 (TBD — requires trained baselines) |
-| P4 | VG-Pair = (G, P, V) with hard-coded V | Verifier is physics laws, not learned discriminator | MuJoCo constraint solver = L2 Verifier (PASS) |
-| P5 | VG-Pair ≠ GAN | No minimax objective, no adversarial training | IDO uses Verifier gate, not adversarial loss (PASS) |
+| P4 | IDO Pick-Check NVR_pick ≡ 0 | Lattice-projected trajectory Pick residual ≡ 0 ↔ Noether residual ≡ 0 | 理论预测(v0.4.0, 待验证) |
+| P5 | Hex-Nav SER ≥ 1.5× Rect-Nav | Hexagonal grid isotropic 6-neighbor advantage over square 4-neighbor | 理论预测(v0.4.0, 待Hex-Nav任务实现) |
+
+**Verified architectural properties** (formerly P4/P5 in v0.2.x–v0.3.0): VG-Pair hard-coded Verifier = MuJoCo constraint solver (PASS); VG-Pair ≠ GAN (PASS). See §C.14 for details.
 
 **Status**: P1 is architecturally guaranteed by the Noether gate (all
-violations trigger fallback). P4 and P5 are structural properties of
-the IDO architecture (MuJoCo physics engine as hard-coded Verifier).
+violations trigger fallback). P4 and P5 are v0.4.0 theoretical predictions
+derived from Pick's theorem as discrete geometric prior (see §C.20).
 P2 depends on the quality of NARLA motor primitives relative to trained
 policies. P3 is expected because standard RL agents lack explicit
 conservation enforcement.
@@ -321,6 +323,8 @@ All modules carry a version string constant:
 | tdmpc2_adapter | v0.3.0 |
 | cosmos_predict_adapter | v0.3.0 |
 | evaluate_vs_baseline | v0.3.0 |
+
+**v0.4.0 Prophecy Notes**: P4 (Pick-Check NVR_pick ≡ 0) and P5 (Hex-Nav SER ≥ 1.5× Rect-Nav) are v0.4.0 theoretical predictions derived from Pick's theorem as discrete geometric prior (see §C.20). VG-Pair structural properties (formerly P4/P5) are verified PASS — see §C.14.
 
 ## C.10  Limitations and Future Work
 
@@ -785,6 +789,89 @@ Two evaluation modes available via `--eval-mode` CLI flag:
 
 ---
 
+## C.20  Pick's Theorem as Discrete Geometric Prior (Zhang 2026)
+
+### C.20.1  Classical Pick's Theorem
+
+Pick's theorem (1899) states that for a simple polygon P with vertices on a lattice ℤ²:
+
+  A(P) = I + B/2 - 1
+
+where A is the area, I is the number of interior lattice points, and B is the number of boundary lattice points.
+
+**Key insight**: This is a *discrete Gauss-Bonnet theorem* — the constant -1 is the Euler characteristic χ(P) = 1, making it:
+
+  A(P) = I + B/2 - χ(P)
+
+This mirrors the continuous Gauss-Bonnet: ∫K dA = 2πχ, connecting discrete lattice counting to topological invariants.
+
+### C.20.2  Pick-Check: Discrete Noether Verification
+
+The IDO Noether-Check verifies energy conservation: ΔE ≡ 0. Pick's theorem provides a *geometric analogue*:
+
+| Noether-Check (Physics) | Pick-Check (Geometry) |
+|-------------------------|----------------------|
+| Energy invariant ΔE = 0 | Area invariant A = I + B/2 - 1 |
+| Continuous violation NVR | Discrete violation NV_pick |
+| κ-Snap residual = 0 | Pick residual = A - (I + B/2 - 1) = 0 |
+
+**Prophecy P4**: IDO Pick-Check on lattice-projected state trajectories yields NVR_pick ≡ 0 when the underlying physics is conservation-compliant. This is because:
+1. If ΔE = 0 (Noether satisfied), then the state-space trajectory projected onto ℤ² lattice preserves lattice topology
+2. Pick residual zero ↔ topology preserved ↔ conservation law held
+3. The -χ term acts as a *topological anchor* analogous to ψ-Anchor's δ_K evolution
+
+### C.20.3  Hexagonal Lattice and Optimal Grid
+
+Zhang (2026) demonstrates that the 60° hexagonal lattice (triangular tiling) is the physically optimal grid:
+
+- **Maximum packing density**: Hexagonal grids achieve π/(2√3) ≈ 0.9069 density vs π/4 ≈ 0.7854 for square grids
+- **Minimum percolation threshold**: θ_c(hex) ≈ 0.6527 vs θ_c(square) ≈ 0.5927 for site percolation
+- **Isotropic coordination**: 6-fold symmetry provides uniform neighbor connectivity (vs 4-fold for square)
+
+**Application to MuJoCo-Bench-IDO**:
+A Hex-Nav benchmark task using hexagonal obstacle grids would test whether IDO's conservation-first loop exploits the isotropic advantage:
+- **Prophecy P5**: Hex-Nav SER ≥ 1.5× Rect-Nav SER (IDO's κ-Snap benefits from isotropic neighbor structure)
+
+### C.20.4  Weighted Pick's Theorem and ψ-Anchor
+
+The *weighted Pick's theorem* generalizes to fractional lattice weights:
+
+  A(P) = Σ w_i · I_i + Σ w_b · B_b/2 - χ(P)
+
+where w_i, w_b are rational weights assigned to interior/boundary lattice classes.
+
+**Connection to ψ-Anchor**:
+- ψ-Anchor's δ_K evolution policy (light/freeze) currently uses binary thresholds
+- Weighted Pick suggests replacing binary thresholds with *fractional lattice weights*:
+  - Interior lattice points → high-confidence η predictions (w_i = 1)
+  - Boundary lattice points → uncertain η predictions (w_b = 1/2, reflecting the "half-counting" of boundary)
+  - This provides a principled mathematical foundation for the light/freeze decision
+
+### C.20.5  Industrial Application: Lattice Audit for Manipulation
+
+Zhang (2026) connects Pick's theorem to Galbot S1 production-line quality audit:
+- Contact area during grasping → lattice point count → Pick-area verification
+- If Pick residual ≠ 0 → insufficient contact → grasp instability predicted
+
+**MuJoCo-Bench-IDO extension**:
+A manipulation benchmark task where the agent must achieve sufficient contact area (verified by lattice audit) to complete a grasp. The GoalEML invariant would be:
+
+  L_GEL_pick = λ_pick · |A_contact - (I_contact + B_contact/2 - 1)|²
+
+This extends GEL (§C.15) with a *geometric term* alongside the Noether/contact/task terms.
+
+### C.20.6  Summary: Pick ↔ IDO Bridge
+
+| Pick Theorem Concept | IDO/TOMAS Mapping | Status |
+|----------------------|-------------------|--------|
+| A = I + B/2 - 1 | Noether-Check (ΔE = 0) | P4 prediction |
+| χ(P) topological anchor | ψ-Anchor δ_K evolution | Theoretical bridge |
+| Hexagonal optimal grid | Hex-Nav benchmark task | P5 prediction |
+| Weighted Pick w_i/w_b | ψ-Anchor light/freeze policy | Future v0.4.0 |
+| Contact lattice audit | Manipulation benchmark | Future v0.4.0 |
+
+---
+
 ## References
 
 1. Zhang (2026). "From Explicit Physics to Implicit Flux: VG-Pair, C-IPP, GEL,
@@ -805,3 +892,5 @@ Two evaluation modes available via `--eval-mode` CLI flag:
    NARLA motor primitives, Oracle replay, Critique stall detection.
 
 7. dm_control (DeepMind): MuJoCo-based continuous control benchmark suite.
+
+8. Zhang (2026). "From Pick's Theorem to Industrial Intelligence: Discrete Geometric Prior under IDO/TOMAS." 微信公众号「复合体理学」.
