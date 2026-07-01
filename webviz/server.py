@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.4.3"
+WEBVIZ_VERSION: str = "v0.4.4"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -697,9 +697,30 @@ async def get_tasks() -> JSONResponse:
     tasks: List[dict] = []
     task_descriptions: dict = {
         "humanoid-stand": "Humanoid upright standing with ground contact",
-        "hopper-stand": "Hopper standing balance with ground contact",
+        "humanoid-walk": "Humanoid walking forward locomotion",
+        "humanoid-run": "Humanoid running forward locomotion",
+        "walker-stand": "Walker standing balance",
+        "walker-walk": "Walker walking forward locomotion",
         "walker-run": "Walker forward locomotion without falling",
+        "hopper-stand": "Hopper standing balance with ground contact",
+        "hopper-hop": "Hopper hopping forward locomotion",
+        "cheetah-run": "Cheetah running forward locomotion",
+        "cartpole-balance": "Cartpole balance pole upright",
+        "cartpole-swingup": "Cartpole swing pole up and balance",
+        "cartpole-balance_sparse": "Cartpole sparse reward balance",
+        "cartpole-swingup_sparse": "Cartpole sparse reward swingup",
         "reacher-easy": "Reacher simple 2-DOF reaching task",
+        "reacher-hard": "Reacher harder reaching task",
+        "fish-swim": "Fish forward swimming",
+        "manipulator-bring_ball": "Manipulator bring ball to target",
+        "acrobot-swingup": "Acrobot swing-up task",
+        "pendulum-swingup": "Pendulum swing-up task",
+        "finger-spin": "Finger spin object task",
+        "finger-turn_easy": "Finger turn object easy",
+        "finger-turn_hard": "Finger turn object hard",
+        "ball_in_cup-catch": "Ball-in-cup catch task",
+        "swimmer-swim6": "Swimmer forward swim 6 segments",
+        "swimmer-swim15": "Swimmer forward swim 15 segments",
     }
     for task_name in TASK_REGISTRY.keys():
         tasks.append({
@@ -794,9 +815,10 @@ async def set_mjviser_scene(req: SceneRequest) -> JSONResponse:
         JSONResponse with the current scene_type.
     """
     global mjviser_scene_type
-    if req.scene_type not in {"plain", "obstacle"}:
+    valid_scenes = {"plain", "obstacle", "ramp", "stairs", "floating", "maze"}
+    if req.scene_type not in valid_scenes:
         from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail="Invalid scene type. Must be 'plain' or 'obstacle'.")
+        raise HTTPException(status_code=400, detail=f"Invalid scene type. Must be one of: {', '.join(sorted(valid_scenes))}.")
     mjviser_scene_type = req.scene_type
     return JSONResponse(content={"scene_type": mjviser_scene_type})
 
@@ -847,21 +869,31 @@ async def start_viewer() -> JSONResponse:
             # ── Load scene based on mjviser_scene_type ──
             env_ref = None
             target_height: float = 1.4  # Default for dm_control humanoid
+            scene_xml_path: Optional[str] = None
 
-            if mjviser_scene_type == "obstacle":
-                scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / "humanoid_obstacle_arena.xml")
-                mj_model = mj.MjModel.from_xml_path(scene_xml_path)
-                mj_data = mj.MjData(mj_model)
-                mj.mj_resetData(mj_model, mj_data)
-                mj.mj_forward(mj_model, mj_data)
-                target_height = 1.0  # Stick-figure humanoid is shorter
-            else:
+            if mjviser_scene_type == "plain":
                 # Default: load dm_control humanoid-stand
                 env_ref = suite.load("humanoid", "stand")
                 env_ref.reset()  # Reset to get initial upright pose
                 mj_model = env_ref.physics.model._model
                 mj_data = env_ref.physics.data._data
                 target_height = 1.4  # dm_control humanoid standing height
+            else:
+                # Custom scene: load XML from webviz/scenes/
+                scene_file_map: dict = {
+                    "obstacle": "humanoid_obstacle_arena.xml",
+                    "ramp": "humanoid_ramp_arena.xml",
+                    "stairs": "humanoid_stairs_arena.xml",
+                    "floating": "humanoid_floating_platforms.xml",
+                    "maze": "humanoid_maze_arena.xml",
+                }
+                scene_file = scene_file_map.get(mjviser_scene_type, "humanoid_obstacle_arena.xml")
+                scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / scene_file)
+                mj_model = mj.MjModel.from_xml_path(scene_xml_path)
+                mj_data = mj.MjData(mj_model)
+                mj.mj_resetData(mj_model, mj_data)
+                mj.mj_forward(mj_model, mj_data)
+                target_height = 1.0  # Stick-figure humanoid is shorter
 
             # ── Helper functions for walking controller ──
 

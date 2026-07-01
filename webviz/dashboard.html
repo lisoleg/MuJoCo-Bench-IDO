@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.3.1</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.4.4</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -256,7 +256,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.3.1</span>
+      <span class="text-sm font-medium text-slate-400">v0.4.4</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -277,11 +277,51 @@
       <div>
         <label class="label-sm mb-1 block" data-i18n="label_task_select">Task Selection</label>
         <select id="taskSelect">
-          <option value="humanoid-stand">humanoid-stand</option>
-          <option value="hopper-stand">hopper-stand</option>
-          <option value="walker-run">walker-run</option>
-          <option value="reacher-easy">reacher-easy</option>
+          <optgroup label="Humanoid" data-i18n-label="group_humanoid">
+            <option value="humanoid-stand">humanoid-stand</option>
+            <option value="humanoid-walk">humanoid-walk</option>
+            <option value="humanoid-run">humanoid-run</option>
+          </optgroup>
+          <optgroup label="Walker" data-i18n-label="group_walker">
+            <option value="walker-stand">walker-stand</option>
+            <option value="walker-walk">walker-walk</option>
+            <option value="walker-run">walker-run</option>
+          </optgroup>
+          <optgroup label="Cheetah" data-i18n-label="group_cheetah">
+            <option value="cheetah-run">cheetah-run</option>
+          </optgroup>
+          <optgroup label="Hopper" data-i18n-label="group_hopper">
+            <option value="hopper-stand">hopper-stand</option>
+            <option value="hopper-hop">hopper-hop</option>
+          </optgroup>
+          <optgroup label="Cartpole" data-i18n-label="group_cartpole">
+            <option value="cartpole-balance">cartpole-balance</option>
+            <option value="cartpole-swingup">cartpole-swingup</option>
+            <option value="cartpole-balance_sparse">cartpole-balance_sparse</option>
+            <option value="cartpole-swingup_sparse">cartpole-swingup_sparse</option>
+          </optgroup>
+          <optgroup label="Reacher" data-i18n-label="group_reacher">
+            <option value="reacher-easy">reacher-easy</option>
+            <option value="reacher-hard">reacher-hard</option>
+          </optgroup>
+          <optgroup label="Manipulator / Hand" data-i18n-label="group_manipulator">
+            <option value="manipulator-bring_ball">manipulator-bring_ball</option>
+            <option value="finger-spin">finger-spin</option>
+            <option value="finger-turn_easy">finger-turn_easy</option>
+            <option value="finger-turn_hard">finger-turn_hard</option>
+            <option value="ball_in_cup-catch">ball_in_cup-catch</option>
+          </optgroup>
+          <optgroup label="Swimmer / Fish" data-i18n-label="group_swimmer">
+            <option value="fish-swim">fish-swim</option>
+            <option value="swimmer-swim6">swimmer-swim6</option>
+            <option value="swimmer-swim15">swimmer-swim15</option>
+          </optgroup>
+          <optgroup label="Classic Control" data-i18n-label="group_classic">
+            <option value="pendulum-swingup">pendulum-swingup</option>
+            <option value="acrobot-swingup">acrobot-swingup</option>
+          </optgroup>
         </select>
+        <small id="taskHelp" class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_task_select">Select a dm_control benchmark task. The agent's goal EML will be adjusted automatically.</small>
       </div>
 
       <!-- Episodes Slider -->
@@ -291,12 +331,14 @@
           <input type="range" id="episodesSlider" min="1" max="20" value="5">
           <span id="episodesValue" class="value-sm font-mono">5</span>
         </div>
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_episodes">Number of independent evaluation episodes. More episodes give better statistics.</small>
       </div>
 
       <!-- Max Steps -->
       <div>
         <label class="label-sm mb-1 block" data-i18n="label_max_steps">Max Steps</label>
         <input type="number" id="maxStepsInput" value="1000" min="100" max="5000" step="100">
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_max_steps">Maximum steps per episode. Episode terminates early if the goal is reached.</small>
       </div>
 
       <!-- SIP-Bench Toggle -->
@@ -306,18 +348,21 @@
           <div id="sipToggle" class="toggle-switch" onclick="toggleSIP()"></div>
           <span id="sipLabel" class="value-sm" data-i18n="sip_standard">Standard</span>
         </div>
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_sip_mode">Toggle SIP-Bench longitudinal evaluation (T0/T1/T2) for stability testing.</small>
       </div>
 
       <!-- Evolution Rounds (SIP-Bench only) -->
       <div id="evolutionRoundsSection" style="display:none;">
         <label class="label-sm mb-1 block" data-i18n="label_evolution_rounds">Evolution Rounds</label>
         <input type="number" id="evolutionRoundsInput" value="3" min="1" max="10">
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_evolution_rounds">How many ψ-Anchor evolution rounds to run during T1.</small>
       </div>
 
       <!-- Kappa Threshold -->
       <div>
         <label class="label-sm mb-1 block" data-i18n="label_kappa_thresh">κ-Snap Threshold (δ_K)</label>
         <input type="number" id="kappaThreshInput" value="0.05" min="0.001" max="1.0" step="0.01">
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_kappa_thresh">Residual threshold for κ-Snap. Smaller values make the goal detection stricter.</small>
       </div>
 
       <!-- 3D Scene Selection -->
@@ -326,7 +371,16 @@
         <select id="sceneSelect" onchange="setScene()">
           <option value="plain" data-i18n-opt="scene_plain">Default (humanoid-stand)</option>
           <option value="obstacle" data-i18n-opt="scene_obstacle">Obstacle Arena</option>
+          <option value="ramp" data-i18n-opt="scene_ramp">Ramp Arena</option>
+          <option value="stairs" data-i18n-opt="scene_stairs">Stairs Arena</option>
+          <option value="floating" data-i18n-opt="scene_floating">Floating Platforms</option>
+          <option value="maze" data-i18n-opt="scene_maze">Maze Arena</option>
         </select>
+        <div id="sceneNameDisplay" class="mt-2 p-2 rounded" style="background: #0f172a; border: 1px solid #475569;">
+          <span class="label-sm block" data-i18n="label_current_scene">Current Scene</span>
+          <span id="currentSceneName" class="value-md font-bold text-blue-400" data-i18n="scene_plain">Default (humanoid-stand)</span>
+        </div>
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_3d_scene">Select the physical 3D arena loaded by mjviser. Reload viewer after changing.</small>
       </div>
 
       <!-- mjviser 3D Viewer Button -->
@@ -336,6 +390,7 @@
           🎮 Open mjviser (8081)
         </button>
         <span id="viewerStatus" class="label-sm mt-1 block"></span>
+        <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_3d_vis">Open the 3D viewer in a new tab. The simulation starts paused; click Play in the viewer to animate.</small>
       </div>
 
       <!-- Divider -->
@@ -345,9 +400,11 @@
       <button id="startBtn" class="btn-primary" onclick="startRun()" data-i18n="btn_start_run">
         ▶ Start Run
       </button>
+      <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_start_run">Start the IDO benchmark with the selected task, scene, and parameters.</small>
       <button id="stopBtn" class="btn-danger" onclick="stopRun()" disabled data-i18n="btn_stop_run">
         ⏹ Stop Run
       </button>
+      <small class="text-muted mt-1 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_stop_run">Stop the current run. Results collected so far are still reported.</small>
 
       <!-- Quick Status -->
       <div class="card mt-2">
@@ -361,6 +418,7 @@
           <span class="label-sm" data-i18n="label_step">Step:</span>
           <span id="currentStep" class="value-sm font-mono">0</span>
         </div>
+        <small class="text-muted mt-2 block" style="color: #94a3b8; font-size: 0.7rem; line-height: 1.3;" data-i18n="hint_run_status">Live progress of the active benchmark run.</small>
       </div>
     </aside>
 
@@ -548,10 +606,26 @@
         label_3d_scene: "3D 场景",
         scene_plain: "默认 (humanoid-stand)",
         scene_obstacle: "障碍竞技场",
+        scene_ramp: "斜坡挑战",
+        scene_stairs: "阶梯地形",
+        scene_floating: "浮台地形",
+        scene_maze: "迷宫场景",
+        label_current_scene: "当前场景",
         label_3d_vis: "3D 可视化",
         btn_open_viewer: "🎮 打开 mjviser (8081)",
         btn_start_run: "▶ 开始运行",
         btn_stop_run: "⏹ 停止运行",
+        hint_task_select: "选择一个 dm_control 基准任务。系统会根据任务自动调整目标 EML。",
+        hint_episodes: "独立评估的 Episode 数量。更多 Episode 能提供更稳定的统计结果。",
+        hint_max_steps: "每个 Episode 的最大步数。若提前达到目标，Episode 会提前结束。",
+        hint_sip_mode: "切换 SIP-Bench 纵向评估（T0/T1/T2），用于测试策略稳定性。",
+        hint_evolution_rounds: "T1 阶段 ψ-Anchor 演化的轮数。",
+        hint_kappa_thresh: "κ-Snap 残差阈值。值越小，目标检测越严格。",
+        hint_3d_scene: "选择 mjviser 加载的物理 3D 竞技场。切换后请重新打开 viewer。",
+        hint_3d_vis: "在新标签页打开 3D 查看器。仿真启动时暂停，请在查看器中点击 Play 开始动画。",
+        hint_start_run: "使用当前选择的任务、场景和参数启动 IDO 基准运行。",
+        hint_stop_run: "停止当前运行。已收集的结果仍会被汇总报告。",
+        hint_run_status: "当前基准运行的实时进度。",
         card_run_status: "运行状态",
         status_no_active_run: "无活跃运行",
         label_episode: "Episode:",
@@ -622,10 +696,26 @@
         label_3d_scene: "3D Scene",
         scene_plain: "Default (humanoid-stand)",
         scene_obstacle: "Obstacle Arena",
+        scene_ramp: "Ramp Arena",
+        scene_stairs: "Stairs Arena",
+        scene_floating: "Floating Platforms",
+        scene_maze: "Maze Arena",
+        label_current_scene: "Current Scene",
         label_3d_vis: "3D Visualization",
         btn_open_viewer: "🎮 Open mjviser (8081)",
         btn_start_run: "▶ Start Run",
         btn_stop_run: "⏹ Stop Run",
+        hint_task_select: "Select a dm_control benchmark task. The goal EML is adjusted automatically.",
+        hint_episodes: "Number of independent evaluation episodes. More episodes yield better statistics.",
+        hint_max_steps: "Maximum steps per episode. Episodes terminate early if the goal is reached.",
+        hint_sip_mode: "Toggle SIP-Bench longitudinal evaluation (T0/T1/T2) for stability testing.",
+        hint_evolution_rounds: "Number of ψ-Anchor evolution rounds during T1.",
+        hint_kappa_thresh: "Residual threshold for κ-Snap. Smaller values make goal detection stricter.",
+        hint_3d_scene: "Select the physical 3D arena loaded by mjviser. Reload the viewer after changing.",
+        hint_3d_vis: "Open the 3D viewer in a new tab. The simulation starts paused; click Play in the viewer to animate.",
+        hint_start_run: "Start the IDO benchmark with the selected task, scene, and parameters.",
+        hint_stop_run: "Stop the current run. Results collected so far are still reported.",
+        hint_run_status: "Live progress of the active benchmark run.",
         card_run_status: "Run Status",
         status_no_active_run: "No active run",
         label_episode: "Episode:",
@@ -1186,6 +1276,10 @@
 
     function setScene() {
       const sceneType = document.getElementById('sceneSelect').value;
+      const sceneOption = document.querySelector(`#sceneSelect option[value="${sceneType}"]`);
+      const sceneName = sceneOption ? sceneOption.textContent : sceneType;
+      document.getElementById('currentSceneName').textContent = sceneName;
+
       fetch('/api/mjviser/scene', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1265,7 +1359,7 @@
       initCharts();
       connectWebSocket();
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.3.1');
+      addLog('Dashboard initialized v0.4.4');
     });
   </script>
 

@@ -6,7 +6,7 @@ Runs IDO/TOMAS agent episodes on dm_control benchmark tasks and
 collects performance metrics (steps-to-goal, final η, Noether
 violations, elapsed time, average return).
 
-Supported tasks: humanoid-stand, hopper-stand, walker-run, reacher-easy.
+Supported tasks: all dm_control.suite tasks registered in TASK_REGISTRY.
 
 v0.2.0 Upgrade: SIP-Bench longitudinal evaluation mode
   - Three phases: T0 (Initial), T1 (Iterated), T2 (Retention)
@@ -30,18 +30,60 @@ from agent.mujoco_ido_agent import IDOMuJoCoAgent
 from agent.psi_anchor import PsiAnchor
 from core.goal_eml_mj import (GoalEML,
                                make_humanoid_stand_eml,
+                               make_humanoid_walk_eml,
+                               make_humanoid_run_eml,
                                make_hopper_stand_eml,
+                               make_hopper_hop_eml,
+                               make_walker_stand_eml,
+                               make_walker_walk_eml,
                                make_walker_run_eml,
-                               make_reacher_easy_eml)
+                               make_cheetah_run_eml,
+                               make_cartpole_balance_eml,
+                               make_cartpole_swingup_eml,
+                               make_cartpole_balance_sparse_eml,
+                               make_cartpole_swingup_sparse_eml,
+                               make_reacher_easy_eml,
+                               make_reacher_hard_eml,
+                               make_fish_swim_eml,
+                               make_manipulator_bring_ball_eml,
+                               make_acrobot_swingup_eml,
+                               make_pendulum_swingup_eml,
+                               make_finger_spin_eml,
+                               make_finger_turn_easy_eml,
+                               make_finger_turn_hard_eml,
+                               make_ball_in_cup_catch_eml,
+                               make_swimmer_swim6_eml,
+                               make_swimmer_swim15_eml)
 from core.kappa_snap_mj import FlowMatchingEtaPredictor
 
-IDO_RUN_MUJOCO_BENCH_VERSION: str = "v0.2.0"
+IDO_RUN_MUJOCO_BENCH_VERSION: str = "v0.3.0"
 
 TASK_REGISTRY: dict = {
-    'humanoid-stand':  make_humanoid_stand_eml,
-    'hopper-stand':    make_hopper_stand_eml,
-    'walker-run':      make_walker_run_eml,
-    'reacher-easy':    make_reacher_easy_eml,
+    'humanoid-stand':            make_humanoid_stand_eml,
+    'humanoid-walk':             make_humanoid_walk_eml,
+    'humanoid-run':              make_humanoid_run_eml,
+    'walker-stand':              make_walker_stand_eml,
+    'walker-walk':               make_walker_walk_eml,
+    'walker-run':                make_walker_run_eml,
+    'hopper-stand':              make_hopper_stand_eml,
+    'hopper-hop':                make_hopper_hop_eml,
+    'cheetah-run':               make_cheetah_run_eml,
+    'cartpole-balance':          make_cartpole_balance_eml,
+    'cartpole-swingup':          make_cartpole_swingup_eml,
+    'cartpole-balance_sparse':   make_cartpole_balance_sparse_eml,
+    'cartpole-swingup_sparse':   make_cartpole_swingup_sparse_eml,
+    'reacher-easy':              make_reacher_easy_eml,
+    'reacher-hard':              make_reacher_hard_eml,
+    'fish-swim':                 make_fish_swim_eml,
+    'manipulator-bring_ball':    make_manipulator_bring_ball_eml,
+    'acrobot-swingup':           make_acrobot_swingup_eml,
+    'pendulum-swingup':          make_pendulum_swingup_eml,
+    'finger-spin':               make_finger_spin_eml,
+    'finger-turn_easy':          make_finger_turn_easy_eml,
+    'finger-turn_hard':          make_finger_turn_hard_eml,
+    'ball_in_cup-catch':         make_ball_in_cup_catch_eml,
+    'swimmer-swim6':             make_swimmer_swim6_eml,
+    'swimmer-swim15':            make_swimmer_swim15_eml,
 }
 
 

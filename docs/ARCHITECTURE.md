@@ -560,6 +560,7 @@ graph TB
 *v0.3.1 update: 2025-07-01 — Language switching, real-time 3D simulation, obstacle scene*
 *v0.4.2 update: 2025-07-01 — Three-layer PD standing controller (gravity comp + root orientation + joint PD)*
 *v0.4.3 update: 2025-07-01 — Random walking controller + waypoint navigation + obstacle arena (replaces hard-lock root)*
+*v0.4.4 update: 2025-07-02 — Expanded dashboard task/scene selection + explanatory tooltips + 4 new 3D arenas*
 
 ---
 
@@ -634,6 +635,32 @@ graph TB
 |---------|------|
 | `webviz/server.py` | 新增全局变量 `mjviser_scene_type: str = "plain"`，新增 `SceneRequest` Pydantic model，新增 `/api/mjviser/scene` POST endpoint |
 | `webviz/dashboard.html` | 左侧控制面板新增"3D场景"下拉框（选项：plain/obstacle），通过 `/api/mjviser/scene` API保存 |
+
+#### v0.4.4 Dashboard 扩展
+
+| 修改文件 | 说明 |
+|---------|------|
+| `webviz/dashboard.html` | 任务下拉扩展为分组选择（Humanoid/Walker/Cheetah/Hopper/Cartpole/Reacher/Manipulator/Swimmer/Classic）；3D场景下拉扩展为 6 个（plain/obstacle/ramp/stairs/floating/maze）；新增"当前场景"显示卡片；为每个控制区增加说明文字（中英文 i18n） |
+| `webviz/server.py` | `/api/mjviser/scene` 支持 6 种场景；`launch_viewer()` 通过场景文件映射加载 XML；`/api/tasks` 返回完整任务描述；版本号 v0.4.4 |
+| `webviz/scenes/humanoid_ramp_arena.xml` | 斜坡竞技场：倾斜坡道 + 通道侧墙 |
+| `webviz/scenes/humanoid_stairs_arena.xml` | 阶梯地形：5 级上升台阶 |
+| `webviz/scenes/humanoid_floating_platforms.xml` | 浮台地形：6 个高低错落的平台 |
+| `webviz/scenes/humanoid_maze_arena.xml` | 迷宫场景：墙体围成的 corridors |
+
+**新增 3D 场景映射**（`webviz/server.py` `launch_viewer`）：
+- `plain` → dm_control `humanoid-stand`
+- `obstacle` / `ramp` / `stairs` / `floating` / `maze` → `webviz/scenes/humanoid_*.xml`
+
+**新增任务分组**（按 `benchmarks/run_mujoco_bench.py` 的 `TASK_REGISTRY`）：
+- Humanoid: humanoid-stand, humanoid-walk, humanoid-run
+- Walker: walker-stand, walker-walk, walker-run
+- Cheetah: cheetah-run
+- Hopper: hopper-stand, hopper-hop
+- Cartpole: cartpole-balance, cartpole-swingup, cartpole-balance_sparse, cartpole-swingup_sparse
+- Reacher: reacher-easy, reacher-hard
+- Manipulator / Hand: manipulator-bring_ball, finger-spin, finger-turn_easy, finger-turn_hard, ball_in_cup-catch
+- Swimmer / Fish: fish-swim, swimmer-swim6, swimmer-swim15
+- Classic Control: pendulum-swingup, acrobot-swingup
 
 #### 导航链接修复
 

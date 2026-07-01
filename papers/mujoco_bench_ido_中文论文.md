@@ -613,6 +613,12 @@ v0.4.1–v0.4.3修复了mjviser Viewer的系列bug：
   - 球关节控制：四元数相对旋转 + 小角度近似
   - 障碍物场景改进：障碍物改为静态(移除free joint)，地面尺寸12×12，障碍物位置重新分布
 
+v0.4.4在v0.4.3基础上扩展了Dashboard的任务/场景选择和解释性文字：
+- 任务选择从4个扩展到25个，按Humanoid/Walker/Cheetah/Hopper/Cartpole/Reacher/Manipulator/Swimmer/Classic Control分组
+- 3D场景选择从2个扩展到6个：默认(plain)、障碍竞技场(obstacle)、斜坡挑战(ramp)、阶梯地形(stairs)、浮台地形(floating)、迷宫场景(maze)，每个场景都有独立的MuJoCo XML文件
+- 在左侧控制面板为每个区域增加说明文字（中英文i18n），包括任务选择、3D场景、参数、按钮和运行状态
+- 在场景选择下方显示当前3D场景名称卡片
+
 ### 4.4 Baseline集成
 
 v0.3.0实现了两个baseline adapter：

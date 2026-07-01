@@ -8,7 +8,7 @@ Usage:
   python webviz/run_webviz.py
   python -m webviz.server
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.4.3
+Author: MuJoCo-Bench-IDO Webviz extension v0.4.4
 """
 
 import os
@@ -36,7 +36,7 @@ def main() -> None:
 
     print("=" * 60)
     print("  MuJoCo-Bench-IDO Web Visualization Dashboard")
-    print("  Version: v0.4.3")
+    print("  Version: v0.4.4")
     print("=" * 60)
     print()
     print(f"  Access the dashboard at: http://localhost:8080")
