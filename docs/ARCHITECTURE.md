@@ -585,21 +585,28 @@ graph TB
 - 代码块（XML/C）不翻译，只翻译周围说明文字
 - 翻译质量面向学术/工程师
 
-#### 实时3D仿真循环（v0.3.1→v0.4.1 重写）
+#### 实时3D仿真循环（v0.3.1→v0.4.2 PD站立控制器）
 
 | 修改文件 | 说明 |
 |---------|------|
-| `webviz/server.py` | `launch_viewer()` 重写：取消独立 sim_loop 线程，改用 Viewer step_fn 参数 + 手动 viewer loop |
+| `webviz/server.py` | `launch_viewer()` 重写：PD站立控制器 + 手动 viewer loop + 暂停启动 |
 
-**仿真循环设计（v0.4.1 修复后）**：
-- `viewer.run()` 在后台线程中调用 `signal.signal()` 会抛 ValueError（仅主线程可设信号处理），导致 Viewer 崩溃 → GUI 和渲染未执行
-- 修复方案：手动调用 `_setup_gui()` + `_render()` + `_tick()` 循环，规避 signal 限制
-- plain 场景：`dm_control_step_fn` 通过 Viewer 的 `step_fn` 参数注入 dm_control stepping，消除数据竞争
-- obstacle 场景：Viewer 内部 `_tick()` → `_step_physics()` 直接调用 `mj.mj_step()`
-- ViserServer 端口：从 `viser_server._websock_server._port` 读取实际端口（避免硬编码 8081）
+**仿真循环设计（v0.4.2 PD站立控制器）**：
+- `viewer.run()` 在后台线程中调用 `signal.signal()` 会抛 ValueError → 手动 `_setup_gui()+_render()+_tick()` 循环规避
+- plain 场景（humanoid-stand）：`plain_step_fn` PD 站立控制器
+  - dm_control 位置执行器太弱（gain=1, ctrlrange=[-1,1]）无法撑住站立姿态
+  - 使用 `data.qfrc_applied` 直接施加关节力矩，绕过弱执行器
+  - PD 增益：KP=50, KD=15（经验验证：root_z ≈ 1.5，稳定 ≥10s）
+  - 5个关节添加小幅正弦运动（摆臂+轻微躯干扭转），使机器人看起来"活着"
+  - 启动暂停模式：用户看到直立姿态，点 Play 后机器人开始微动
+- obstacle 场景：`obstacle_step_fn` 简单零力矩被动物理推进
+- ViserServer 端口：从 `viser_server._websock_server._port` 读取实际端口
 - viewer 关闭时 `viser_server.stop()` + `mjviser_viewer_running = False`
 
-> **旧设计（v0.3.1，已废弃）**：独立 `sim_loop` daemon 线程与 Viewer `_tick()` 并发写入同一 MjData → 数据竞争；`viewer.run()` 在后台线程崩溃
+> **Bug 历史**：
+> - v0.3.1：独立 `sim_loop` daemon 线程与 Viewer `_tick()` 并发写入同一 MjData → 数据竞争
+> - v0.4.1：`viewer.run()` 在后台线程崩溃 + 随机动作导致机器人疯狂抽搐
+> - v0.4.2：无控制器时重力倒下 → PD 站立控制器修复
 
 #### 3D场景选择
 

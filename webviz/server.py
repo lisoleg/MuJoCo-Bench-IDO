@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.3.1"
+WEBVIZ_VERSION: str = "v0.4.2"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -846,6 +846,9 @@ async def start_viewer() -> JSONResponse:
 
             # Load scene based on mjviser_scene_type
             env_ref = None
+            target_qpos = None  # PD controller target for plain scene
+            actuator_to_qpos_dof = None  # Mapping for PD controller
+
             if mjviser_scene_type == "obstacle":
                 scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / "humanoid_obstacle_arena.xml")
                 mj_model = mj.MjModel.from_xml_path(scene_xml_path)
@@ -855,8 +858,28 @@ async def start_viewer() -> JSONResponse:
             else:
                 # Default: load dm_control humanoid-stand
                 env_ref = suite.load("humanoid", "stand")
+                env_ref.reset()  # Reset to get initial upright pose
+
+                # ── Capture initial joint positions as PD target ──
+                # The dm_control humanoid-stand reset() places the robot upright.
+                # We use this as the target posture for the PD controller.
+                target_qpos = env_ref.physics.data._data.qpos.copy()
+
                 mj_model = env_ref.physics.model._model
                 mj_data = env_ref.physics.data._data
+
+                # ── Build actuator → (qpos_adr, dof_adr) mapping ──
+                # Each dm_control humanoid actuator is a single-DOF hinge joint.
+                # model.actuator_trnid[i, 0] gives the joint ID for actuator i.
+                # model.jnt_qposadr[jnt_id] gives the qpos address for that joint.
+                # model.jnt_dofadr[jnt_id] gives the DOF (qvel) address.
+                actuator_to_qpos_dof = []
+                num_actuators = mj_model.nu
+                for i in range(num_actuators):
+                    jnt_id = int(mj_model.actuator_trnid[i, 0])
+                    qpos_adr = int(mj_model.jnt_qposadr[jnt_id])
+                    dof_adr = int(mj_model.jnt_dofadr[jnt_id])
+                    actuator_to_qpos_dof.append((qpos_adr, dof_adr))
 
             # Create ViserServer on port 8081 (avoid conflict with FastAPI on 8080)
             viser_server = ViserServer(port=8081, verbose=False)
@@ -865,34 +888,104 @@ async def start_viewer() -> JSONResponse:
             actual_port: int = viser_server._websock_server._port
             mjviser_viewer_url = f"http://localhost:{actual_port}"
 
-            # ── Define a custom step function for dm_control environments ──
-            # The mjviser Viewer has its own internal simulation loop (_tick →
-            # _step_physics → step_fn). We use step_fn to inject dm_control
-            # stepping, which handles timestep and action spec properly.
-            # This replaces the old separate sim_loop thread that caused data
-            # races by modifying mj_data concurrently with the viewer.
-            def dm_control_step_fn(model: Any, data: Any) -> None:
-                """Step using dm_control env with random actions, then sync mj_data."""
-                if env_ref is not None and mjviser_scene_type == "plain":
-                    action_spec = env_ref.action_spec()
-                    action = np.random.uniform(-1, 1, action_spec.shape[0])
-                    env_ref.step(action)
-                    # Sync viewer's mj_data from dm_control env
-                    data.qpos[:] = env_ref.physics.data._data.qpos[:]
-                    data.qvel[:] = env_ref.physics.data._data.qvel[:]
-                    data.ctrl[:] = action
-                else:
-                    # Direct MuJoCo step for custom XML scenes
-                    action = np.random.uniform(-1, 1, model.nu)
-                    data.ctrl[:] = action[:model.nu]
-                    mj.mj_step(model, data)
+            # ── PD Standing Controller for plain humanoid scene ──
+            # The dm_control humanoid position actuators are too weak
+            # (gainprm=[1,0,0,0,0], ctrlrange=[-1,1]) to hold the standing pose
+            # by themselves. Without active control, the robot falls under gravity.
+            # We use a PD controller that applies generalized forces directly
+            # via data.qfrc_applied, bypassing the weak actuators.
+            # Gains KP=50, KD=15 were empirically verified to keep root_z ≈ 1.5
+            # and the robot standing for > 10 simulated seconds.
+            KP: float = 50.0
+            KD: float = 15.0
+
+            # ── Joint names for periodic motion ──
+            # Named joints to add gentle sinusoidal motion so the robot looks alive.
+            # These are selected based on dm_control humanoid joint naming convention.
+            # abdomen_z adds gentle torso twist, shoulder joints add arm sway.
+            # We look up their qpos/dof addresses from the model's joint names.
+            motion_joints: dict = {}  # joint_name -> (qpos_adr, dof_adr, amplitude, freq_hz)
+            if mjviser_scene_type == "plain" and actuator_to_qpos_dof is not None:
+                # Define desired motion: joint_name → (amplitude_rad, frequency_hz)
+                desired_motion = {
+                    "abdomen_z": (0.1, 0.5),     # gentle torso twist
+                    "right_shoulder1": (0.15, 0.5),  # right arm sway
+                    "left_shoulder1": (0.15, 0.5),   # left arm sway
+                    "right_hip_x": (0.08, 0.3),    # slight right hip motion
+                    "left_hip_x": (0.08, 0.3),     # slight left hip motion
+                }
+                # Resolve named joints to qpos/dof addresses
+                for jnt_idx in range(mj_model.njnt):
+                    jnt_name_bytes = mj.mj_id2name(mj_model, mj.mjtObj.mjOBJ_JOINT, jnt_idx)
+                    if jnt_name_bytes is not None:
+                        jnt_name = jnt_name_bytes.decode('utf-8') if isinstance(jnt_name_bytes, bytes) else str(jnt_name_bytes)
+                        if jnt_name in desired_motion:
+                            qpos_adr = int(mj_model.jnt_qposadr[jnt_idx])
+                            dof_adr = int(mj_model.jnt_dofadr[jnt_idx])
+                            amp, freq = desired_motion[jnt_name]
+                            motion_joints[jnt_name] = (qpos_adr, dof_adr, amp, freq)
+
+            def plain_step_fn(model: mj.MjModel, data: mj.MjData) -> None:
+                """PD standing controller step function for plain humanoid scene.
+
+                Applies PD torques via data.qfrc_applied to maintain upright pose,
+                plus gentle sinusoidal motion on selected joints to make the robot
+                look alive. Bypasses the weak dm_control position actuators entirely.
+
+                Args:
+                    model: MuJoCo model.
+                    data: MuJoCo data (qpos, qvel, qfrc_applied modified in-place).
+                """
+                # Clear any previous applied forces
+                data.qfrc_applied[:] = 0.0
+
+                # ── PD controller: drive each actuator joint toward target_qpos ──
+                for i, (qpos_adr, dof_adr) in enumerate(actuator_to_qpos_dof):
+                    # Compute target for this joint (base target + periodic offset)
+                    base_target = target_qpos[qpos_adr]
+
+                    # ── Add periodic motion offset for selected joints ──
+                    for jnt_name, (mqpos_adr, mdof_adr, amp, freq) in motion_joints.items():
+                        if qpos_adr == mqpos_adr:
+                            offset = amp * np.sin(2.0 * np.pi * freq * data.time)
+                            base_target = base_target + offset
+                            break
+
+                    # PD control: torque = KP * error - KD * velocity
+                    error = base_target - data.qpos[qpos_adr]
+                    vel = data.qvel[dof_adr]
+                    torque = KP * error - KD * vel
+                    data.qfrc_applied[dof_adr] = torque
+
+                # Step physics with the applied forces
+                mj.mj_step(model, data)
+
+            def obstacle_step_fn(model: mj.MjModel, data: mj.MjData) -> None:
+                """Simple fallback step function for obstacle scene.
+
+                Clears applied forces and steps physics with zero control.
+                No active control — robot will fall naturally, but won't twitch
+                from residual forces.
+
+                Args:
+                    model: MuJoCo model.
+                    data: MuJoCo data.
+                """
+                data.qfrc_applied[:] = 0.0
+                data.ctrl[:] = 0.0
+                mj.mj_step(model, data)
+
+            # Select step_fn based on scene type
+            step_fn = plain_step_fn if mjviser_scene_type == "plain" else obstacle_step_fn
 
             viewer = mjviser.Viewer(
                 model=mj_model,
                 data=mj_data,
-                step_fn=dm_control_step_fn if mjviser_scene_type == "plain" else None,
+                step_fn=step_fn,
                 server=viser_server,
             )
+            # Start in paused mode: robot shows upright pose, user clicks Play to start
+            viewer._paused = True
             mjviser_viewer_running = True
 
             # ── Manual viewer loop (replaces viewer.run()) ──
