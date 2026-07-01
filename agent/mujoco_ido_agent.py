@@ -9,6 +9,11 @@ Inherits the tomas-arc3-solver v7.2 IDO architecture:
   Oracle   → ExpertDemonstrationReplay (lightweight EML edge rewrite)
   Critique → stall-detect → relax δ_K / shrink amplitude
 
+v0.2.0 Upgrade:
+  ψ-Anchor → meta-management layer (dynamic δ_K, evolution policy,
+             Noether anchoring, epiplexity)
+  FlowMatchingEtaPredictor → forward-looking η trend prediction
+
 Author: tomas-arc3-solver project · IDO-MuJoCo-Bench extension
 """
 import numpy as np
@@ -16,9 +21,10 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Tuple, Optional
 import traceback
 
-from core.kappa_snap_mj import gauss_ex_residual
+from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj, NoetherViolation
 from core.goal_eml_mj import GoalEML
+from agent.psi_anchor import PsiAnchor
 
 
 class MotorPrimitives:
@@ -164,6 +170,15 @@ class IDOMuJoCoAgent:
     primitives, PD stabilization, stall-detection critique, and oracle
     replay within a single choose_action loop.
 
+    v0.2.0: Optionally integrates ψ-Anchor (meta-management) and
+    FlowMatchingEtaPredictor (η trend prediction). These are optional
+    and can be set externally (e.g., by SIP-Bench). When present,
+    the decision loop is enhanced with:
+    - ψ-Anchor dynamic δ_K adjustment (replaces simple stall critique)
+    - ψ-Anchor evolution policy for MotorPrimitives
+    - ψ-Anchor Noether conservation anchoring
+    - FlowMatchingEtaPredictor for forward-looking η computation
+
     Attributes:
         env: dm_control environment instance.
         goal: GoalEML defining the task's invariants and tolerances.
@@ -176,6 +191,8 @@ class IDOMuJoCoAgent:
         mp: MotorPrimitives instance.
         macros: List of (primitive_fn, base_ic_value) from MotorPrimitives.
         oracle_buffer: Buffer for oracle demonstration actions.
+        psi_anchor: Optional ψ-Anchor meta-management layer instance.
+        flow_predictor: Optional FlowMatchingEtaPredictor instance.
     """
 
     def __init__(self,
@@ -183,7 +200,9 @@ class IDOMuJoCoAgent:
                  goal_eml: GoalEML,
                  kappa_thresh: float = 0.05,
                  max_stall: int = 80,
-                 enable_critique: bool = True) -> None:
+                 enable_critique: bool = True,
+                 psi_anchor: Optional[PsiAnchor] = None,
+                 flow_predictor: Optional[FlowMatchingEtaPredictor] = None) -> None:
         """Initialize the IDO MuJoCo Agent.
 
         Args:
@@ -192,6 +211,10 @@ class IDOMuJoCoAgent:
             kappa_thresh: η threshold for PD stabilization activation.
             max_stall: Max consecutive stall steps before critique relax.
             enable_critique: Whether stall-detection critique is active.
+            psi_anchor: Optional PsiAnchor instance for meta-management.
+                        If None, can be set later via attribute assignment.
+            flow_predictor: Optional FlowMatchingEtaPredictor for η trend.
+                           If None, can be set later via attribute assignment.
         """
         self.env = env
         self.goal = goal_eml
@@ -206,6 +229,10 @@ class IDOMuJoCoAgent:
 
         self.macros: List[Tuple[Callable, float]] = self.mp.get_library()
         self.oracle_buffer: List[np.ndarray] = []
+
+        # v0.2.0: ψ-Anchor and FlowMatchingEtaPredictor (optional, set externally)
+        self.psi_anchor: Optional[PsiAnchor] = psi_anchor
+        self.flow_predictor: Optional[FlowMatchingEtaPredictor] = flow_predictor
 
     def _extract_eml_obs(self, timestep) -> dict:
         """Extract EML observation dict from a dm_control timestep.
@@ -250,13 +277,17 @@ class IDOMuJoCoAgent:
     def _compute_kappa_snap(self, z_i: dict) -> float:
         """Compute κ-Snap GaussEx residual η for current observation.
 
+        v0.2.0: If flow_predictor is set, passes it to gauss_ex_residual
+        for forward-looking η computation with trend blending.
+
         Args:
             z_i: EML observation dict from _extract_eml_obs.
 
         Returns:
             Scalar residual η measuring deviation from goal manifold.
         """
-        return gauss_ex_residual(z_i, self.goal)
+        return gauss_ex_residual(z_i, self.goal,
+                                 flow_predictor=self.flow_predictor)
 
     def _run_noether_check(self) -> Tuple[bool, str]:
         """Run Noether conservation gate between previous and current data.
@@ -274,11 +305,14 @@ class IDOMuJoCoAgent:
         """Select control action via IDO decision loop.
 
         Decision path:
-        1. Extract EML observation → compute η via κ-Snap.
+        1. Extract EML observation → compute η via κ-Snap (with flow predictor).
         2. Run Noether check → if violation, execute squat fallback.
-        3. If η < κ_thresh → PD stabilize toward goal.
-        4. Else → select highest-scoring NARLA motor primitive.
-        5. Critique: if stall detected, relax κ_thresh / increase max_stall.
+           v0.2.0: ψ-Anchor injects conservation anchor from Noether result.
+        3. v0.2.0: ψ-Anchor updates η history and adjusts δ_K dynamically.
+        4. If η < κ_thresh → PD stabilize toward goal.
+        5. Else → select highest-scoring NARLA motor primitive.
+           v0.2.0: ψ-Anchor decides evolution policy for macros.
+        6. Critique: if stall detected, relax κ_thresh / increase max_stall.
 
         Args:
             timestep: dm_control TimeStep with .physics attribute.
@@ -289,10 +323,16 @@ class IDOMuJoCoAgent:
         phys = timestep.physics
         z_i = self._extract_eml_obs(timestep)
 
+        # ── v0.2.0: κ-Snap with flow predictor (forward-looking η) ──
         eta: float = self._compute_kappa_snap(z_i)
 
         # ── Noether Gate ──
         noether_ok, noether_msg = self._run_noether_check()
+
+        # v0.2.0: ψ-Anchor injects conservation anchor
+        if self.psi_anchor is not None:
+            self.psi_anchor.inject_conservation_anchor(noether_ok, noether_msg)
+
         if not noether_ok:
             self.mp.squat(phys)
             self.stall_count += 1
@@ -301,6 +341,18 @@ class IDOMuJoCoAgent:
             return phys.data.ctrl.copy()
 
         self.prev_data = phys.data
+
+        # ── v0.2.0: ψ-Anchor η history update and dynamic δ_K ──
+        if self.psi_anchor is not None:
+            self.psi_anchor.update_eta_history(eta)
+            adjusted_dk: float = self.psi_anchor.adjust_delta_K(self.kappa_thresh)
+            self.kappa_thresh = adjusted_dk
+
+            # ψ-Anchor evolution policy — decides when to evolve macros
+            evo_policy: str = self.psi_anchor.decide_evolution_policy()
+            if self.psi_anchor.should_trigger_evolution():
+                self.macros = self.psi_anchor.apply_evolution_to_macros(
+                    self.macros, evo_policy)
 
         # ── Near-Goal: PD Stabilize ──
         if eta < self.kappa_thresh:
