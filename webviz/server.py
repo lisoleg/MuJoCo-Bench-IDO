@@ -77,6 +77,7 @@ run_state: RunState = RunState()
 MJVISER_AVAILABLE: bool = False
 mjviser_viewer_thread: Optional[threading.Thread] = None
 mjviser_viewer_running: bool = False
+mjviser_viewer_url: str = ""
 mjviser_scene_type: str = "plain"
 
 try:
@@ -816,24 +817,35 @@ async def start_viewer() -> JSONResponse:
             },
         )
 
-    global mjviser_viewer_thread, mjviser_viewer_running
+    global mjviser_viewer_thread, mjviser_viewer_running, mjviser_viewer_url
 
     if mjviser_viewer_running:
         return JSONResponse(content={
             "status": "already_running",
-            "url": "http://localhost:8081",
+            "url": mjviser_viewer_url,
         })
 
+    # Initialize viewer URL (will be updated by launch_viewer thread)
+    mjviser_viewer_url = "http://localhost:8081"
+
     def launch_viewer() -> None:
-        """Launch mjviser Viewer in a background thread with real-time simulation."""
-        global mjviser_viewer_running
+        """Launch mjviser Viewer in a background thread with real-time simulation.
+
+        Note: We cannot use viewer.run() directly because it calls
+        signal.signal(), which raises ValueError in non-main threads
+        ("signal only works in main thread of the main interpreter").
+        Instead, we manually replicate the viewer loop, calling
+        _setup_gui(), _render(), and _tick() in a while-loop.
+        """
+        global mjviser_viewer_running, mjviser_viewer_url
         try:
             import dm_control.suite as suite
             import mujoco as mj
             from viser import ViserServer
-            import time
+            import time as _time
 
             # Load scene based on mjviser_scene_type
+            env_ref = None
             if mjviser_scene_type == "obstacle":
                 scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / "humanoid_obstacle_arena.xml")
                 mj_model = mj.MjModel.from_xml_path(scene_xml_path)
@@ -842,73 +854,87 @@ async def start_viewer() -> JSONResponse:
                 mj.mj_forward(mj_model, mj_data)
             else:
                 # Default: load dm_control humanoid-stand
-                env = suite.load("humanoid", "stand")
-                mj_model = env.physics.model._model
-                mj_data = env.physics.data._data
+                env_ref = suite.load("humanoid", "stand")
+                mj_model = env_ref.physics.model._model
+                mj_data = env_ref.physics.data._data
 
             # Create ViserServer on port 8081 (avoid conflict with FastAPI on 8080)
             viser_server = ViserServer(port=8081, verbose=False)
+
+            # Get the actual port (ViserServer auto-increments if port is occupied)
+            actual_port: int = viser_server._websock_server._port
+            mjviser_viewer_url = f"http://localhost:{actual_port}"
+
+            # ── Define a custom step function for dm_control environments ──
+            # The mjviser Viewer has its own internal simulation loop (_tick →
+            # _step_physics → step_fn). We use step_fn to inject dm_control
+            # stepping, which handles timestep and action spec properly.
+            # This replaces the old separate sim_loop thread that caused data
+            # races by modifying mj_data concurrently with the viewer.
+            def dm_control_step_fn(model: Any, data: Any) -> None:
+                """Step using dm_control env with random actions, then sync mj_data."""
+                if env_ref is not None and mjviser_scene_type == "plain":
+                    action_spec = env_ref.action_spec()
+                    action = np.random.uniform(-1, 1, action_spec.shape[0])
+                    env_ref.step(action)
+                    # Sync viewer's mj_data from dm_control env
+                    data.qpos[:] = env_ref.physics.data._data.qpos[:]
+                    data.qvel[:] = env_ref.physics.data._data.qvel[:]
+                    data.ctrl[:] = action
+                else:
+                    # Direct MuJoCo step for custom XML scenes
+                    action = np.random.uniform(-1, 1, model.nu)
+                    data.ctrl[:] = action[:model.nu]
+                    mj.mj_step(model, data)
+
             viewer = mjviser.Viewer(
                 model=mj_model,
                 data=mj_data,
+                step_fn=dm_control_step_fn if mjviser_scene_type == "plain" else None,
                 server=viser_server,
             )
             mjviser_viewer_running = True
 
-            # ── Background simulation loop ──
-            def sim_loop() -> None:
-                """Run MuJoCo simulation steps in a background thread."""
-                env_ref = None
-                try:
-                    # If using dm_control env, get action spec for random actions
-                    if mjviser_scene_type == "plain":
-                        env_ref = suite.load("humanoid", "stand")
-                        action_spec = env_ref.action_spec()
-                        action_dim = action_spec.shape[0]
-                    else:
-                        action_dim = mj_model.nu
-                except Exception:
-                    action_dim = mj_model.nu if mj_model.nu > 0 else 1
+            # ── Manual viewer loop (replaces viewer.run()) ──
+            # viewer.run() uses signal.signal() which fails in background threads,
+            # so we replicate its logic here without the signal handling.
+            viewer._setup_gui()
 
+            # Initial forward pass and render
+            if viewer._render_fn is None:
+                mj.mj_forward(mj_model, mj_data)
+            viewer._render()
+
+            # Initialize timing counters
+            now: float = _time.perf_counter()
+            viewer._last_tick = now
+            viewer._stats_last_time = now
+
+            try:
                 while mjviser_viewer_running:
-                    try:
-                        # Generate random action
-                        action = np.random.uniform(-1, 1, action_dim)
+                    viewer._tick()
+                    _time.sleep(0.001)
+            finally:
+                viser_server.stop()
+                mjviser_viewer_running = False
+                mjviser_viewer_url = ""
 
-                        if mjviser_scene_type == "plain" and env_ref is not None:
-                            # Use dm_control env for stepping (handles timestep properly)
-                            env_ref.step(action)
-                            # Sync mj_data from env
-                            mj_data.qpos[:] = env_ref.physics.data._data.qpos[:]
-                            mj_data.qvel[:] = env_ref.physics.data._data.qvel[:]
-                            mj_data.ctrl[:] = action
-                        else:
-                            # Direct mj_step for custom scenes
-                            mj_data.ctrl[:] = action[:mj_model.nu]
-                            mj.mj_step(mj_model, mj_data)
-
-                        time.sleep(0.01)  # ~100 Hz simulation
-                    except Exception:
-                        break
-
-            sim_thread = threading.Thread(target=sim_loop, daemon=True)
-            sim_thread.start()
-
-            # Run viewer (blocks until viewer is closed)
-            viewer.run()
-            # Viewer closed — stop simulation loop
-            mjviser_viewer_running = False
         except Exception as e:
             mjviser_viewer_running = False
+            mjviser_viewer_url = ""
+            traceback.print_exc()
             print(f"mjviser viewer failed: {e}")
 
     mjviser_viewer_thread = threading.Thread(
         target=launch_viewer, daemon=True)
     mjviser_viewer_thread.start()
 
+    # Brief wait so the thread can start ViserServer and determine the actual port
+    time.sleep(0.5)
+
     return JSONResponse(content={
         "status": "starting",
-        "url": "http://localhost:8081",
+        "url": mjviser_viewer_url,
         "available": True,
     })
 

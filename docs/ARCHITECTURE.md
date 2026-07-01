@@ -585,18 +585,21 @@ graph TB
 - 代码块（XML/C）不翻译，只翻译周围说明文字
 - 翻译质量面向学术/工程师
 
-#### 实时3D仿真循环
+#### 实时3D仿真循环（v0.3.1→v0.4.1 重写）
 
 | 修改文件 | 说明 |
 |---------|------|
-| `webviz/server.py` | `launch_viewer()` 增加后台仿真线程：随机动作 → mj.mj_step → 实时更新 mjviser data |
+| `webviz/server.py` | `launch_viewer()` 重写：取消独立 sim_loop 线程，改用 Viewer step_fn 参数 + 手动 viewer loop |
 
-**仿真循环设计**：
-- `sim_loop()` 在 daemon 线程中运行
-- plain场景：使用 dm_control env.step(action) 推进仿真
-- obstacle场景：使用 mj.mj_step(mj_model, mj_data) 直接推进
-- 仿真频率：~100Hz（time.sleep(0.01)）
-- viewer 关闭时 mjviser_viewer_running = False，线程自动停止
+**仿真循环设计（v0.4.1 修复后）**：
+- `viewer.run()` 在后台线程中调用 `signal.signal()` 会抛 ValueError（仅主线程可设信号处理），导致 Viewer 崩溃 → GUI 和渲染未执行
+- 修复方案：手动调用 `_setup_gui()` + `_render()` + `_tick()` 循环，规避 signal 限制
+- plain 场景：`dm_control_step_fn` 通过 Viewer 的 `step_fn` 参数注入 dm_control stepping，消除数据竞争
+- obstacle 场景：Viewer 内部 `_tick()` → `_step_physics()` 直接调用 `mj.mj_step()`
+- ViserServer 端口：从 `viser_server._websock_server._port` 读取实际端口（避免硬编码 8081）
+- viewer 关闭时 `viser_server.stop()` + `mjviser_viewer_running = False`
+
+> **旧设计（v0.3.1，已废弃）**：独立 `sim_loop` daemon 线程与 Viewer `_tick()` 并发写入同一 MjData → 数据竞争；`viewer.run()` 在后台线程崩溃
 
 #### 3D场景选择
 
@@ -629,7 +632,7 @@ graph TB
     subgraph Webviz
         FastAPI["FastAPI Server<br/>webviz/server.py"]
         Dashboard["Dashboard<br/>webviz/dashboard.html"]
-        Mjviser["mjviser Viewer<br/>+ sim_loop"]
+        Mjviser["mjviser Viewer<br/>+ step_fn"]
         UserManual["用户手册<br/>webviz/user_manual.html"]
         MuJoCoDocs["MuJoCo文档<br/>webviz/mujoco_docs_cn.html"]
         ObstacleScene["障碍物场景<br/>webviz/scenes/humanoid_obstacle_arena.xml"]
@@ -679,7 +682,7 @@ graph TB
     subgraph Webviz
         FastAPI["FastAPI Server<br/>webviz/server.py"]
         Dashboard["Dashboard<br/>webviz/dashboard.html"]
-        Mjviser["mjviser Viewer<br/>+ sim_loop"]
+        Mjviser["mjviser Viewer<br/>+ step_fn"]
         UserManual["用户手册<br/>webviz/user_manual.html"]
         MuJoCoDocs["MuJoCo文档<br/>webviz/mujoco_docs_cn.html"]
         ObstacleScene["障碍物场景<br/>webviz/scenes/humanoid_obstacle_arena.xml"]
