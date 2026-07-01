@@ -132,6 +132,21 @@ MuJoCo中文文档：导航栏"📘 MuJoCo中文文档"链接 → /mujoco_docs_c
 
 ---
 
-*Document by 许清楚（Xu） — Product Manager*  
-*Date: 2025-07-01*  
+*Document by 许清楚（Xu） — Product Manager*
+*Date: 2025-07-01*
 *v0.3.0 update: 2025-07-01*
+*v0.3.1 update: 2025-07-01 — R23 语言切换, R24 实时3D仿真, R25 障碍物场景*
+
+#### v0.3.1 — 语言切换 + 实时3D仿真 + 障碍物场景（新增）
+
+| ID | Requirement | Description |
+|----|-------------|-------------|
+| R23 | 中英文界面切换 | 三个HTML页面（dashboard.html、user_manual.html、mujoco_docs_cn.html）加右上角中/EN切换按钮，使用 data-i18n 属性 + i18nDict 字典，localStorage key: mujoco-bench-lang |
+| R24 | 实时3D仿真循环 | `launch_viewer()` 增加后台仿真线程，随机动作让机器人运动，viewer关闭时自动停止。plain场景用dm_control env.step，obstacle场景用mj.mj_step |
+| R25 | 障碍物场景 | `webviz/scenes/humanoid_obstacle_arena.xml` 新增障碍物竞技场场景，dashboard新增3D场景下拉框，server.py新增 `/api/mjviser/scene` API endpoint，全局变量 mjviser_scene_type |
+
+#### v0.3.1 Bug修复
+
+| ID | Bug | Fix |
+|----|-----|-----|
+| BF1 | 导航链接是相对路径，从8081端口打开时404 | 改为绝对URL `http://localhost:8080/user_manual.html` 和 `http://localhost:8080/mujoco_docs_cn.html` |

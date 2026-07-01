@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO 用户手册</title>
+  <title>MuJoCo-Bench-IDO User Manual</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
@@ -31,25 +31,29 @@
     .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
     .badge-blue { background: #1e40af; color: #60a5fa; }
     .badge-green { background: #14532d; color: #22c55e; }
+    .lang-toggle-btn { background: #1e293b; color: #60a5fa; border: 1px solid #3b82f6; border-radius: 6px; padding: 4px 10px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.2s; position: absolute; top: 16px; right: 40px; z-index: 20; }
+    .lang-toggle-btn:hover { background: #3b82f6; color: #fff; }
     @media (max-width: 768px) { .sidebar { display: none; } .main-content { margin-left: 0; padding: 16px; } }
   </style>
 </head>
 <body>
 
+<button class="lang-toggle-btn" onclick="toggleLanguage()" data-i18n="lang_btn">中/EN</button>
+
 <!-- LEFT SIDEBAR -->
 <nav class="sidebar">
-  <div class="sidebar-title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.3.0</div>
-  <a href="#sec1">1. 项目简介</a>
-  <a href="#sec2">2. 环境要求</a>
-  <a href="#sec3">3. 快速开始</a>
-  <a href="#sec4">4. Web可视化仪表盘指南</a>
-  <a href="#sec5">5. mjviser 3D可视化指南</a>
-  <a href="#sec6">6. SIP-Bench模式</a>
-  <a href="#sec7">7. 核心概念通俗解释</a>
-  <a href="#sec8">8. Benchmark任务详解</a>
-  <a href="#sec9">9. Baseline对比使用</a>
-  <a href="#sec10">10. 物理/数学速查表</a>
-  <a href="#sec11">11. 常见问题与故障排查</a>
+  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.3.1</div>
+  <a href="#sec1" data-i18n="nav_sec1">1. 项目简介</a>
+  <a href="#sec2" data-i18n="nav_sec2">2. 环境要求</a>
+  <a href="#sec3" data-i18n="nav_sec3">3. 快速开始</a>
+  <a href="#sec4" data-i18n="nav_sec4">4. Web可视化仪表盘指南</a>
+  <a href="#sec5" data-i18n="nav_sec5">5. mjviser 3D可视化指南</a>
+  <a href="#sec6" data-i18n="nav_sec6">6. SIP-Bench模式</a>
+  <a href="#sec7" data-i18n="nav_sec7">7. 核心概念通俗解释</a>
+  <a href="#sec8" data-i18n="nav_sec8">8. Benchmark任务详解</a>
+  <a href="#sec9" data-i18n="nav_sec9">9. Baseline对比使用</a>
+  <a href="#sec10" data-i18n="nav_sec10">10. 物理/数学速查表</a>
+  <a href="#sec11" data-i18n="nav_sec11">11. 常见问题与故障排查</a>
 </nav>
 
 <!-- MAIN CONTENT -->
@@ -57,51 +61,51 @@
 
 <!-- HEADER -->
 <div class="section-card" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: none; margin-bottom: 32px;">
-  <h1 style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-bottom: 8px;">MuJoCo-Bench-IDO 用户手册</h1>
-  <p style="color: #94a3b8;">版本 v0.3.0 · 最后更新 2025-07-01 · IDO/TOMAS Continuous Physics Benchmark</p>
+  <h1 style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-bottom: 8px;" data-i18n="header_title">MuJoCo-Bench-IDO 用户手册</h1>
+  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.3.1 · 最后更新 2025-07-01 · IDO/TOMAS 连续物理基准验证平台</p>
 </div>
 
 <!-- ═══ Section 1: 项目简介 ═══ -->
 <div id="sec1" class="section-card">
-  <h2 class="section-title">1. 项目简介</h2>
+  <h2 class="section-title" data-i18n="sec1_title">1. 项目简介</h2>
 
-  <p><strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。</p>
+  <p data-i18n="sec1_intro"><strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。</p>
 
-  <h3 class="sub-title">什么是 IDO/TOMAS？</h3>
-  <p>IDO（Information-Driven Orchestration）是一种<strong>非冯诺依曼架构</strong>的决策框架，核心思想是：</p>
+  <h3 class="sub-title" data-i18n="sec1_what_is_ido">什么是 IDO/TOMAS？</h3>
+  <p data-i18n="sec1_ido_desc">IDO（Information-Driven Orchestration）是一种<strong>非冯诺依曼架构</strong>的决策框架，核心思想是：</p>
   <ul>
-    <li><strong>守恒优先</strong>（Conservation-First）：先检查物理守恒定律是否被违反，再决定下一步行动</li>
-    <li><strong>方向引导</strong>（κ-Snap Gate）：通过 η（GaussEx 残差）衡量当前状态距离目标的远近，η 小到阈值以下才"扣合"执行</li>
-    <li><strong>自演化</strong>（ψ-Anchor Meta-Layer）：根据 η 趋势动态调整策略，像教练看比赛数据调整战术</li>
+    <li data-i18n="sec1_ido_li1"><strong>守恒优先</strong>（Conservation-First）：先检查物理守恒定律是否被违反，再决定下一步行动</li>
+    <li data-i18n="sec1_ido_li2"><strong>方向引导</strong>（κ-Snap Gate）：通过 η（GaussEx 残差）衡量当前状态距离目标的远近，η 小到阈值以下才"扣合"执行</li>
+    <li data-i18n="sec1_ido_li3"><strong>自演化</strong>（ψ-Anchor Meta-Layer）：根据 η 趋势动态调整策略，像教练看比赛数据调整战术</li>
   </ul>
-  <p>TOMAS（Theory of Multi-Agent Systems）是 IDO 的理论基础，包含五层本体结构（L1-L5），从底层感知到顶层 Oracle 约束。</p>
+  <p data-i18n="sec1_tomas_desc">TOMAS（Theory of Multi-Agent Systems）是 IDO 的理论基础，包含五层本体结构（L1-L5），从底层感知到顶层 Oracle 约束。</p>
 
-  <h3 class="sub-title">MuJoCo-Bench-IDO 做什么？</h3>
-  <p>它把 IDO 的决策循环映射到 MuJoCo 物理仿真环境，让机器人（人形、跳跃者、行走者、机械臂）在物理约束下尝试完成控制任务，同时验证 IDO 理论预言：</p>
+  <h3 class="sub-title" data-i18n="sec1_what_does">MuJoCo-Bench-IDO 做什么？</h3>
+  <p data-i18n="sec1_does_desc">它把 IDO 的决策循环映射到 MuJoCo 物理仿真环境，让机器人（人形、跳跃者、行走者、机械臂）在物理约束下尝试完成控制任务，同时验证 IDO 理论预言：</p>
 
   <table>
-    <thead><tr><th>预言</th><th>内容</th><th>验证方式</th></tr></thead>
+    <thead><tr><th data-i18n="th_prediction">预言</th><th data-i18n="th_content">内容</th><th data-i18n="th_verification">验证方式</th></tr></thead>
     <tbody>
-      <tr><td>P1</td><td>IDO 永不违反物理守恒（NVR ≡ 0）</td><td>Noether-Check 门控</td></tr>
-      <tr><td>P2</td><td>IDO 比传统 RL 更快到达目标（SER ≥ 1.2）</td><td>步数对比</td></tr>
-      <tr><td>P3</td><td>传统 RL 会违反物理守恒（Baseline NVR > 0）</td><td>Baseline 评估</td></tr>
+      <tr><td>P1</td><td data-i18n="sec1_p1">IDO 永不违反物理守恒（NVR ≡ 0）</td><td data-i18n="sec1_p1_v">Noether-Check 门控</td></tr>
+      <tr><td>P2</td><td data-i18n="sec1_p2">IDO 比传统 RL 更快到达目标（SER ≥ 1.2）</td><td data-i18n="sec1_p2_v">步数对比</td></tr>
+      <tr><td>P3</td><td data-i18n="sec1_p3">传统 RL 会违反物理守恒（Baseline NVR > 0）</td><td data-i18n="sec1_p3_v">Baseline 评估</td></tr>
     </tbody>
   </table>
 </div>
 
 <!-- ═══ Section 2: 环境要求 ═══ -->
 <div id="sec2" class="section-card">
-  <h2 class="section-title">2. 环境要求</h2>
+  <h2 class="section-title" data-i18n="sec2_title">2. 环境要求</h2>
 
-  <h3 class="sub-title">系统要求</h3>
+  <h3 class="sub-title" data-i18n="sec2_sys_req">系统要求</h3>
   <ul>
-    <li><strong>操作系统</strong>: Windows / Linux / macOS</li>
-    <li><strong>Python</strong>: 3.10+（推荐 3.11 或 3.12）</li>
-    <li><strong>内存</strong>: ≥ 4 GB RAM</li>
-    <li><strong>GPU</strong>: 非必需（IDO 运行纯 CPU）；Cosmos-Predict baseline 需 GPU + CUDA</li>
+    <li data-i18n="sec2_os"><strong>操作系统</strong>: Windows / Linux / macOS</li>
+    <li data-i18n="sec2_python"><strong>Python</strong>: 3.10+（推荐 3.11 或 3.12）</li>
+    <li data-i18n="sec2_ram"><strong>内存</strong>: ≥ 4 GB RAM</li>
+    <li data-i18n="sec2_gpu"><strong>GPU</strong>: 非必需（IDO 运行纯 CPU）；Cosmos-Predict baseline 需 GPU + CUDA</li>
   </ul>
 
-  <h3 class="sub-title">安装依赖</h3>
+  <h3 class="sub-title" data-i18n="sec2_install_deps">安装依赖</h3>
   <pre><code># 核心依赖（必须）
 pip install dm_control mujoco numpy
 
@@ -118,25 +122,25 @@ pip install tdmpc2                         # TD-MPC2
 # Cosmos-Predict 世界模型（可选，需 GPU）
 pip install nvidia-cosmos-predict1         # 需 CUDA + 7B+ 模型</code></pre>
 
-  <h3 class="sub-title">一键安装</h3>
+  <h3 class="sub-title" data-i18n="sec2_one_click">一键安装</h3>
   <pre><code>pip install dm_control mujoco numpy fastapi uvicorn websockets mjviser</code></pre>
 </div>
 
 <!-- ═══ Section 3: 快速开始 ═══ -->
 <div id="sec3" class="section-card">
-  <h2 class="section-title">3. 快速开始</h2>
+  <h2 class="section-title" data-i18n="sec3_title">3. 快速开始</h2>
 
-  <h3 class="sub-title">Step 1: 安装依赖</h3>
+  <h3 class="sub-title" data-i18n="sec3_step1">Step 1: 安装依赖</h3>
   <pre><code>pip install dm_control mujoco numpy fastapi uvicorn websockets</code></pre>
-  <p>可选安装 mjviser（3D 可视化）：</p>
+  <p data-i18n="sec3_mjviser_optional">可选安装 mjviser（3D 可视化）：</p>
   <pre><code>pip install mjviser viser</code></pre>
 
-  <h3 class="sub-title">Step 2: 运行 Benchmark</h3>
-  <p>最简单的运行方式——单任务 3 个 episode：</p>
+  <h3 class="sub-title" data-i18n="sec3_step2">Step 2: 运行 Benchmark</h3>
+  <p data-i18n="sec3_simplest">最简单的运行方式——单任务 3 个 episode：</p>
   <pre><code>cd /path/to/mujoco-bench-ido
 python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 3</code></pre>
 
-  <p>输出示例：</p>
+  <p data-i18n="sec3_output_example">输出示例：</p>
   <pre><code>=== MuJoCo-Bench-IDO v0.2.0 ===
 Task: reacher-easy | Episodes: 3 | Max steps: 1000
 Episode 1: steps=1000, final_eta=2.45, NV=0, time=3.2s
@@ -147,18 +151,18 @@ avg_final_eta: 2.78
 avg_steps: 1000.0
 total_noether_violations: 0</code></pre>
 
-  <h3 class="sub-title">所有可用任务</h3>
+  <h3 class="sub-title" data-i18n="sec3_available_tasks">所有可用任务</h3>
   <table>
-    <thead><tr><th>任务名</th><th>说明</th><th>推荐入门</th></tr></thead>
+    <thead><tr><th data-i18n="th_task">任务名</th><th data-i18n="th_description">说明</th><th data-i18n="th_recommended">推荐入门</th></tr></thead>
     <tbody>
-      <tr><td><code>reacher-easy</code></td><td>2-DOF 机械臂到达目标（最简单）</td><td><span class="badge badge-green">⭐ 推荐新手</span></td></tr>
-      <tr><td><code>hopper-stand</code></td><td>单腿跳跃机器人站立</td><td>中等难度</td></tr>
-      <tr><td><code>walker-run</code></td><td>双足行走机器人跑步</td><td>较难</td></tr>
-      <tr><td><code>humanoid-stand</code></td><td>人形机器人站立（21 自由度）</td><td>最难</td></tr>
+      <tr><td><code>reacher-easy</code></td><td data-i18n="sec3_reacher_desc">2-DOF 机械臂到达目标（最简单）</td><td><span class="badge badge-green">⭐ 推荐新手</span></td></tr>
+      <tr><td><code>hopper-stand</code></td><td data-i18n="sec3_hopper_desc">单腿跳跃机器人站立</td><td data-i18n="sec3_medium">中等难度</td></tr>
+      <tr><td><code>walker-run</code></td><td data-i18n="sec3_walker_desc">双足行走机器人跑步</td><td data-i18n="sec3_harder">较难</td></tr>
+      <tr><td><code>humanoid-stand</code></td><td data-i18n="sec3_humanoid_desc">人形机器人站立（21 自由度）</td><td data-i18n="sec3_hardest">最难</td></tr>
     </tbody>
   </table>
 
-  <h3 class="sub-title">更多 CLI 参数</h3>
+  <h3 class="sub-title" data-i18n="sec3_more_cli">更多 CLI 参数</h3>
   <pre><code># 自定义 κ-Snap 阈值
 python benchmarks/run_mujoco_bench.py --task humanoid-stand --episodes 5 --kappa-thresh 0.05
 
@@ -168,138 +172,152 @@ python benchmarks/run_mujoco_bench.py --task humanoid-stand --eval-mode sip --ep
 # 自定义最大步数
 python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-steps 500</code></pre>
 
-  <h3 class="sub-title">Step 3: 启动 Web 仪表盘</h3>
+  <h3 class="sub-title" data-i18n="sec3_step3">Step 3: 启动 Web 仪表盘</h3>
   <pre><code>python webviz/run_webviz.py</code></pre>
-  <p>打开浏览器访问 <code>http://localhost:8080</code>，即可看到实时监控仪表盘。</p>
+  <p data-i18n="sec3_open_browser">打开浏览器访问 <code>http://localhost:8080</code>，即可看到实时监控仪表盘。</p>
 </div>
 
 <!-- ═══ Section 4: Web可视化仪表盘指南 ═══ -->
 <div id="sec4" class="section-card">
-  <h2 class="section-title">4. Web 可视化仪表盘指南</h2>
-  <p>启动 Web 仪表盘后，浏览器将显示完整的监控界面。</p>
+  <h2 class="section-title" data-i18n="sec4_title">4. Web 可视化仪表盘指南</h2>
+  <p data-i18n="sec4_intro">启动 Web 仪表盘后，浏览器将显示完整的监控界面。</p>
 
-  <h3 class="sub-title">顶部导航栏</h3>
+  <h3 class="sub-title" data-i18n="sec4_top_nav">顶部导航栏</h3>
   <ul>
-    <li><strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz</li>
-    <li><strong>版本号</strong>: v0.3.0</li>
-    <li><strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行</li>
-    <li><strong>导航链接</strong>: 用户手册、MuJoCo中文文档</li>
-  </ul>
-
-  <h3 class="sub-title">左侧控制面板</h3>
-  <p><strong>任务选择下拉框</strong>：选择要运行的 dm_control 任务（humanoid-stand / hopper-stand / walker-run / reacher-easy）。</p>
-  <p><strong>Episode 配置</strong>：</p>
-  <ul>
-    <li><strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）</li>
-    <li><strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）</li>
-  </ul>
-  <p><strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式（T0/T1/T2 三阶段）。</p>
-  <p><strong>mjviser 3D 按钮</strong>：点击 "🎮 Open mjviser (8081)" 按钮，在端口 8081 启动 3D 物理可视化。需先安装 <code>mjviser</code> 和 <code>viser</code>。</p>
-  <p><strong>运行 / 停止按钮</strong>：</p>
-  <ul>
-    <li><strong>Run</strong>: 开始 benchmark 运行</li>
-    <li><strong>Stop</strong>: 停止当前运行的 benchmark</li>
+    <li data-i18n="sec4_nav_project"><strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz</li>
+    <li data-i18n="sec4_nav_version"><strong>版本号</strong>: v0.3.1</li>
+    <li data-i18n="sec4_nav_status"><strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行</li>
+    <li data-i18n="sec4_nav_links"><strong>导航链接</strong>: 用户手册、MuJoCo文档（使用绝对URL http://localhost:8080/）</li>
+    <li data-i18n="sec4_nav_lang"><strong>语言切换</strong>: 中/EN按钮切换界面语言</li>
   </ul>
 
-  <h3 class="sub-title">右侧仪表盘</h3>
-  <p><strong>η 轨迹图</strong>：实时显示每个 episode 的 η（GaussEx 残差）随步数变化的曲线。η 趋近 0 说明接近目标。</p>
-  <p><strong>Noether 计数器</strong>：累计显示 Noether 违规次数。理想状态：IDO 模式下 NVR ≡ 0。</p>
-  <p><strong>κ-Snap 状态</strong>：显示当前 κ-Snap 门控是否触发（η < δ_K → snap，η ≥ δ_K → 探索）。</p>
-  <p><strong>ψ-Anchor 面板</strong>：显示 ψ-Anchor 元管理层状态：</p>
+  <h3 class="sub-title" data-i18n="sec4_left_panel">左侧控制面板</h3>
+  <p data-i18n="sec4_task_select"><strong>任务选择下拉框</strong>：选择要运行的 dm_control 任务（humanoid-stand / hopper-stand / walker-run / reacher-easy）。</p>
+  <p data-i18n="sec4_episode_config"><strong>Episode 配置</strong>：</p>
   <ul>
-    <li>当前演化策略（light/freeze）</li>
-    <li>epiplexity 评分</li>
-    <li>动态调整的 δ_K 值</li>
+    <li data-i18n="sec4_ep_count"><strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）</li>
+    <li data-i18n="sec4_max_steps"><strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）</li>
   </ul>
-  <p><strong>IC-Value 柱状图</strong>：各 Motor Primitive 的 IC-Value 评分柱状图，显示哪个元动作被优先选择。</p>
-  <p><strong>SIP-Bench 结果面板</strong>（SIP 模式下）：显示 T0/T1/T2 三阶段的结果对比：</p>
+  <p data-i18n="sec4_sip_toggle"><strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式（T0/T1/T2 三阶段）。</p>
+  <p data-i18n="sec4_3d_scene"><strong>3D 场景选择</strong>：下拉框选择 3D 可视化场景——"默认 (humanoid-stand)" 或 "障碍竞技场"。</p>
+  <p data-i18n="sec4_mjviser_btn"><strong>mjviser 3D 按钮</strong>：点击 "🎮 Open mjviser (8081)" 按钮，在端口 8081 启动 3D 物理可视化。机器人将在仿真循环中自动运动。</p>
+  <p data-i18n="sec4_run_stop"><strong>运行 / 停止按钮</strong>：</p>
   <ul>
-    <li>Retention Gain（>1 表示改善保持）</li>
-    <li>Stability Index（<1 表示更稳定）</li>
+    <li data-i18n="sec4_run"><strong>Run</strong>: 开始 benchmark 运行</li>
+    <li data-i18n="sec4_stop"><strong>Stop</strong>: 停止当前运行的 benchmark</li>
   </ul>
 
-  <h3 class="sub-title">底部状态栏</h3>
+  <h3 class="sub-title" data-i18n="sec4_right_dashboard">右侧仪表盘</h3>
+  <p data-i18n="sec4_eta_chart"><strong>η 轨迹图</strong>：实时显示每个 episode 的 η（GaussEx 残差）随步数变化的曲线。η 趋近 0 说明接近目标。</p>
+  <p data-i18n="sec4_noether"><strong>Noether 计数器</strong>：累计显示 Noether 违规次数。理想状态：IDO 模式下 NVR ≡ 0。</p>
+  <p data-i18n="sec4_kappa"><strong>κ-Snap 状态</strong>：显示当前 κ-Snap 门控是否触发（η < δ_K → snap，η ≥ δ_K → 探索）。</p>
+  <p data-i18n="sec4_psi"><strong>ψ-Anchor 面板</strong>：显示 ψ-Anchor 元管理层状态：</p>
   <ul>
-    <li>当前任务名</li>
-    <li>当前 episode / 总 episode</li>
-    <li>当前步数</li>
-    <li>mjviser 可用状态</li>
+    <li data-i18n="sec4_psi_li1">当前演化策略（light/freeze）</li>
+    <li data-i18n="sec4_psi_li2">epiplexity 评分</li>
+    <li data-i18n="sec4_psi_li3">动态调整的 δ_K 值</li>
+  </ul>
+  <p data-i18n="sec4_ic_chart"><strong>IC-Value 柱状图</strong>：各 Motor Primitive 的 IC-Value 评分柱状图，显示哪个元动作被优先选择。</p>
+  <p data-i18n="sec4_sip_results"><strong>SIP-Bench 结果面板</strong>（SIP 模式下）：显示 T0/T1/T2 三阶段的结果对比：</p>
+  <ul>
+    <li data-i18n="sec4_retention">Retention Gain（>1 表示改善保持）</li>
+    <li data-i18n="sec4_stability">Stability Index（<1 表示更稳定）</li>
+  </ul>
+
+  <h3 class="sub-title" data-i18n="sec4_bottom_bar">底部状态栏</h3>
+  <ul>
+    <li data-i18n="sec4_bar_task">当前任务名</li>
+    <li data-i18n="sec4_bar_episode">当前 episode / 总 episode</li>
+    <li data-i18n="sec4_bar_step">当前步数</li>
+    <li data-i18n="sec4_bar_mjviser">mjviser 可用状态</li>
   </ul>
 </div>
 
 <!-- ═══ Section 5: mjviser 3D可视化指南 ═══ -->
 <div id="sec5" class="section-card">
-  <h2 class="section-title">5. mjviser 3D 可视化指南</h2>
+  <h2 class="section-title" data-i18n="sec5_title">5. mjviser 3D 可视化指南</h2>
 
-  <h3 class="sub-title">启动步骤</h3>
+  <h3 class="sub-title" data-i18n="sec5_launch">启动步骤</h3>
   <ol>
-    <li>安装 mjviser 和 viser：<code>pip install mjviser viser</code></li>
-    <li>在 Web 仪表盘中点击 "🎮 Open mjviser (8081)" 按钮</li>
-    <li>等待几秒钟，mjviser 服务在端口 8081 启动</li>
-    <li>打开浏览器访问 <code>http://localhost:8081</code></li>
+    <li data-i18n="sec5_li1">安装 mjviser 和 viser：<code>pip install mjviser viser</code></li>
+    <li data-i18n="sec5_li2">在 Web 仪表盘中选择3D场景类型（默认或障碍竞技场）</li>
+    <li data-i18n="sec5_li3">点击 "🎮 Open mjviser (8081)" 按钮</li>
+    <li data-i18n="sec5_li4">等待几秒钟，mjviser 服务在端口 8081 启动</li>
+    <li data-i18n="sec5_li5">打开浏览器访问 <code>http://localhost:8081</code>，机器人将自动运动</li>
   </ol>
 
-  <h3 class="sub-title">3D 交互操作</h3>
-  <p>在 mjviser 3D 视窗中，你可以：</p>
+  <h3 class="sub-title" data-i18n="sec5_interaction">3D 交互操作</h3>
+  <p data-i18n="sec5_inter_desc">在 mjviser 3D 视窗中，你可以：</p>
   <ul>
-    <li><strong>旋转视角</strong>: 鼠标左键拖拽</li>
-    <li><strong>缩放</strong>: 鼠标滚轮</li>
-    <li><strong>平移</strong>: 鼠标右键拖拽</li>
-    <li><strong>选择关节</strong>: 点击关节高亮</li>
-    <li><strong>实时物理</strong>: 查看人形机器人当前姿态</li>
+    <li data-i18n="sec5_rotate"><strong>旋转视角</strong>: 鼠标左键拖拽</li>
+    <li data-i18n="sec5_zoom"><strong>缩放</strong>: 鼼标滚轮</li>
+    <li data-i18n="sec5_pan"><strong>平移</strong>: 鼼标右键拖拽</li>
+    <li data-i18n="sec5_select"><strong>选择关节</strong>: 点击关节高亮</li>
+    <li data-i18n="sec5_realtime"><strong>实时仿真</strong>: 机器人通过仿真循环自动运动（随机动作或 IDO 策略）</li>
   </ul>
 
-  <h3 class="sub-title">注意事项</h3>
-  <ul>
-    <li>mjviser 服务使用端口 <strong>8081</strong>，FastAPI 仪表盘使用端口 <strong>8080</strong>，两者不冲突</li>
-    <li>mjviser 只能同时运行一个实例，重复点击按钮会返回 "already_running" 状态</li>
-    <li>关闭浏览器页面不会停止 mjviser 服务，需要重启 webviz 服务来停止</li>
-  </ul>
-
-  <h3 class="sub-title">故障排查</h3>
+  <h3 class="sub-title" data-i18n="sec5_scenes">3D 场景类型</h3>
+  <p data-i18n="sec5_scene_desc">v0.3.1 新增场景选择功能：</p>
   <table>
-    <thead><tr><th>问题</th><th>解决方案</th></tr></thead>
+    <thead><tr><th data-i18n="th_scene">场景</th><th data-i18n="th_description">说明</th></tr></thead>
     <tbody>
-      <tr><td>按钮显示 "mjviser not installed"</td><td>运行 <code>pip install mjviser viser</code></td></tr>
-      <tr><td>8081 端口打不开</td><td>检查防火墙，或等待 3-5 秒后刷新</td></tr>
-      <tr><td>3D 视窗空白</td><td>确认 dm_control 和 mujoco 正常安装</td></tr>
-      <tr><td>启动失败</td><td>查看终端输出的 <code>mjviser viewer failed:</code> 错误信息</td></tr>
+      <tr><td data-i18n="sec5_plain">默认 (humanoid-stand)</td><td data-i18n="sec5_plain_desc">标准 dm_control humanoid-stand 环境</td></tr>
+      <tr><td data-i18n="sec5_obstacle">障碍竞技场</td><td data-i18n="sec5_obstacle_desc">包含墙体、圆柱、方块障碍物和红色目标球的自定义场景</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title" data-i18n="sec5_notes">注意事项</h3>
+  <ul>
+    <li data-i18n="sec5_note1">mjviser 服务使用端口 <strong>8081</strong>，FastAPI 仪表盘使用端口 <strong>8080</strong>，两者不冲突</li>
+    <li data-i18n="sec5_note2">mjviser 只能同时运行一个实例，重复点击按钮会返回 "already_running" 状态</li>
+    <li data-i18n="sec5_note3">关闭浏览器页面不会停止 mjviser 服务和仿真循环</li>
+    <li data-i18n="sec5_note4">导航链接使用绝对URL（http://localhost:8080/），不会误解析到8081端口</li>
+  </ul>
+
+  <h3 class="sub-title" data-i18n="sec5_troubleshoot">故障排查</h3>
+  <table>
+    <thead><tr><th data-i18n="th_problem">问题</th><th data-i18n="th_solution">解决方案</th></tr></thead>
+    <tbody>
+      <tr><td data-i18n="sec5_prob1">按钮显示 "mjviser not installed"</td><td data-i18n="sec5_sol1">运行 <code>pip install mjviser viser</code></td></tr>
+      <tr><td data-i18n="sec5_prob2">8081 端口打不开</td><td data-i18n="sec5_sol2">检查防火墙，或等待 3-5 秒后刷新</td></tr>
+      <tr><td data-i18n="sec5_prob3">3D 视窗空白</td><td data-i18n="sec5_sol3">确认 dm_control 和 mujoco 正常安装</td></tr>
+      <tr><td data-i18n="sec5_prob4">机器人静止不动</td><td data-i18n="sec5_sol4">v0.3.1 已加入仿真循环，机器人应自动运动</td></tr>
     </tbody>
   </table>
 </div>
 
 <!-- ═══ Section 6: SIP-Bench模式 ═══ -->
 <div id="sec6" class="section-card">
-  <h2 class="section-title">6. SIP-Bench 模式</h2>
+  <h2 class="section-title" data-i18n="sec6_title">6. SIP-Bench 模式</h2>
 
-  <h3 class="sub-title">什么是 SIP-Bench？</h3>
-  <p>SIP-Bench（Self-evolving Iteration Protocol Benchmark）是 IDO 的纵向评估协议，测量 Agent 在<strong>学习→适应→保持</strong>三个阶段的性能变化。</p>
+  <h3 class="sub-title" data-i18n="sec6_what">什么是 SIP-Bench？</h3>
+  <p data-i18n="sec6_desc">SIP-Bench（Self-evolving Iteration Protocol Benchmark）是 IDO 的纵向评估协议，测量 Agent 在<strong>学习→适应→保持</strong>三个阶段的性能变化。</p>
 
-  <h3 class="sub-title">T0/T1/T2 三阶段</h3>
+  <h3 class="sub-title" data-i18n="sec6_phases">T0/T1/T2 三阶段</h3>
   <table>
-    <thead><tr><th>阶段</th><th>名称</th><th>说明</th></tr></thead>
+    <thead><tr><th data-i18n="th_phase">阶段</th><th data-i18n="th_name">名称</th><th data-i18n="th_description">说明</th></tr></thead>
     <tbody>
-      <tr><td><strong>T0</strong></td><td>初始基线</td><td>运行 IDO Agent，ψ-Anchor 观察但不主动调整</td></tr>
-      <tr><td><strong>T1</strong></td><td>迭代演化</td><td>ψ-Anchor 主动演化（light/freeze 循环），调整 δ_K 和 Motor Primitive IC-Value</td></tr>
-      <tr><td><strong>T2</strong></td><td>保持测试</td><td>使用 T1 演化后的策略，但不再进一步演化，测试改善是否持久</td></tr>
+      <tr><td><strong>T0</strong></td><td data-i18n="sec6_t0_name">初始基线</td><td data-i18n="sec6_t0_desc">运行 IDO Agent，ψ-Anchor 观察但不主动调整</td></tr>
+      <tr><td><strong>T1</strong></td><td data-i18n="sec6_t1_name">迭代演化</td><td data-i18n="sec6_t1_desc">ψ-Anchor 主动演化（light/freeze 循环），调整 δ_K 和 Motor Primitive IC-Value</td></tr>
+      <tr><td><strong>T2</strong></td><td data-i18n="sec6_t2_name">保持测试</td><td data-i18n="sec6_t2_desc">使用 T1 演化后的策略，但不再进一步演化，测试改善是否持久</td></tr>
     </tbody>
   </table>
 
-  <h3 class="sub-title">关键指标</h3>
-  <p><strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps</p>
+  <h3 class="sub-title" data-i18n="sec6_metrics">关键指标</h3>
+  <p data-i18n="sec6_retention_formula"><strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps</p>
   <ul>
-    <li>> 1 → T2 比 T0 更快（改善持久）✅</li>
-    <li>= 1 → 无变化</li>
-    <li>< 1 → T2 更慢（改善未保持）</li>
+    <li data-i18n="sec6_retention_good">> 1 → T2 比 T0 更快（改善持久）✅</li>
+    <li data-i18n="sec6_retention_neutral">= 1 → 无变化</li>
+    <li data-i18n="sec6_retention_bad">< 1 → T2 更慢（改善未保持）</li>
   </ul>
-  <p><strong>Stability Index</strong> = T2_std_steps / T0_std_steps</p>
+  <p data-i18n="sec6_stability_formula"><strong>Stability Index</strong> = T2_std_steps / T0_std_steps</p>
   <ul>
-    <li>< 1 → T2 比 T0 更稳定（方差降低）✅</li>
-    <li>= 1 → 稳定性相同</li>
-    <li>> 1 → T2 更不稳定</li>
+    <li data-i18n="sec6_stability_good">< 1 → T2 比 T0 更稳定（方差降低）✅</li>
+    <li data-i18n="sec6_stability_neutral">= 1 → 稳定性相同</li>
+    <li data-i18n="sec6_stability_bad">> 1 → T2 更不稳定</li>
   </ul>
 
-  <h3 class="sub-title">运行 SIP-Bench</h3>
+  <h3 class="sub-title" data-i18n="sec6_run">运行 SIP-Bench</h3>
   <pre><code># CLI 方式
 python benchmarks/run_mujoco_bench.py --task humanoid-stand --eval-mode sip --episodes 5 --evolution-rounds 3
 
@@ -309,138 +327,138 @@ python benchmarks/run_mujoco_bench.py --task humanoid-stand --eval-mode sip --ep
 
 <!-- ═══ Section 7: 核心概念通俗解释 ═══ -->
 <div id="sec7" class="section-card">
-  <h2 class="section-title">7. 核心概念通俗解释</h2>
+  <h2 class="section-title" data-i18n="sec7_title">7. 核心概念通俗解释</h2>
 
-  <h3 class="sub-title">η (GaussEx) — 距离目标的度量</h3>
+  <h3 class="sub-title" data-i18n="sec7_eta">η (GaussEx) — 距离目标的度量</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: η 就像是你离家还有多远。越接近目标，η 越小，就像高斯分布——越靠近中心点密度越高。η 不是简单的距离，而是综合了位置、姿态、能量、速度四个维度的"加权距离平方"。
+    <p data-i18n="sec7_eta_quote"><strong>通俗理解</strong>: η 就像是你离家还有多远。越接近目标，η 越小，就像高斯分布——越靠近中心点密度越高。η 不是简单的距离，而是综合了位置、姿态、能量、速度四个维度的"加权距离平方"。</p>
   </div>
-  <p>公式：<code>η = w_pos · ‖ee − target‖² + w_ori · tilt² + w_eng · max(0, E − E_budget)² + w_vel · ‖v_ee‖²</code></p>
+  <p data-i18n="sec7_eta_formula">公式：<code>η = w_pos · ‖ee − target‖² + w_ori · tilt² + w_eng · max(0, E − E_budget)² + w_vel · ‖v_ee‖²</code></p>
 
-  <h3 class="sub-title">Noether 违规 — 物理守恒定律被违反</h3>
+  <h3 class="sub-title" data-i18n="sec7_noether">Noether 违规 — 物理守恒定律被违反</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: Noether 违规就是"物理定律被违反的次数"。能量不该凭空产生或消失，力矩不该超过电机限制，机器人不该自己撞自己。IDO 的 Noether-Check 就像物理老师批改作业——每个动作都要通过物理定律考试。
+    <p data-i18n="sec7_noether_quote"><strong>通俗理解</strong>: Noether 违规就是"物理定律被违反的次数"。能量不该凭空产生或消失，力矩不该超过电机限制，机器人不该自己撞自己。IDO 的 Noether-Check 就像物理老师批改作业——每个动作都要通过物理定律考试。</p>
   </div>
-  <p>三重守恒门：</p>
+  <p data-i18n="sec7_noether_gates">三重守恒门：</p>
   <ol>
-    <li><strong>能量门</strong>: ΔE ≤ max_energy_inject + ε（能量不能凭空出现）</li>
-    <li><strong>力矩门</strong>: |actuator_force| ≤ MAX_TORQUE × margin（不能超功率）</li>
-    <li><strong>碰撞门</strong>: min_geom_distance ≥ threshold（不能自己撞自己）</li>
+    <li data-i18n="sec7_gate_e"><strong>能量门</strong>: ΔE ≤ max_energy_inject + ε（能量不能凭空出现）</li>
+    <li data-i18n="sec7_gate_f"><strong>力矩门</strong>: |actuator_force| ≤ MAX_TORQUE × margin（不能超功率）</li>
+    <li data-i18n="sec7_gate_c"><strong>碰撞门</strong>: min_geom_distance ≥ threshold（不能自己撞自己）</li>
   </ol>
 
-  <h3 class="sub-title">κ-Snap 门控 — 想清楚再行动</h3>
+  <h3 class="sub-title" data-i18n="sec7_kappa">κ-Snap 门控 — 想清楚再行动</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: κ-Snap 门控就像是"当优化足够收敛时才'扣合'执行"。还没想清楚就行动是危险的——η 太大说明还在探索，只有当 η 降到阈值以下（η < δ_K），才认为当前方向足够好，可以"扣合"到 PD 控制精细调整。
+    <p data-i18n="sec7_kappa_quote"><strong>通俗理解</strong>: κ-Snap 门控就像是"当优化足够收敛时才'扣合'执行"。还没想清楚就行动是危险的——η 太大说明还在探索，只有当 η 降到阈值以下（η < δ_K），才认为当前方向足够好，可以"扣合"到 PD 控制精细调整。</p>
   </div>
   <ul>
-    <li>η ≥ δ_K → 探索模式（Motor Primitive 尝试不同策略）</li>
-    <li>η < δ_K → κ-Snap 模式（PD 稳定控制精细收敛）</li>
+    <li data-i18n="sec7_kappa_explore">η ≥ δ_K → 探索模式（Motor Primitive 尝试不同策略）</li>
+    <li data-i18n="sec7_kappa_snap">η < δ_K → κ-Snap 模式（PD 稳定控制精细收敛）</li>
   </ul>
 
-  <h3 class="sub-title">ψ-Anchor — 元管理层（教练角色）</h3>
+  <h3 class="sub-title" data-i18n="sec7_psi">ψ-Anchor — 元管理层（教练角色）</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: ψ-Anchor 就像教练看比赛数据调整战术。它监测 η 的趋势（上升、停滞、下降），动态调整 δ_K 阈值，决定是"放开探索"（light策略）还是"锁定当前最优"（freeze策略）。
+    <p data-i18n="sec7_psi_quote"><strong>通俗理解</strong>: ψ-Anchor 就像教练看比赛数据调整战术。它监测 η 的趋势（上升、停滞、下降），动态调整 δ_K 阈值，决定是"放开探索"（light策略）还是"锁定当前最优"（freeze策略）。</p>
   </div>
   <ul>
-    <li>η 下降 → 收紧 δ_K（×0.8），追求更精确</li>
-    <li>η 停滞 → 放宽 δ_K（×1.2），打破僵局</li>
-    <li>η 上升 → 保持 δ_K 不变，避免恶化</li>
+    <li data-i18n="sec7_psi_down">η 下降 → 收紧 δ_K（×0.8），追求更精确</li>
+    <li data-i18n="sec7_psi_stall">η 停滞 → 放宽 δ_K（×1.2），打破僵局</li>
+    <li data-i18n="sec7_psi_up">η 上升 → 保持 δ_K 不变，避免恶化</li>
   </ul>
 
-  <h3 class="sub-title">FlowMatching — 预判未来走势</h3>
+  <h3 class="sub-title" data-i18n="sec7_flow">FlowMatching — 预判未来走势</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: FlowMatching 就像天气预报——预测 η 的未来轨迹。如果预测 η 不会下降（停滞），就触发 ψ-Anchor 演化，换策略。
+    <p data-i18n="sec7_flow_quote"><strong>通俗理解</strong>: FlowMatching 就像天气预报——预测 η 的未来轨迹。如果预测 η 不会下降（停滞），就触发 ψ-Anchor 演化，换策略。</p>
   </div>
-  <p>关键指标：</p>
+  <p data-i18n="sec7_flow_metrics">关键指标：</p>
   <ul>
-    <li><strong>Hesitation-RMSE</strong>: η 来回震荡的幅度（犹豫不决程度）</li>
-    <li><strong>Retry-VOC</strong>: η 方向频繁翻转的频率（反复尝试程度）</li>
+    <li data-i18n="sec7_hesitation"><strong>Hesitation-RMSE</strong>: η 来回震荡的幅度（犹豫不决程度）</li>
+    <li data-i18n="sec7_retry"><strong>Retry-VOC</strong>: η 方向频繁翻转的频率（反复尝试程度）</li>
   </ul>
 
-  <h3 class="sub-title">epiplexity — 策略困惑度</h3>
+  <h3 class="sub-title" data-i18n="sec7_epiplexity">epiplexity — 策略困惑度</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: epiplexity 衡量策略的"困惑程度"。困惑度高说明当前策略不够用，需要演化新策略。就像考试前越焦虑，说明准备越不充分。
+    <p data-i18n="sec7_epiplexity_quote"><strong>通俗理解</strong>: epiplexity 衡量策略的"困惑程度"。困惑度高说明当前策略不够用，需要演化新策略。就像考试前越焦虑，说明准备越不充分。</p>
   </div>
-  <p>公式：<code>epiplexity = n_invariants × (1/δ_K) × log(max_energy)</code></p>
+  <p data-i18n="sec7_epiplexity_formula">公式：<code>epiplexity = n_invariants × (1/δ_K) × log(max_energy)</code></p>
 
-  <h3 class="sub-title">VG-Pair ≠ GAN — 不是对抗训练</h3>
+  <h3 class="sub-title" data-i18n="sec7_vgpair">VG-Pair ≠ GAN — 不是对抗训练</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: VG-Pair（Verifier-Generator Pair）和 GAN（生成对抗网络）看起来都有"生成器+验证器"，但本质完全不同。GAN 的验证器是<strong>学出来的</strong>，生成器试图骗过验证器——就像考试时学生和考官互相博弈。VG-Pair 的验证器是<strong>物理定律本身</strong>——你不可能骗过牛顿定律，能量守恒就是守恒。
+    <p data-i18n="sec7_vgpair_quote"><strong>通俗理解</strong>: VG-Pair（Verifier-Generator Pair）和 GAN（生成对抗网络）看起来都有"生成器+验证器"，但本质完全不同。GAN 的验证器是<strong>学出来的</strong>，生成器试图骗过验证器——就像考试时学生和考官互相博弈。VG-Pair 的验证器是<strong>物理定律本身</strong>——你不可能骗过牛顿定律，能量守恒就是守恒。</p>
   </div>
   <table>
-    <thead><tr><th>对比</th><th>VG-Pair</th><th>GAN</th></tr></thead>
+    <thead><tr><th data-i18n="th_compare">对比</th><th data-i18n="th_vgpair">VG-Pair</th><th data-i18n="th_gan">GAN</th></tr></thead>
     <tbody>
-      <tr><td>目标</td><td>生成→验证→修正→执行</td><td>min_G max_D 对抗博弈</td></tr>
-      <tr><td>验证器</td><td>物理定律（不可欺骗）</td><td>学出来的判别器（可以骗）</td></tr>
-      <tr><td>Soundness</td><td>物理定律保证</td><td>无形式化保证</td></tr>
-      <tr><td>训练方式</td><td>无对抗训练</td><td>对抗训练</td></tr>
+      <tr><td data-i18n="sec7_vg_goal">目标</td><td data-i18n="sec7_vg_goal_desc">生成→验证→修正→执行</td><td data-i18n="sec7_gan_goal_desc">min_G max_D 对抗博弈</td></tr>
+      <tr><td data-i18n="sec7_vg_verifier">验证器</td><td data-i18n="sec7_vg_verifier_desc">物理定律（不可欺骗）</td><td data-i18n="sec7_gan_verifier_desc">学出来的判别器（可以骗）</td></tr>
+      <tr><td data-i18n="sec7_vg_sound">Soundness</td><td data-i18n="sec7_vg_sound_desc">物理定律保证</td><td data-i18n="sec7_gan_sound_desc">无形式化保证</td></tr>
+      <tr><td data-i18n="sec7_vg_train">训练方式</td><td data-i18n="sec7_vg_train_desc">无对抗训练</td><td data-i18n="sec7_gan_train_desc">对抗训练</td></tr>
     </tbody>
   </table>
 
-  <h3 class="sub-title">C-IPP — 连续交互式证明协议</h3>
+  <h3 class="sub-title" data-i18n="sec7_cipp">C-IPP — 连续交互式证明协议</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: C-IPP 就像数学证明的交互式验证过程——提出一个解决方案→验证→如果验证失败就修正→再次验证→通过后执行。不是一次性提交答案，而是反复验证直到确定正确。
+    <p data-i18n="sec7_cipp_quote"><strong>通俗理解</strong>: C-IPP 就像数学证明的交互式验证过程——提出一个解决方案→验证→如果验证失败就修正→再次验证→通过后执行。不是一次性提交答案，而是反复验证直到确定正确。</p>
   </div>
-  <p>流程：<strong>生成 → 验证 → 拒绝 → 修正 → 接受 → 执行</strong></p>
+  <p data-i18n="sec7_cipp_flow">流程：<strong>生成 → 验证 → 拒绝 → 修正 → 接受 → 执行</strong></p>
 
-  <h3 class="sub-title">GEL — Goal-EML 注入损失</h3>
+  <h3 class="sub-title" data-i18n="sec7_gel">GEL — Goal-EML 注入损失</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: GEL 把物理约束当作"惩罚项"，迫使策略遵守物理定律。就像给自动驾驶加上"不能闯红灯"的硬约束——不是靠学习后可能遵守，而是从一开始就被强制遵守。
+    <p data-i18n="sec7_gel_quote"><strong>通俗理解</strong>: GEL 把物理约束当作"惩罚项"，迫使策略遵守物理定律。就像给自动驾驶加上"不能闯红灯"的硬约束——不是靠学习后可能遵守，而是从一开始就被强制遵守。</p>
   </div>
-  <p>公式：<code>L_GEL = λ₁ · ‖η_Noether‖² + λ₂ · ‖η_contact‖² + λ₃ · ‖η_task‖² + λ₄ · hinge(task_success)</code></p>
+  <p data-i18n="sec7_gel_formula">公式：<code>L_GEL = λ₁ · ‖η_Noether‖² + λ₂ · ‖η_contact‖² + λ₃ · ‖η_task‖² + λ₄ · hinge(task_success)</code></p>
 
-  <h3 class="sub-title">Dual-Engine AGI — 双引擎驱动</h3>
+  <h3 class="sub-title" data-i18n="sec7_dual">Dual-Engine AGI — 双引擎驱动</h3>
   <div class="quote-block">
-    <strong>通俗理解</strong>: Dual-Engine AGI 用两个引擎驱动——数字引擎（LLM 推理，像大脑思考）+ 具身引擎（物理执行，像身体行动）。大脑负责规划和逻辑验证，身体负责物理世界验证和执行。两个引擎各自独立验证（VG-Pair），互相补充。
+    <p data-i18n="sec7_dual_quote"><strong>通俗理解</strong>: Dual-Engine AGI 用两个引擎驱动——数字引擎（LLM 推理，像大脑思考）+ 具身引擎（物理执行，像身体行动）。大脑负责规划和逻辑验证，身体负责物理世界验证和执行。两个引擎各自独立验证（VG-Pair），互相补充。</p>
   </div>
 </div>
 
 <!-- ═══ Section 8: Benchmark任务详解 ═══ -->
 <div id="sec8" class="section-card">
-  <h2 class="section-title">8. Benchmark 任务详解</h2>
+  <h2 class="section-title" data-i18n="sec8_title">8. Benchmark 任务详解</h2>
 
-  <h3 class="sub-title">humanoid-stand: 人形机器人站立</h3>
+  <h3 class="sub-title" data-i18n="sec8_humanoid">humanoid-stand: 人形机器人站立</h3>
   <ul>
-    <li><strong>自由度</strong>: 21 DOF（3D 空间）</li>
-    <li><strong>目标</strong>: 人形机器人从初始姿态站立保持平衡</li>
-    <li><strong>难点</strong>: 多关节协调、重心控制、地面接触约束</li>
-    <li><strong>GoalEML 不变量</strong>: ee_at_target, torso_upright, no_self_collide</li>
-    <li><strong>能量预算</strong>: 500 J</li>
+    <li data-i18n="sec8_h_dof"><strong>自由度</strong>: 21 DOF（3D 空间）</li>
+    <li data-i18n="sec8_h_goal"><strong>目标</strong>: 人形机器人从初始姿态站立保持平衡</li>
+    <li data-i18n="sec8_h_hard"><strong>难点</strong>: 多关节协调、重心控制、地面接触约束</li>
+    <li data-i18n="sec8_h_eml"><strong>GoalEML 不变量</strong>: ee_at_target, torso_upright, no_self_collide</li>
+    <li data-i18n="sec8_h_energy"><strong>能量预算</strong>: 500 J</li>
   </ul>
 
-  <h3 class="sub-title">hopper-stand: 单腿跳跃机器人站立</h3>
+  <h3 class="sub-title" data-i18n="sec8_hopper">hopper-stand: 单腿跳跃机器人站立</h3>
   <ul>
-    <li><strong>自由度</strong>: 6 DOF</li>
-    <li><strong>目标</strong>: 单腿机器人站立保持平衡</li>
-    <li><strong>难点</strong>: 单腿平衡、足部接触约束</li>
-    <li><strong>GoalEML 不变量</strong>: torso_upright, foot_on_ground, no_self_collide</li>
-    <li><strong>能量预算</strong>: 200 J</li>
+    <li data-i18n="sec8_hop_dof"><strong>自由度</strong>: 6 DOF</li>
+    <li data-i18n="sec8_hop_goal"><strong>目标</strong>: 单腿机器人站立保持平衡</li>
+    <li data-i18n="sec8_hop_hard"><strong>难点</strong>: 单腿平衡、足部接触约束</li>
+    <li data-i18n="sec8_hop_eml"><strong>GoalEML 不变量</strong>: torso_upright, foot_on_ground, no_self_collide</li>
+    <li data-i18n="sec8_hop_energy"><strong>能量预算</strong>: 200 J</li>
   </ul>
 
-  <h3 class="sub-title">walker-run: 双足行走机器人跑步</h3>
+  <h3 class="sub-title" data-i18n="sec8_walker">walker-run: 双足行走机器人跑步</h3>
   <ul>
-    <li><strong>自由度</strong>: 6 DOF</li>
-    <li><strong>目标</strong>: 双足机器人向前跑步不跌倒</li>
-    <li><strong>难点</strong>: 连续前进、动态平衡、跑步周期</li>
-    <li><strong>GoalEML 不变量</strong>: com_x_advancing, not_fallen, no_self_collide</li>
-    <li><strong>能量预算</strong>: 600 J</li>
+    <li data-i18n="sec8_w_dof"><strong>自由度</strong>: 6 DOF</li>
+    <li data-i18n="sec8_w_goal"><strong>目标</strong>: 双足机器人向前跑步不跌倒</li>
+    <li data-i18n="sec8_w_hard"><strong>难点</strong>: 连续前进、动态平衡、跑步周期</li>
+    <li data-i18n="sec8_w_eml"><strong>GoalEML 不变量</strong>: com_x_advancing, not_fallen, no_self_collide</li>
+    <li data-i18n="sec8_w_energy"><strong>能量预算</strong>: 600 J</li>
   </ul>
 
-  <h3 class="sub-title">reacher-easy: 2-DOF 机械臂到达目标</h3>
+  <h3 class="sub-title" data-i18n="sec8_reacher">reacher-easy: 2-DOF 机械臂到达目标</h3>
   <ul>
-    <li><strong>自由度</strong>: 2 DOF（最简单）</li>
-    <li><strong>目标</strong>: 机械臂末端到达目标位置</li>
-    <li><strong>难点</strong>: 简单到达，适合入门调试</li>
-    <li><strong>GoalEML 不变量</strong>: ee_at_target</li>
-    <li><strong>能量预算</strong>: 50 J</li>
+    <li data-i18n="sec8_r_dof"><strong>自由度</strong>: 2 DOF（最简单）</li>
+    <li data-i18n="sec8_r_goal"><strong>目标</strong>: 机械臂末端到达目标位置</li>
+    <li data-i18n="sec8_r_hard"><strong>难点</strong>: 简单到达，适合入门调试</li>
+    <li data-i18n="sec8_r_eml"><strong>GoalEML 不变量</strong>: ee_at_target</li>
+    <li data-i18n="sec8_r_energy"><strong>能量预算</strong>: 50 J</li>
   </ul>
 </div>
 
 <!-- ═══ Section 9: Baseline对比使用 ═══ -->
 <div id="sec9" class="section-card">
-  <h2 class="section-title">9. Baseline 对比使用</h2>
+  <h2 class="section-title" data-i18n="sec9_title">9. Baseline 对比使用</h2>
 
-  <h3 class="sub-title">IDO vs TD-MPC2 控制对比</h3>
+  <h3 class="sub-title" data-i18n="sec9_ido_tdmpc">IDO vs TD-MPC2 控制对比</h3>
   <pre><code># 控制对比模式（步数、NVR、SER）
 python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --episodes 5
 
@@ -450,142 +468,618 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --baseline tdmpc
 # 仅运行 IDO（无 baseline）
 python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --ido_only</code></pre>
 
-  <h3 class="sub-title">Cosmos-Predict η 预测对比</h3>
+  <h3 class="sub-title" data-i18n="sec9_cosmos">Cosmos-Predict η 预测对比</h3>
   <pre><code># η 轨迹预测对比（需 GPU + Cosmos-Predict 安装）
 python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosmos-predict</code></pre>
 
-  <h3 class="sub-title">对比指标</h3>
+  <h3 class="sub-title" data-i18n="sec9_metrics">对比指标</h3>
   <table>
-    <thead><tr><th>对比类型</th><th>模式</th><th>指标</th></tr></thead>
+    <thead><tr><th data-i18n="th_type">对比类型</th><th data-i18n="th_mode">模式</th><th data-i18n="th_metrics">指标</th></tr></thead>
     <tbody>
-      <tr><td>控制对比</td><td><code>control</code></td><td>Steps, NVR, SER, Survival Rate</td></tr>
-      <tr><td>预测对比</td><td><code>cosmos-predict</code></td><td>η trajectory RMSE, η correlation</td></tr>
+      <tr><td data-i18n="sec9_control">控制对比</td><td><code>control</code></td><td data-i18n="sec9_control_metrics">Steps, NVR, SER, Survival Rate</td></tr>
+      <tr><td data-i18n="sec9_predict">预测对比</td><td><code>cosmos-predict</code></td><td data-i18n="sec9_predict_metrics">η trajectory RMSE, η correlation</td></tr>
     </tbody>
   </table>
 
-  <h3 class="sub-title">优雅降级</h3>
-  <p>如果 baseline 包未安装，系统会自动降级：</p>
+  <h3 class="sub-title" data-i18n="sec9_graceful">优雅降级</h3>
+  <p data-i18n="sec9_graceful_desc">如果 baseline 包未安装，系统会自动降级：</p>
   <ul>
-    <li>TD-MPC2 未安装 → 使用 Random Agent 替代</li>
-    <li>Cosmos-Predict 未安装 → 跳过该 baseline</li>
-    <li>SB3 未安装 → 跳过 PPO/SAC</li>
+    <li data-i18n="sec9_graceful_tdmpc">TD-MPC2 未安装 → 使用 Random Agent 替代</li>
+    <li data-i18n="sec9_graceful_cosmos">Cosmos-Predict 未安装 → 跳过该 baseline</li>
+    <li data-i18n="sec9_graceful_sb3">SB3 未安装 → 跳过 PPO/SAC</li>
   </ul>
 </div>
 
 <!-- ═══ Section 10: 物理/数学速查表 ═══ -->
 <div id="sec10" class="section-card">
-  <h2 class="section-title">10. 大学物理/数学速查表</h2>
-  <p>边跑 Benchmark 边学，以下是 EML 映射表：</p>
+  <h2 class="section-title" data-i18n="sec10_title">10. 大学物理/数学速查表</h2>
+  <p data-i18n="sec10_intro">边跑 Benchmark 边学，以下是 EML 映射表：</p>
 
   <table>
-    <thead><tr><th>大学课程</th><th>核心概念</th><th>EML 映射</th><th>IDO 层</th></tr></thead>
+    <thead><tr><th data-i18n="th_course">大学课程</th><th data-i18n="th_concept">核心概念</th><th data-i18n="th_eml_map">EML 映射</th><th data-i18n="th_ido_layer">IDO 层</th></tr></thead>
     <tbody>
-      <tr><td>经典力学</td><td>牛顿-欧拉方程、能量守恒、Signorini 接触</td><td>Goal-EML 物理约束</td><td>L2</td></tr>
-      <tr><td>线性代数</td><td>向量空间、投影、陪集</td><td>η = 距 Goal-EML 陪集的距离</td><td>L2</td></tr>
-      <tr><td>概率论</td><td>高斯分布、概率密度</td><td>GaussEx η（越近→密度越高→η 越小）</td><td>L2</td></tr>
-      <tr><td>微积分/优化</td><td>Jacobian、梯度下降</td><td>κ-Snap 阈值门控、PD 控制</td><td>L2</td></tr>
-      <tr><td>信息论</td><td>Shannon 熵、有效复杂度</td><td>IC（信息基数）、epiplexity</td><td>L1-L4</td></tr>
-      <tr><td>微分方程</td><td>流、轨迹预测</td><td>FlowMatching η 轨迹</td><td>L1</td></tr>
+      <tr><td data-i18n="sec10_mech">经典力学</td><td data-i18n="sec10_mech_concept">牛顿-欧拉方程、能量守恒、Signorini 接触</td><td data-i18n="sec10_mech_eml">Goal-EML 物理约束</td><td>L2</td></tr>
+      <tr><td data-i18n="sec10_linalg">线性代数</td><td data-i18n="sec10_linalg_concept">向量空间、投影、陪集</td><td data-i18n="sec10_linalg_eml">η = 距 Goal-EML 陪集的距离</td><td>L2</td></tr>
+      <tr><td data-i18n="sec10_prob">概率论</td><td data-i18n="sec10_prob_concept">高斯分布、概率密度</td><td data-i18n="sec10_prob_eml">GaussEx η（越近→密度越高→η 越小）</td><td>L2</td></tr>
+      <tr><td data-i18n="sec10_calc">微积分/优化</td><td data-i18n="sec10_calc_concept">Jacobian、梯度下降</td><td data-i18n="sec10_calc_eml">κ-Snap 阈值门控、PD 控制</td><td>L2</td></tr>
+      <tr><td data-i18n="sec10_info">信息论</td><td data-i18n="sec10_info_concept">Shannon 熵、有效复杂度</td><td data-i18n="sec10_info_eml">IC（信息基数）、epiplexity</td><td>L1-L4</td></tr>
+      <tr><td data-i18n="sec10_ode">微分方程</td><td data-i18n="sec10_ode_concept">流、轨迹预测</td><td data-i18n="sec10_ode_eml">FlowMatching η 轨迹</td><td>L1</td></tr>
     </tbody>
   </table>
 
-  <h3 class="sub-title">边跑边学建议</h3>
+  <h3 class="sub-title" data-i18n="sec10_learn">边跑边学建议</h3>
   <ul>
-    <li><strong>η 曲线</strong> = "物理+数学可视化"——看 η 随时间下降的过程就是收敛过程</li>
-    <li><strong>Noether 违规</strong> = "哪个物理定律被违反了"——每种违规类型对应一个守恒定律</li>
-    <li><strong>κ-Snap 触发</strong> = "优化够收敛了才扣合"——δ_K 阈值决定何时接受当前状态</li>
-    <li><strong>SIP-Bench 阶段</strong> = "学习如何稳定"——T0→T1→T2 展示改善是否持久</li>
+    <li data-i18n="sec10_eta_learn"><strong>η 曲线</strong> = "物理+数学可视化"——看 η 随时间下降的过程就是收敛过程</li>
+    <li data-i18n="sec10_nv_learn"><strong>Noether 违规</strong> = "哪个物理定律被违反了"——每种违规类型对应一个守恒定律</li>
+    <li data-i18n="sec10_kappa_learn"><strong>κ-Snap 触发</strong> = "优化够收敛了才扣合"——δ_K 阈值决定何时接受当前状态</li>
+    <li data-i18n="sec10_sip_learn"><strong>SIP-Bench 阶段</strong> = "学习如何稳定"——T0→T1→T2 展示改善是否持久</li>
   </ul>
 </div>
 
 <!-- ═══ Section 11: 常见问题与故障排查 ═══ -->
 <div id="sec11" class="section-card">
-  <h2 class="section-title">11. 常见问题与故障排查</h2>
+  <h2 class="section-title" data-i18n="sec11_title">11. 常见问题与故障排查</h2>
 
-  <h3 class="sub-title">mjviser 启动失败</h3>
-  <p><strong>症状</strong>: 点击 mjviser 按钮后无反应或报错</p>
-  <p><strong>排查步骤</strong>:</p>
+  <h3 class="sub-title" data-i18n="sec11_mjviser_fail">mjviser 启动失败</h3>
+  <p data-i18n="sec11_mjviser_symptom"><strong>症状</strong>: 点击 mjviser 按钮后无反应或报错</p>
+  <p data-i18n="sec11_mjviser_steps"><strong>排查步骤</strong>:</p>
   <ol>
-    <li>确认安装了 mjviser 和 viser：<code>pip install mjviser viser</code></li>
-    <li>确认 dm_control 正常：<code>python -c "import dm_control.suite; print('OK')"</code></li>
-    <li>查看终端输出的 <code>mjviser viewer failed:</code> 错误信息</li>
-    <li>常见错误：<code>Viewer.__init__()</code> 参数不对 → v0.3.0 已修复此 bug</li>
+    <li data-i18n="sec11_mjviser_s1">确认安装了 mjviser 和 viser：<code>pip install mjviser viser</code></li>
+    <li data-i18n="sec11_mjviser_s2">确认 dm_control 正常：<code>python -c "import dm_control.suite; print('OK')"</code></li>
+    <li data-i18n="sec11_mjviser_s3">查看终端输出的 <code>mjviser viewer failed:</code> 错误信息</li>
+    <li data-i18n="sec11_mjviser_s4">常见错误：<code>Viewer.__init__()</code> 参数不对 → v0.3.0 已修复此 bug</li>
   </ol>
 
-  <h3 class="sub-title">端口冲突</h3>
-  <p><strong>症状</strong>: 8080 或 8081 端口无法访问</p>
-  <p><strong>排查步骤</strong>:</p>
+  <h3 class="sub-title" data-i18n="sec11_port">端口冲突</h3>
+  <p data-i18n="sec11_port_symptom"><strong>症状</strong>: 8080 或 8081 端口无法访问</p>
+  <p data-i18n="sec11_port_steps"><strong>排查步骤</strong>:</p>
   <ol>
-    <li>8080 被 FastAPI 占用是正常的——检查是否有其他 FastAPI 服务占用</li>
-    <li>8081 被 mjviser 占用是正常的——检查是否有其他 viser 服务占用</li>
-    <li>查看占用进程：<code>netstat -ano | findstr 8080</code>（Windows）或 <code>lsof -i :8080</code>（Linux）</li>
-    <li>杀死占用进程或更改端口配置</li>
+    <li data-i18n="sec11_port_s1">8080 被 FastAPI 占用是正常的——检查是否有其他 FastAPI 服务占用</li>
+    <li data-i18n="sec11_port_s2">8081 被 mjviser 占用是正常的——检查是否有其他 viser 服务占用</li>
+    <li data-i18n="sec11_port_s3">查看占用进程：<code>netstat -ano | findstr 8080</code>（Windows）或 <code>lsof -i :8080</code>（Linux）</li>
+    <li data-i18n="sec11_port_s4">杀死占用进程或更改端口配置</li>
   </ol>
 
-  <h3 class="sub-title">dm_control 兼容性</h3>
-  <p><strong>症状</strong>: <code>import dm_control</code> 报错或环境加载失败</p>
-  <p><strong>排查步骤</strong>:</p>
+  <h3 class="sub-title" data-i18n="sec11_dmctrl">dm_control 兼容性</h3>
+  <p data-i18n="sec11_dmctrl_symptom"><strong>症状</strong>: <code>import dm_control</code> 报错或环境加载失败</p>
+  <p data-i18n="sec11_dmctrl_steps"><strong>排查步骤</strong>:</p>
   <ol>
-    <li>确认 Python 版本 ≥ 3.10</li>
-    <li>安装 dm_control：<code>pip install dm_control</code></li>
-    <li>确认 mujoco 版本 ≥ 2.3.0：<code>pip show mujoco</code></li>
-    <li>dm_control 需要 mujoco 作为底层依赖</li>
+    <li data-i18n="sec11_dmctrl_s1">确认 Python 版本 ≥ 3.10</li>
+    <li data-i18n="sec11_dmctrl_s2">安装 dm_control：<code>pip install dm_control</code></li>
+    <li data-i18n="sec11_dmctrl_s3">确认 mujoco 版本 ≥ 2.3.0：<code>pip show mujoco</code></li>
+    <li data-i18n="sec11_dmctrl_s4">dm_control 需要 mujoco 作为底层依赖</li>
   </ol>
 
-  <h3 class="sub-title">GPU 需求</h3>
-  <p><strong>症状</strong>: Cosmos-Predict baseline 无法运行</p>
-  <p><strong>排查步骤</strong>:</p>
+  <h3 class="sub-title" data-i18n="sec11_gpu">GPU 需求</h3>
+  <p data-i18n="sec11_gpu_symptom"><strong>症状</strong>: Cosmos-Predict baseline 无法运行</p>
+  <p data-i18n="sec11_gpu_steps"><strong>排查步骤</strong>:</p>
   <ol>
-    <li>Cosmos-Predict 7B/14B 模型需要 CUDA GPU</li>
-    <li>检查 CUDA 是否可用：<code>python -c "import torch; print(torch.cuda.is_available())"</code></li>
-    <li>如无 GPU，跳过 Cosmos-Predict baseline（使用 <code>--ido_only</code> 参数）</li>
+    <li data-i18n="sec11_gpu_s1">Cosmos-Predict 7B/14B 模型需要 CUDA GPU</li>
+    <li data-i18n="sec11_gpu_s2">检查 CUDA 是否可用：<code>python -c "import torch; print(torch.cuda.is_available())"</code></li>
+    <li data-i18n="sec11_gpu_s3">如无 GPU，跳过 Cosmos-Predict baseline（使用 <code>--ido_only</code> 参数）</li>
   </ol>
 
-  <h3 class="sub-title">η 值异常大</h3>
-  <p><strong>症状</strong>: η 值超过 100 或 1000</p>
-  <p><strong>解释</strong>: 这是正常的——不同任务的 η 尺度不同：</p>
+  <h3 class="sub-title" data-i18n="sec11_eta_large">η 值异常大</h3>
+  <p data-i18n="sec11_eta_symptom"><strong>症状</strong>: η 值超过 100 或 1000</p>
+  <p data-i18n="sec11_eta_explain"><strong>解释</strong>: 这是正常的——不同任务的 η 尺度不同：</p>
   <ul>
-    <li>reacher-easy: η ≈ 10000（机械臂距离远，η 自然大）</li>
-    <li>walker-run: η ≈ 130（行走任务距离中等）</li>
-    <li>humanoid-stand: η ≈ 2.6（站立任务距离近）</li>
-    <li>hopper-stand: η ≈ 6.88（跳跃任务距离中等）</li>
+    <li data-i18n="sec11_eta_reacher">reacher-easy: η ≈ 10000（机械臂距离远，η 自然大）</li>
+    <li data-i18n="sec11_eta_walker">walker-run: η ≈ 130（行走任务距离中等）</li>
+    <li data-i18n="sec11_eta_humanoid">humanoid-stand: η ≈ 2.6（站立任务距离近）</li>
+    <li data-i18n="sec11_eta_hopper">hopper-stand: η ≈ 6.88（跳跃任务距离中等）</li>
   </ul>
 
-  <h3 class="sub-title">Noether 违规数很大</h3>
-  <p><strong>症状</strong>: humanoid/hopper/walker 的 NV > 2000</p>
-  <p><strong>解释</strong>: v0.2.2 数据中这三个任务确实存在大量 Noether 违规（NVR ≈ 1.47），原因：</p>
+  <h3 class="sub-title" data-i18n="sec11_nv_large">Noether 违规数很大</h3>
+  <p data-i18n="sec11_nv_symptom"><strong>症状</strong>: humanoid/hopper/walker 的 NV > 2000</p>
+  <p data-i18n="sec11_nv_explain"><strong>解释</strong>: v0.2.2 数据中这三个任务确实存在大量 Noether 违规（NVR ≈ 1.47），原因：</p>
   <ol>
-    <li>Motor Primitive 设计未充分考虑碰撞约束</li>
-    <li>能量预算参数需要调优</li>
-    <li>只有 reacher-easy 实现了 NV ≡ 0（预言 P1 在此任务上通过）</li>
+    <li data-i18n="sec11_nv_r1">Motor Primitive 设计未充分考虑碰撞约束</li>
+    <li data-i18n="sec11_nv_r2">能量预算参数需要调优</li>
+    <li data-i18n="sec11_nv_r3">只有 reacher-easy 实现了 NV ≡ 0（预言 P1 在此任务上通过）</li>
   </ol>
-  <p><strong>改善方向</strong>: 使用 SIP-Bench 模式进行演化优化，或调整 GoalEML 参数。</p>
+  <p data-i18n="sec11_nv_improve"><strong>改善方向</strong>: 使用 SIP-Bench 模式进行演化优化，或调整 GoalEML 参数。</p>
 </div>
 
 <!-- FOOTER -->
 <div style="text-align: center; padding: 32px 0; color: #64748b; border-top: 1px solid #475569; margin-top: 40px;">
-  <p>MuJoCo-Bench-IDO v0.3.0 用户手册</p>
-  <p>最后更新: 2025-07-01</p>
+  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.3.1 用户手册</p>
+  <p data-i18n="footer_line2">最后更新: 2025-07-01</p>
 </div>
 
 </div><!-- end main-content -->
 
-<!-- Sidebar active link highlighting -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- i18n LANGUAGE SWITCHING MODULE                              -->
+<!-- ═══════════════════════════════════════════════════════════ -->
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  const sections = document.querySelectorAll('.section-card[id]');
-  const navLinks = document.querySelectorAll('.sidebar a');
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        navLinks.forEach(link => link.classList.remove('active'));
-        const activeLink = document.querySelector(`.sidebar a[href="#${entry.target.id}"]`);
-        if (activeLink) activeLink.classList.add('active');
+  const i18nDict = {
+    zh: {
+      lang_btn: "中/EN",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.3.1",
+      nav_sec1: "1. 项目简介", nav_sec2: "2. 环境要求", nav_sec3: "3. 快速开始",
+      nav_sec4: "4. Web可视化仪表盘指南", nav_sec5: "5. mjviser 3D可视化指南",
+      nav_sec6: "6. SIP-Bench模式", nav_sec7: "7. 核心概念通俗解释",
+      nav_sec8: "8. Benchmark任务详解", nav_sec9: "9. Baseline对比使用",
+      nav_sec10: "10. 物理/数学速查表", nav_sec11: "11. 常见问题与故障排查",
+      header_title: "MuJoCo-Bench-IDO 用户手册",
+      header_subtitle: "版本 v0.3.1 · 最后更新 2025-07-01 · IDO/TOMAS 连续物理基准验证平台",
+      sec1_title: "1. 项目简介",
+      sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。",
+      sec1_what_is_ido: "什么是 IDO/TOMAS？",
+      sec1_ido_desc: "IDO（Information-Driven Orchestration）是一种<strong>非冯诺依曼架构</strong>的决策框架，核心思想是：",
+      sec1_ido_li1: "<strong>守恒优先</strong>（Conservation-First）：先检查物理守恒定律是否被违反，再决定下一步行动",
+      sec1_ido_li2: "<strong>方向引导</strong>（κ-Snap Gate）：通过 η（GaussEx 残差）衡量当前状态距离目标的远近，η 小到阈值以下才"扣合"执行",
+      sec1_ido_li3: "<strong>自演化</strong>（ψ-Anchor Meta-Layer）：根据 η 趋势动态调整策略，像教练看比赛数据调整战术",
+      sec1_tomas_desc: "TOMAS（Theory of Multi-Agent Systems）是 IDO 的理论基础，包含五层本体结构（L1-L5），从底层感知到顶层 Oracle 约束。",
+      sec1_what_does: "MuJoCo-Bench-IDO 做什么？",
+      sec1_does_desc: "它把 IDO 的决策循环映射到 MuJoCo 物理仿真环境，让机器人（人形、跳跃者、行走者、机械臂）在物理约束下尝试完成控制任务，同时验证 IDO 理论预言：",
+      th_prediction: "预言", th_content: "内容", th_verification: "验证方式",
+      sec1_p1: "IDO 永不违反物理守恒（NVR ≡ 0）", sec1_p1_v: "Noether-Check 门控",
+      sec1_p2: "IDO 比传统 RL 更快到达目标（SER ≥ 1.2）", sec1_p2_v: "步数对比",
+      sec1_p3: "传统 RL 会违反物理守恒（Baseline NVR > 0）", sec1_p3_v: "Baseline 评估",
+      sec2_title: "2. 环境要求", sec2_sys_req: "系统要求",
+      sec2_os: "<strong>操作系统</strong>: Windows / Linux / macOS",
+      sec2_python: "<strong>Python</strong>: 3.10+（推荐 3.11 或 3.12）",
+      sec2_ram: "<strong>内存</strong>: ≥ 4 GB RAM",
+      sec2_gpu: "<strong>GPU</strong>: 非必需（IDO 运行纯 CPU）；Cosmos-Predict baseline 需 GPU + CUDA",
+      sec2_install_deps: "安装依赖", sec2_one_click: "一键安装",
+      sec3_title: "3. 快速开始", sec3_step1: "Step 1: 安装依赖",
+      sec3_mjviser_optional: "可选安装 mjviser（3D 可视化）：",
+      sec3_step2: "Step 2: 运行 Benchmark", sec3_simplest: "最简单的运行方式——单任务 3 个 episode：",
+      sec3_output_example: "输出示例：", sec3_available_tasks: "所有可用任务",
+      th_task: "任务名", th_description: "说明", th_recommended: "推荐入门",
+      sec3_reacher_desc: "2-DOF 机械臂到达目标（最简单）",
+      sec3_hopper_desc: "单腿跳跃机器人站立", sec3_medium: "中等难度",
+      sec3_walker_desc: "双足行走机器人跑步", sec3_harder: "较难",
+      sec3_humanoid_desc: "人形机器人站立（21 自由度）", sec3_hardest: "最难",
+      sec3_more_cli: "更多 CLI 参数", sec3_step3: "Step 3: 启动 Web 仪表盘",
+      sec3_open_browser: "打开浏览器访问 <code>http://localhost:8080</code>，即可看到实时监控仪表盘。",
+      sec4_title: "4. Web 可视化仪表盘指南", sec4_intro: "启动 Web 仪表盘后，浏览器将显示完整的监控界面。",
+      sec4_top_nav: "顶部导航栏", sec4_nav_project: "<strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz",
+      sec4_nav_version: "<strong>版本号</strong>: v0.3.1",
+      sec4_nav_status: "<strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行",
+      sec4_nav_links: "<strong>导航链接</strong>: 用户手册、MuJoCo文档（使用绝对URL http://localhost:8080/）",
+      sec4_nav_lang: "<strong>语言切换</strong>: 中/EN按钮切换界面语言",
+      sec4_left_panel: "左侧控制面板",
+      sec4_task_select: "<strong>任务选择下拉框</strong>：选择要运行的 dm_control 任务。",
+      sec4_episode_config: "<strong>Episode 配置</strong>：",
+      sec4_ep_count: "<strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）",
+      sec4_max_steps: "<strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）",
+      sec4_sip_toggle: "<strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式。",
+      sec4_3d_scene: "<strong>3D 场景选择</strong>：下拉框选择 3D 可视化场景——\"默认 (humanoid-stand)\" 或 \"障碍竞技场\"。",
+      sec4_mjviser_btn: "<strong>mjviser 3D 按钮</strong>：点击按钮启动 3D 物理可视化。机器人将在仿真循环中自动运动。",
+      sec4_run_stop: "<strong>运行 / 停止按钮</strong>：",
+      sec4_run: "<strong>Run</strong>: 开始 benchmark 运行",
+      sec4_stop: "<strong>Stop</strong>: 停止当前运行的 benchmark",
+      sec4_right_dashboard: "右侧仪表盘",
+      sec4_eta_chart: "<strong>η 轨迹图</strong>：实时显示每个 episode 的 η 随步数变化。",
+      sec4_noether: "<strong>Noether 计数器</strong>：累计显示 Noether 违规次数。",
+      sec4_kappa: "<strong>κ-Snap 状态</strong>：显示当前 κ-Snap 门控是否触发。",
+      sec4_psi: "<strong>ψ-Anchor 面板</strong>：显示 ψ-Anchor 元管理层状态：",
+      sec4_psi_li1: "当前演化策略（light/freeze）",
+      sec4_psi_li2: "epiplexity 评分",
+      sec4_psi_li3: "动态调整的 δ_K 值",
+      sec4_ic_chart: "<strong>IC-Value 柱状图</strong>：Motor Primitive 的 IC-Value 排名。",
+      sec4_sip_results: "<strong>SIP-Bench 结果面板</strong>：T0/T1/T2 三阶段结果对比：",
+      sec4_retention: "Retention Gain（>1 表示改善保持）",
+      sec4_stability: "Stability Index（<1 表示更稳定）",
+      sec4_bottom_bar: "底部状态栏",
+      sec4_bar_task: "当前任务名",
+      sec4_bar_episode: "当前 episode / 总 episode",
+      sec4_bar_step: "当前步数",
+      sec4_bar_mjviser: "mjviser 可用状态",
+      sec5_title: "5. mjviser 3D 可视化指南", sec5_launch: "启动步骤",
+      sec5_li1: "安装 mjviser 和 viser：<code>pip install mjviser viser</code>",
+      sec5_li2: "在 Web 仪表盘中选择3D场景类型（默认或障碍竞技场）",
+      sec5_li3: "点击 \"🎮 Open mjviser (8081)\" 按钮",
+      sec5_li4: "等待几秒钟，mjviser 服务在端口 8081 启动",
+      sec5_li5: "打开浏览器访问 <code>http://localhost:8081</code>，机器人将自动运动",
+      sec5_interaction: "3D 交互操作", sec5_inter_desc: "在 mjviser 3D 视窗中，你可以：",
+      sec5_rotate: "<strong>旋转视角</strong>: 鼼标左键拖拽", sec5_zoom: "<strong>缩放</strong>: 鼼标滚轮",
+      sec5_pan: "<strong>平移</strong>: 鼼标右键拖拽", sec5_select: "<strong>选择关节</strong>: 点击关节高亮",
+      sec5_realtime: "<strong>实时仿真</strong>: 机器人通过仿真循环自动运动",
+      sec5_scenes: "3D 场景类型", sec5_scene_desc: "v0.3.1 新增场景选择功能：",
+      th_scene: "场景", th_description: "说明",
+      sec5_plain: "默认 (humanoid-stand)", sec5_plain_desc: "标准 dm_control humanoid-stand 环境",
+      sec5_obstacle: "障碍竞技场", sec5_obstacle_desc: "包含墙体、圆柱、方块障碍物和红色目标球的自定义场景",
+      sec5_notes: "注意事项",
+      sec5_note1: "mjviser 服务使用端口 <strong>8081</strong>，FastAPI 仪表盘使用端口 <strong>8080</strong>",
+      sec5_note2: "mjviser 只能同时运行一个实例",
+      sec5_note3: "关闭浏览器不会停止仿真循环",
+      sec5_note4: "导航链接使用绝对URL（http://localhost:8080/），不会误解析到8081端口",
+      sec5_troubleshoot: "故障排查", th_problem: "问题", th_solution: "解决方案",
+      sec5_prob1: "按钮显示 \"mjviser not installed\"", sec5_sol1: "运行 <code>pip install mjviser viser</code>",
+      sec5_prob2: "8081 端口打不开", sec5_sol2: "检查防火墙，或等待 3-5 秒后刷新",
+      sec5_prob3: "3D 视窗空白", sec5_sol3: "确认 dm_control 和 mujoco 正常安装",
+      sec5_prob4: "机器人静止不动", sec5_sol4: "v0.3.1 已加入仿真循环，机器人应自动运动",
+      sec6_title: "6. SIP-Bench 模式", sec6_what: "什么是 SIP-Bench？",
+      sec6_desc: "SIP-Bench 是 IDO 的纵向评估协议，测量 Agent 在<strong>学习→适应→保持</strong>三个阶段的性能变化。",
+      sec6_phases: "T0/T1/T2 三阶段", th_phase: "阶段", th_name: "名称",
+      sec6_t0_name: "初始基线", sec6_t0_desc: "运行 IDO Agent，ψ-Anchor 观察但不主动调整",
+      sec6_t1_name: "迭代演化", sec6_t1_desc: "ψ-Anchor 主动演化（light/freeze 循环）",
+      sec6_t2_name: "保持测试", sec6_t2_desc: "使用 T1 演化后的策略，测试改善是否持久",
+      sec6_metrics: "关键指标",
+      sec6_retention_formula: "<strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps",
+      sec6_retention_good: "> 1 → T2 比 T0 更快 ✅", sec6_retention_neutral: "= 1 → 无变化",
+      sec6_retention_bad: "< 1 → T2 更慢",
+      sec6_stability_formula: "<strong>Stability Index</strong> = T2_std_steps / T0_std_steps",
+      sec6_stability_good: "< 1 → T2 比 T0 更稳定 ✅", sec6_stability_neutral: "= 1 → 稳定性相同",
+      sec6_stability_bad: "> 1 → T2 更不稳定",
+      sec6_run: "运行 SIP-Bench",
+      sec7_title: "7. 核心概念通俗解释",
+      sec7_eta: "η (GaussEx) — 距离目标的度量",
+      sec7_eta_quote: "<strong>通俗理解</strong>: η 就像是你离家还有多远。",
+      sec7_eta_formula: "公式：<code>η = w_pos · ‖ee − target‖² + w_ori · tilt² + ...</code>",
+      sec7_noether: "Noether 违规 — 物理守恒定律被违反",
+      sec7_noether_quote: "<strong>通俗理解</strong>: Noether 违规就是"物理定律被违反的次数"。",
+      sec7_noether_gates: "三重守恒门：",
+      sec7_gate_e: "<strong>能量门</strong>: ΔE ≤ max_energy_inject + ε",
+      sec7_gate_f: "<strong>力矩门</strong>: |actuator_force| ≤ MAX_TORQUE × margin",
+      sec7_gate_c: "<strong>碰撞门</strong>: min_geom_distance ≥ threshold",
+      sec7_kappa: "κ-Snap 门控 — 想清楚再行动",
+      sec7_kappa_quote: "<strong>通俗理解</strong>: κ-Snap 门控就像是"当优化足够收敛时才'扣合'执行"。",
+      sec7_kappa_explore: "η ≥ δ_K → 探索模式", sec7_kappa_snap: "η < δ_K → κ-Snap 模式",
+      sec7_psi: "ψ-Anchor — 元管理层",
+      sec7_psi_quote: "<strong>通俗理解</strong>: ψ-Anchor 就像教练看比赛数据调整战术。",
+      sec7_psi_down: "η 下降 → 收紧 δ_K", sec7_psi_stall: "η 停滞 → 放宽 δ_K", sec7_psi_up: "η 上升 → 保持 δ_K",
+      sec7_flow: "FlowMatching — 预判未来走势",
+      sec7_flow_quote: "<strong>通俗理解</strong>: FlowMatching 就像天气预报。",
+      sec7_flow_metrics: "关键指标：",
+      sec7_hesitation: "<strong>Hesitation-RMSE</strong>: η 来回震荡的幅度",
+      sec7_retry: "<strong>Retry-VOC</strong>: η 方向频繁翻转的频率",
+      sec7_epiplexity: "epiplexity — 策略困惑度",
+      sec7_epiplexity_quote: "<strong>通俗理解</strong>: epiplexity 衡量策略的"困惑程度"。",
+      sec7_epiplexity_formula: "公式：<code>epiplexity = n_invariants × (1/δ_K) × log(max_energy)</code>",
+      sec7_vgpair: "VG-Pair ≠ GAN — 不是对抗训练",
+      sec7_vgpair_quote: "<strong>通俗理解</strong>: VG-Pair 和 GAN 本质完全不同。",
+      th_compare: "对比", th_vgpair: "VG-Pair", th_gan: "GAN",
+      sec7_vg_goal: "目标", sec7_vg_goal_desc: "生成→验证→修正→执行", sec7_gan_goal_desc: "min_G max_D 对抗博弈",
+      sec7_vg_verifier: "验证器", sec7_vg_verifier_desc: "物理定律（不可欺骗）", sec7_gan_verifier_desc: "学出来的判别器",
+      sec7_vg_sound: "Soundness", sec7_vg_sound_desc: "物理定律保证", sec7_gan_sound_desc: "无形式化保证",
+      sec7_vg_train: "训练方式", sec7_vg_train_desc: "无对抗训练", sec7_gan_train_desc: "对抗训练",
+      sec7_cipp: "C-IPP — 连续交互式证明协议",
+      sec7_cipp_quote: "<strong>通俗理解</strong>: C-IPP 就像数学证明的交互式验证过程。",
+      sec7_cipp_flow: "流程：<strong>生成 → 验证 → 拒绝 → 修正 → 接受 → 执行</strong>",
+      sec7_gel: "GEL — Goal-EML 注入损失",
+      sec7_gel_quote: "<strong>通俗理解</strong>: GEL 把物理约束当作"惩罚项"。",
+      sec7_gel_formula: "公式：<code>L_GEL = λ₁ · ‖η_Noether‖² + λ₂ · ...</code>",
+      sec7_dual: "Dual-Engine AGI — 双引擎驱动",
+      sec7_dual_quote: "<strong>通俗理解</strong>: Dual-Engine AGI 用两个引擎驱动——数字引擎 + 具身引擎。",
+      sec8_title: "8. Benchmark 任务详解",
+      sec8_humanoid: "humanoid-stand: 人形机器人站立",
+      sec8_h_dof: "<strong>自由度</strong>: 21 DOF", sec8_h_goal: "<strong>目标</strong>: 人形机器人站立保持平衡",
+      sec8_h_hard: "<strong>难点</strong>: 多关节协调、重心控制", sec8_h_eml: "<strong>GoalEML 不变量</strong>: ee_at_target, torso_upright, no_self_collide",
+      sec8_h_energy: "<strong>能量预算</strong>: 500 J",
+      sec8_hopper: "hopper-stand: 单腿跳跃机器人站立",
+      sec8_hop_dof: "<strong>自由度</strong>: 6 DOF", sec8_hop_goal: "<strong>目标</strong>: 单腿机器人站立保持平衡",
+      sec8_hop_hard: "<strong>难点</strong>: 单腿平衡", sec8_hop_eml: "<strong>GoalEML</strong>: torso_upright, foot_on_ground",
+      sec8_hop_energy: "<strong>能量预算</strong>: 200 J",
+      sec8_walker: "walker-run: 双足行走机器人跑步",
+      sec8_w_dof: "<strong>自由度</strong>: 6 DOF", sec8_w_goal: "<strong>目标</strong>: 双足机器人向前跑步",
+      sec8_w_hard: "<strong>难点</strong>: 连续前进、动态平衡", sec8_w_eml: "<strong>GoalEML</strong>: com_x_advancing, not_fallen",
+      sec8_w_energy: "<strong>能量预算</strong>: 600 J",
+      sec8_reacher: "reacher-easy: 2-DOF 机械臂",
+      sec8_r_dof: "<strong>自由度</strong>: 2 DOF", sec8_r_goal: "<strong>目标</strong>: 机械臂末端到达目标位置",
+      sec8_r_hard: "<strong>难点</strong>: 简单到达，适合入门", sec8_r_eml: "<strong>GoalEML</strong>: ee_at_target",
+      sec8_r_energy: "<strong>能量预算</strong>: 50 J",
+      sec9_title: "9. Baseline 对比使用", sec9_ido_tdmpc: "IDO vs TD-MPC2 控制对比",
+      sec9_cosmos: "Cosmos-Predict η 预测对比", sec9_metrics: "对比指标",
+      th_type: "对比类型", th_mode: "模式", th_metrics: "指标",
+      sec9_control: "控制对比", sec9_control_metrics: "Steps, NVR, SER, Survival Rate",
+      sec9_predict: "预测对比", sec9_predict_metrics: "η trajectory RMSE, η correlation",
+      sec9_graceful: "优雅降级", sec9_graceful_desc: "如果 baseline 包未安装，系统会自动降级：",
+      sec9_graceful_tdmpc: "TD-MPC2 未安装 → Random Agent", sec9_graceful_cosmos: "Cosmos-Predict 未安装 → 跳过",
+      sec9_graceful_sb3: "SB3 未安装 → 跳过 PPO/SAC",
+      sec10_title: "10. 大学物理/数学速查表", sec10_intro: "边跑 Benchmark 边学，以下是 EML 映射表：",
+      th_course: "大学课程", th_concept: "核心概念", th_eml_map: "EML 映射", th_ido_layer: "IDO 层",
+      sec10_mech: "经典力学", sec10_mech_concept: "牛顿-欧拉方程、能量守恒、Signorini 接触",
+      sec10_mech_eml: "Goal-EML 物理约束",
+      sec10_linalg: "线性代数", sec10_linalg_concept: "向量空间、投影、陪集", sec10_linalg_eml: "η = 距陪集的距离",
+      sec10_prob: "概率论", sec10_prob_concept: "高斯分布、概率密度", sec10_prob_eml: "GaussEx η",
+      sec10_calc: "微积分/优化", sec10_calc_concept: "Jacobian、梯度下降", sec10_calc_eml: "κ-Snap 阈值、PD 控制",
+      sec10_info: "信息论", sec10_info_concept: "Shannon 熵", sec10_info_eml: "IC、epiplexity",
+      sec10_ode: "微分方程", sec10_ode_concept: "流、轨迹预测", sec10_ode_eml: "FlowMatching η 轨迹",
+      sec10_learn: "边跑边学建议",
+      sec10_eta_learn: "<strong>η 曲线</strong> = 收敛过程可视化",
+      sec10_nv_learn: "<strong>Noether 违规</strong> = 物理定律被违反",
+      sec10_kappa_learn: "<strong>κ-Snap</strong> = 优化收敛才扣合",
+      sec10_sip_learn: "<strong>SIP-Bench</strong> = 学习如何稳定",
+      sec11_title: "11. 常见问题与故障排查",
+      sec11_mjviser_fail: "mjviser 启动失败", sec11_mjviser_symptom: "<strong>症状</strong>: 无反应或报错",
+      sec11_mjviser_steps: "<strong>排查步骤</strong>：",
+      sec11_mjviser_s1: "确认安装 mjviser", sec11_mjviser_s2: "确认 dm_control 正常",
+      sec11_mjviser_s3: "查看终端错误信息", sec11_mjviser_s4: "v0.3.0 已修复 Viewer 参数 bug",
+      sec11_port: "端口冲突", sec11_port_symptom: "<strong>症状</strong>: 8080/8081 无法访问",
+      sec11_port_steps: "<strong>排查步骤</strong>：",
+      sec11_port_s1: "8080 被 FastAPI 占用正常", sec11_port_s2: "8081 被 mjviser 占用正常",
+      sec11_port_s3: "查看占用进程", sec11_port_s4: "杀死占用进程或更改端口",
+      sec11_dmctrl: "dm_control 兼容性", sec11_dmctrl_symptom: "<strong>症状</strong>: import 报错",
+      sec11_dmctrl_steps: "<strong>排查步骤</strong>：",
+      sec11_dmctrl_s1: "Python ≥ 3.10", sec11_dmctrl_s2: "pip install dm_control",
+      sec11_dmctrl_s3: "mujoco ≥ 2.3.0", sec11_dmctrl_s4: "dm_control 需要 mujoco",
+      sec11_gpu: "GPU 需求", sec11_gpu_symptom: "<strong>症状</strong>: Cosmos-Predict 无法运行",
+      sec11_gpu_steps: "<strong>排查步骤</strong>：",
+      sec11_gpu_s1: "Cosmos-Predict 需要 CUDA GPU",
+      sec11_gpu_s2: "检查 CUDA",
+      sec11_gpu_s3: "无 GPU 可跳过",
+      sec11_eta_large: "η 值异常大", sec11_eta_symptom: "<strong>症状</strong>: η > 100",
+      sec11_eta_explain: "<strong>解释</strong>: 不同任务 η 尺度不同：",
+      sec11_eta_reacher: "reacher-easy: η ≈ 10000",
+      sec11_eta_walker: "walker-run: η ≈ 130",
+      sec11_eta_humanoid: "humanoid-stand: η ≈ 2.6",
+      sec11_eta_hopper: "hopper-stand: η ≈ 6.88",
+      sec11_nv_large: "Noether 违规数很大", sec11_nv_symptom: "<strong>症状</strong>: NV > 2000",
+      sec11_nv_explain: "<strong>解释</strong>: NVR ≈ 1.47，原因：",
+      sec11_nv_r1: "Motor Primitive 碰撞约束不足",
+      sec11_nv_r2: "能量预算参数需调优",
+      sec11_nv_r3: "仅 reacher-easy 实现 NV ≡ 0",
+      sec11_nv_improve: "<strong>改善方向</strong>: SIP-Bench 演化优化",
+      footer_line1: "MuJoCo-Bench-IDO v0.3.1 用户手册",
+      footer_line2: "最后更新: 2025-07-01",
+    },
+    en: {
+      lang_btn: "中/EN",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.3.1",
+      nav_sec1: "1. Project Overview", nav_sec2: "2. Requirements", nav_sec3: "3. Quick Start",
+      nav_sec4: "4. Dashboard Guide", nav_sec5: "5. mjviser 3D Guide",
+      nav_sec6: "6. SIP-Bench Mode", nav_sec7: "7. Core Concepts Explained",
+      nav_sec8: "8. Benchmark Tasks", nav_sec9: "9. Baseline Comparison",
+      nav_sec10: "10. Physics/Math Cheat Sheet", nav_sec11: "11. FAQ & Troubleshooting",
+      header_title: "MuJoCo-Bench-IDO User Manual",
+      header_subtitle: "Version v0.3.1 · Last updated 2025-07-01 · IDO/TOMAS Continuous Physics Benchmark",
+      sec1_title: "1. Project Overview",
+      sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> is a benchmark platform that migrates the IDO/TOMAS architecture from discrete symbolic domain (ARC puzzles) to continuous physics control domain (MuJoCo robots).",
+      sec1_what_is_ido: "What is IDO/TOMAS?",
+      sec1_ido_desc: "IDO (Information-Driven Orchestration) is a <strong>non-von Neumann architecture</strong> decision framework. Core ideas:",
+      sec1_ido_li1: "<strong>Conservation-First</strong>: Check physical conservation laws before deciding actions",
+      sec1_ido_li2: "<strong>κ-Snap Gate</strong>: Use η (GaussEx residual) to measure proximity to goal; execute only when η drops below threshold",
+      sec1_ido_li3: "<strong>ψ-Anchor Meta-Layer</strong>: Dynamically adjust strategy based on η trends, like a coach adjusting tactics from match data",
+      sec1_tomas_desc: "TOMAS (Theory of Multi-Agent Systems) is IDO's theoretical foundation, with five ontological layers (L1-L5).",
+      sec1_what_does: "What does MuJoCo-Bench-IDO do?",
+      sec1_does_desc: "It maps IDO's decision cycle to MuJoCo physics simulation, letting robots attempt control tasks under physical constraints while verifying IDO theoretical prophecies:",
+      th_prediction: "Prophecy", th_content: "Content", th_verification: "Verification",
+      sec1_p1: "IDO never violates physical conservation (NVR ≡ 0)", sec1_p1_v: "Noether-Check gating",
+      sec1_p2: "IDO reaches goal faster than traditional RL (SER ≥ 1.2)", sec1_p2_v: "Step comparison",
+      sec1_p3: "Traditional RL violates physical conservation (Baseline NVR > 0)", sec1_p3_v: "Baseline evaluation",
+      sec2_title: "2. Requirements", sec2_sys_req: "System Requirements",
+      sec2_os: "<strong>OS</strong>: Windows / Linux / macOS",
+      sec2_python: "<strong>Python</strong>: 3.10+ (recommended 3.11 or 3.12)",
+      sec2_ram: "<strong>RAM</strong>: ≥ 4 GB",
+      sec2_gpu: "<strong>GPU</strong>: Not required (IDO runs CPU-only); Cosmos-Predict baseline needs GPU + CUDA",
+      sec2_install_deps: "Install Dependencies", sec2_one_click: "One-Click Install",
+      sec3_title: "3. Quick Start", sec3_step1: "Step 1: Install Dependencies",
+      sec3_mjviser_optional: "Optional: install mjviser (3D visualization):",
+      sec3_step2: "Step 2: Run Benchmark", sec3_simplest: "Simplest run — single task, 3 episodes:",
+      sec3_output_example: "Example output:", sec3_available_tasks: "Available Tasks",
+      th_task: "Task", th_description: "Description", th_recommended: "Recommended",
+      sec3_reacher_desc: "2-DOF reacher arm reaching target (easiest)",
+      sec3_hopper_desc: "Single-legged hopping robot standing", sec3_medium: "Medium difficulty",
+      sec3_walker_desc: "Bipedal walking robot running", sec3_harder: "Harder",
+      sec3_humanoid_desc: "Humanoid robot standing (21 DOF)", sec3_hardest: "Hardest",
+      sec3_more_cli: "More CLI Options", sec3_step3: "Step 3: Launch Dashboard",
+      sec3_open_browser: "Open browser at <code>http://localhost:8080</code> for the real-time dashboard.",
+      sec4_title: "4. Dashboard Guide", sec4_intro: "After launching the dashboard, the browser shows the full monitoring interface.",
+      sec4_top_nav: "Top Navigation Bar",
+      sec4_nav_project: "<strong>Project Name</strong>: MuJoCo-Bench-IDO Webviz",
+      sec4_nav_version: "<strong>Version</strong>: v0.3.1",
+      sec4_nav_status: "<strong>Status Indicator</strong>: Shows whether a benchmark is running",
+      sec4_nav_links: "<strong>Navigation Links</strong>: User Manual, MuJoCo Docs (absolute URLs http://localhost:8080/)",
+      sec4_nav_lang: "<strong>Language Toggle</strong>: 中/EN button switches UI language",
+      sec4_left_panel: "Left Control Panel",
+      sec4_task_select: "<strong>Task Selector</strong>: Choose dm_control task to run.",
+      sec4_episode_config: "<strong>Episode Configuration</strong>:",
+      sec4_ep_count: "<strong>Episodes</strong>: Number of episodes (default 5)",
+      sec4_max_steps: "<strong>Max Steps</strong>: Max steps per episode (default 1000)",
+      sec4_sip_toggle: "<strong>SIP-Bench Toggle</strong>: Switch to longitudinal evaluation mode (T0/T1/T2 phases).",
+      sec4_3d_scene: "<strong>3D Scene Selector</strong>: Choose visualization scene — Default or Obstacle Arena.",
+      sec4_mjviser_btn: "<strong>mjviser Button</strong>: Launch 3D physics viewer. Robot moves via simulation loop.",
+      sec4_run_stop: "<strong>Run / Stop</strong>:",
+      sec4_run: "<strong>Run</strong>: Start benchmark", sec4_stop: "<strong>Stop</strong>: Stop current run",
+      sec4_right_dashboard: "Right Dashboard",
+      sec4_eta_chart: "<strong>η Trajectory</strong>: Real-time η per step per episode.",
+      sec4_noether: "<strong>Noether Counter</strong>: Cumulative Noether violations count.",
+      sec4_kappa: "<strong>κ-Snap Status</strong>: Whether κ-Snap gate triggered (η < δ_K → snap).",
+      sec4_psi: "<strong>ψ-Anchor Panel</strong>: Meta-management layer status:",
+      sec4_psi_li1: "Current evolution policy (light/freeze)",
+      sec4_psi_li2: "Epiplexity score", sec4_psi_li3: "Dynamic δ_K adjustment",
+      sec4_ic_chart: "<strong>IC-Value Bar Chart</strong>: Motor Primitive IC-Value ranking.",
+      sec4_sip_results: "<strong>SIP-Bench Results</strong>: T0/T1/T2 phase comparison:",
+      sec4_retention: "Retention Gain (>1 = improvement persisted)",
+      sec4_stability: "Stability Index (<1 = more stable)",
+      sec4_bottom_bar: "Bottom Status Bar",
+      sec4_bar_task: "Current task", sec4_bar_episode: "Current episode / total",
+      sec4_bar_step: "Current step", sec4_bar_mjviser: "mjviser availability",
+      sec5_title: "5. mjviser 3D Guide", sec5_launch: "Launch Steps",
+      sec5_li1: "Install mjviser: <code>pip install mjviser viser</code>",
+      sec5_li2: "Select 3D scene type in dashboard (Default or Obstacle Arena)",
+      sec5_li3: "Click \"🎮 Open mjviser (8081)\" button",
+      sec5_li4: "Wait a few seconds for mjviser to start on port 8081",
+      sec5_li5: "Open browser at <code>http://localhost:8081</code> — robot moves automatically",
+      sec5_interaction: "3D Interaction", sec5_inter_desc: "In mjviser you can:",
+      sec5_rotate: "<strong>Rotate</strong>: Left-click drag", sec5_zoom: "<strong>Zoom</strong>: Scroll wheel",
+      sec5_pan: "<strong>Pan</strong>: Right-click drag", sec5_select: "<strong>Select joints</strong>: Click to highlight",
+      sec5_realtime: "<strong>Live simulation</strong>: Robot moves via simulation loop",
+      sec5_scenes: "3D Scene Types", sec5_scene_desc: "v0.3.1 adds scene selection:",
+      th_scene: "Scene", th_description: "Description",
+      sec5_plain: "Default (humanoid-stand)", sec5_plain_desc: "Standard dm_control humanoid-stand environment",
+      sec5_obstacle: "Obstacle Arena", sec5_obstacle_desc: "Custom scene with walls, cylinders, blocks, and red target sphere",
+      sec5_notes: "Notes",
+      sec5_note1: "mjviser uses port <strong>8081</strong>, FastAPI dashboard uses <strong>8080</strong>",
+      sec5_note2: "Only one mjviser instance can run at a time",
+      sec5_note3: "Closing browser does not stop the simulation loop",
+      sec5_note4: "Nav links use absolute URLs (http://localhost:8080/), won't resolve to port 8081",
+      sec5_troubleshoot: "Troubleshooting", th_problem: "Problem", th_solution: "Solution",
+      sec5_prob1: "\"mjviser not installed\" button", sec5_sol1: "Run <code>pip install mjviser viser</code>",
+      sec5_prob2: "Port 8081 inaccessible", sec5_sol2: "Check firewall, wait 3-5 seconds",
+      sec5_prob3: "3D view blank", sec5_sol3: "Verify dm_control and mujoco installed",
+      sec5_prob4: "Robot static", sec5_sol4: "v0.3.1 adds simulation loop; robot should move",
+      sec6_title: "6. SIP-Bench Mode", sec6_what: "What is SIP-Bench?",
+      sec6_desc: "SIP-Bench is IDO's longitudinal evaluation protocol, measuring Agent performance across <strong>Learn → Adapt → Retain</strong> phases.",
+      sec6_phases: "T0/T1/T2 Phases", th_phase: "Phase", th_name: "Name",
+      sec6_t0_name: "Initial Baseline", sec6_t0_desc: "Run IDO Agent, ψ-Anchor observes but doesn't adjust",
+      sec6_t1_name: "Iterated Evolution", sec6_t1_desc: "ψ-Anchor actively evolves (light/freeze cycles)",
+      sec6_t2_name: "Retention Test", sec6_t2_desc: "Use T1-evolved policy, test if improvement persists",
+      sec6_metrics: "Key Metrics",
+      sec6_retention_formula: "<strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps",
+      sec6_retention_good: "> 1 → T2 faster than T0 ✅", sec6_retention_neutral: "= 1 → No change",
+      sec6_retention_bad: "< 1 → T2 slower",
+      sec6_stability_formula: "<strong>Stability Index</strong> = T2_std_steps / T0_std_steps",
+      sec6_stability_good: "< 1 → T2 more stable ✅", sec6_stability_neutral: "= 1 → Same stability",
+      sec6_stability_bad: "> 1 → T2 less stable", sec6_run: "Run SIP-Bench",
+      sec7_title: "7. Core Concepts Explained",
+      sec7_eta: "η (GaussEx) — Distance to Goal",
+      sec7_eta_quote: "<strong>Analogy</strong>: η is how far you are from home. Smaller η = closer to goal.",
+      sec7_eta_formula: "Formula: <code>η = w_pos · ‖ee − target‖² + w_ori · tilt² + ...</code>",
+      sec7_noether: "Noether Violations — Conservation Laws Broken",
+      sec7_noether_quote: "<strong>Analogy</strong>: Noether violations = times physical laws were broken.",
+      sec7_noether_gates: "Three Conservation Gates:",
+      sec7_gate_e: "<strong>Energy Gate</strong>: ΔE ≤ max_energy_inject + ε",
+      sec7_gate_f: "<strong>Force Gate</strong>: |actuator_force| ≤ MAX_TORQUE × margin",
+      sec7_gate_c: "<strong>Collision Gate</strong>: min_geom_distance ≥ threshold",
+      sec7_kappa: "κ-Snap Gate — Think Before Acting",
+      sec7_kappa_quote: "<strong>Analogy</strong>: κ-Snap = execute only when optimization is sufficiently converged.",
+      sec7_kappa_explore: "η ≥ δ_K → Exploration mode", sec7_kappa_snap: "η < δ_K → κ-Snap mode (PD stabilize)",
+      sec7_psi: "ψ-Anchor — Meta-Management (Coach Role)",
+      sec7_psi_quote: "<strong>Analogy</strong>: ψ-Anchor is like a coach adjusting tactics from match data.",
+      sec7_psi_down: "η dropping → Tighten δ_K (×0.8)", sec7_psi_stall: "η stalling → Loosen δ_K (×1.2)",
+      sec7_psi_up: "η rising → Keep δ_K unchanged",
+      sec7_flow: "FlowMatching — Predict Future Trends",
+      sec7_flow_quote: "<strong>Analogy</strong>: FlowMatching is like weather forecasting for η.",
+      sec7_flow_metrics: "Key indicators:",
+      sec7_hesitation: "<strong>Hesitation-RMSE</strong>: η oscillation amplitude",
+      sec7_retry: "<strong>Retry-VOC</strong>: η direction reversal frequency",
+      sec7_epiplexity: "Epiplexity — Policy Confusion Level",
+      sec7_epiplexity_quote: "<strong>Analogy</strong>: Epiplexity measures how confused the current strategy is.",
+      sec7_epiplexity_formula: "Formula: <code>epiplexity = n_invariants × (1/δ_K) × log(max_energy)</code>",
+      sec7_vgpair: "VG-Pair ≠ GAN — Not Adversarial Training",
+      sec7_vgpair_quote: "<strong>Analogy</strong>: VG-Pair and GAN look similar but are fundamentally different.",
+      th_compare: "Comparison", th_vgpair: "VG-Pair", th_gan: "GAN",
+      sec7_vg_goal: "Goal", sec7_vg_goal_desc: "Generate→Verify→Correct→Execute", sec7_gan_goal_desc: "min_G max_D adversarial game",
+      sec7_vg_verifier: "Verifier", sec7_vg_verifier_desc: "Physical laws (uncheatable)", sec7_gan_verifier_desc: "Learned discriminator (cheatable)",
+      sec7_vg_sound: "Soundness", sec7_vg_sound_desc: "Guaranteed by physics", sec7_gan_sound_desc: "No formal guarantee",
+      sec7_vg_train: "Training", sec7_vg_train_desc: "No adversarial training", sec7_gan_train_desc: "Adversarial training",
+      sec7_cipp: "C-IPP — Continuous Interactive Proof Protocol",
+      sec7_cipp_quote: "<strong>Analogy</strong>: C-IPP is like interactive verification of a math proof.",
+      sec7_cipp_flow: "Flow: <strong>Generate → Verify → Reject → Correct → Accept → Execute</strong>",
+      sec7_gel: "GEL — Goal-EML Injection Loss",
+      sec7_gel_quote: "<strong>Analogy</strong>: GEL treats physical constraints as penalty terms.",
+      sec7_gel_formula: "Formula: <code>L_GEL = λ₁ · ‖η_Noether‖² + λ₂ · ...</code>",
+      sec7_dual: "Dual-Engine AGI — Two-Engine Drive",
+      sec7_dual_quote: "<strong>Analogy</strong>: Dual-Engine AGI uses two engines — Digital (LLM reasoning) + Embodied (physical execution).",
+      sec8_title: "8. Benchmark Tasks",
+      sec8_humanoid: "humanoid-stand: Humanoid Robot Standing",
+      sec8_h_dof: "<strong>DOF</strong>: 21", sec8_h_goal: "<strong>Goal</strong>: Stand upright from initial pose",
+      sec8_h_hard: "<strong>Difficulty</strong>: Multi-joint coordination, center-of-mass control",
+      sec8_h_eml: "<strong>GoalEML</strong>: ee_at_target, torso_upright, no_self_collide",
+      sec8_h_energy: "<strong>Energy Budget</strong>: 500 J",
+      sec8_hopper: "hopper-stand: One-Legged Hopper Standing",
+      sec8_hop_dof: "<strong>DOF</strong>: 6", sec8_hop_goal: "<strong>Goal</strong>: Stand balanced on one leg",
+      sec8_hop_hard: "<strong>Difficulty</strong>: Single-leg balance, foot contact",
+      sec8_hop_eml: "<strong>GoalEML</strong>: torso_upright, foot_on_ground",
+      sec8_hop_energy: "<strong>Energy Budget</strong>: 200 J",
+      sec8_walker: "walker-run: Bipedal Walker Running",
+      sec8_w_dof: "<strong>DOF</strong>: 6", sec8_w_goal: "<strong>Goal</strong>: Run forward without falling",
+      sec8_w_hard: "<strong>Difficulty</strong>: Continuous advance, dynamic balance",
+      sec8_w_eml: "<strong>GoalEML</strong>: com_x_advancing, not_fallen",
+      sec8_w_energy: "<strong>Energy Budget</strong>: 600 J",
+      sec8_reacher: "reacher-easy: 2-DOF Reacher Arm",
+      sec8_r_dof: "<strong>DOF</strong>: 2", sec8_r_goal: "<strong>Goal</strong>: Reach target position",
+      sec8_r_hard: "<strong>Difficulty</strong>: Simple reaching, ideal for beginners",
+      sec8_r_eml: "<strong>GoalEML</strong>: ee_at_target",
+      sec8_r_energy: "<strong>Energy Budget</strong>: 50 J",
+      sec9_title: "9. Baseline Comparison", sec9_ido_tdmpc: "IDO vs TD-MPC2 Control Comparison",
+      sec9_cosmos: "Cosmos-Predict η Prediction Comparison", sec9_metrics: "Comparison Metrics",
+      th_type: "Type", th_mode: "Mode", th_metrics: "Metrics",
+      sec9_control: "Control", sec9_control_metrics: "Steps, NVR, SER, Survival Rate",
+      sec9_predict: "Prediction", sec9_predict_metrics: "η trajectory RMSE, η correlation",
+      sec9_graceful: "Graceful Degradation",
+      sec9_graceful_desc: "If baseline packages are not installed, the system degrades automatically:",
+      sec9_graceful_tdmpc: "TD-MPC2 not installed → Random Agent",
+      sec9_graceful_cosmos: "Cosmos-Predict not installed → Skip",
+      sec9_graceful_sb3: "SB3 not installed → Skip PPO/SAC",
+      sec10_title: "10. Physics/Math Cheat Sheet", sec10_intro: "Learn while running benchmarks. EML mapping table:",
+      th_course: "Course", th_concept: "Core Concept", th_eml_map: "EML Mapping", th_ido_layer: "IDO Layer",
+      sec10_mech: "Classical Mechanics", sec10_mech_concept: "Newton-Euler equations, energy conservation, Signorini contact",
+      sec10_mech_eml: "Goal-EML physical constraints",
+      sec10_linalg: "Linear Algebra", sec10_linalg_concept: "Vector spaces, projection, cosets", sec10_linalg_eml: "η = distance to Goal-EML coset",
+      sec10_prob: "Probability", sec10_prob_concept: "Gaussian distribution, probability density", sec10_prob_eml: "GaussEx η",
+      sec10_calc: "Calculus/Optimization", sec10_calc_concept: "Jacobian, gradient descent", sec10_calc_eml: "κ-Snap threshold, PD control",
+      sec10_info: "Information Theory", sec10_info_concept: "Shannon entropy, effective complexity", sec10_info_eml: "IC, epiplexity",
+      sec10_ode: "Differential Equations", sec10_ode_concept: "Flows, trajectory prediction", sec10_ode_eml: "FlowMatching η trajectory",
+      sec10_learn: "Learning Tips",
+      sec10_eta_learn: "<strong>η curve</strong> = convergence process visualization",
+      sec10_nv_learn: "<strong>Noether violations</strong> = which conservation law was broken",
+      sec10_kappa_learn: "<strong>κ-Snap</strong> = execute only when converged enough",
+      sec10_sip_learn: "<strong>SIP-Bench</strong> = learning how to stabilize",
+      sec11_title: "11. FAQ & Troubleshooting",
+      sec11_mjviser_fail: "mjviser Launch Failure", sec11_mjviser_symptom: "<strong>Symptom</strong>: No response or error after clicking button",
+      sec11_mjviser_steps: "<strong>Troubleshooting</strong>:",
+      sec11_mjviser_s1: "Confirm mjviser installed", sec11_mjviser_s2: "Confirm dm_control works",
+      sec11_mjviser_s3: "Check terminal error output", sec11_mjviser_s4: "Viewer parameter bug fixed in v0.3.0",
+      sec11_port: "Port Conflict", sec11_port_symptom: "<strong>Symptom</strong>: Port 8080 or 8081 inaccessible",
+      sec11_port_steps: "<strong>Troubleshooting</strong>:",
+      sec11_port_s1: "8080 occupied by FastAPI is normal", sec11_port_s2: "8081 occupied by mjviser is normal",
+      sec11_port_s3: "Check process occupancy", sec11_port_s4: "Kill process or change port",
+      sec11_dmctrl: "dm_control Compatibility", sec11_dmctrl_symptom: "<strong>Symptom</strong>: Import error",
+      sec11_dmctrl_steps: "<strong>Troubleshooting</strong>:",
+      sec11_dmctrl_s1: "Python ≥ 3.10", sec11_dmctrl_s2: "pip install dm_control",
+      sec11_dmctrl_s3: "mujoco ≥ 2.3.0", sec11_dmctrl_s4: "dm_control depends on mujoco",
+      sec11_gpu: "GPU Requirements", sec11_gpu_symptom: "<strong>Symptom</strong>: Cosmos-Predict cannot run",
+      sec11_gpu_steps: "<strong>Troubleshooting</strong>:",
+      sec11_gpu_s1: "Cosmos-Predict needs CUDA GPU",
+      sec11_gpu_s2: "Check CUDA availability",
+      sec11_gpu_s3: "Skip if no GPU (--ido_only)",
+      sec11_eta_large: "Abnormally Large η", sec11_eta_symptom: "<strong>Symptom</strong>: η > 100",
+      sec11_eta_explain: "<strong>Explanation</strong>: Different tasks have different η scales:",
+      sec11_eta_reacher: "reacher-easy: η ≈ 10000", sec11_eta_walker: "walker-run: η ≈ 130",
+      sec11_eta_humanoid: "humanoid-stand: η ≈ 2.6", sec11_eta_hopper: "hopper-stand: η ≈ 6.88",
+      sec11_nv_large: "Large Noether Violation Count", sec11_nv_symptom: "<strong>Symptom</strong>: NV > 2000",
+      sec11_nv_explain: "<strong>Explanation</strong>: NVR ≈ 1.47 in these tasks. Reasons:",
+      sec11_nv_r1: "Motor Primitive collision constraints insufficient",
+      sec11_nv_r2: "Energy budget parameters need tuning",
+      sec11_nv_r3: "Only reacher-easy achieved NV ≡ 0",
+      sec11_nv_improve: "<strong>Fix</strong>: SIP-Bench evolution optimization",
+      footer_line1: "MuJoCo-Bench-IDO v0.3.1 User Manual",
+      footer_line2: "Last updated: 2025-07-01",
+    }
+  };
+
+  let currentLang = localStorage.getItem('mujoco-bench-lang') || 'zh';
+
+  function applyLanguage(lang) {
+    currentLang = lang;
+    localStorage.setItem('mujoco-bench-lang', lang);
+    const dict = i18nDict[lang];
+    if (!dict) return;
+    document.querySelectorAll('[data-i18n]').forEach(function(el) {
+      const key = el.getAttribute('data-i18n');
+      if (dict[key] !== undefined) {
+        el.innerHTML = dict[key];
       }
     });
-  }, { threshold: 0.3 });
-  sections.forEach(sec => observer.observe(sec));
-});
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }
+
+  function toggleLanguage() {
+    applyLanguage(currentLang === 'zh' ? 'en' : 'zh');
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    applyLanguage(currentLang);
+    // Sidebar active link highlighting
+    const sections = document.querySelectorAll('.section-card[id]');
+    const navLinks = document.querySelectorAll('.sidebar a');
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(link => link.classList.remove('active'));
+          const activeLink = document.querySelector(`.sidebar a[href="#${entry.target.id}"]`);
+          if (activeLink) activeLink.classList.add('active');
+        }
+      });
+    }, { threshold: 0.3 });
+    sections.forEach(sec => observer.observe(sec));
+  });
 </script>
 
 </body>

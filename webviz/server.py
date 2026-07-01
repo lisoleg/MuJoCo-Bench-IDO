@@ -13,8 +13,10 @@ API Endpoints:
   GET  /api/results     — Historical run results
   POST /api/start_viewer — Launch mjviser 3D viewer (optional)
   GET  /                — Dashboard HTML page
+  GET  /user_manual.html — User manual HTML page
+  GET  /mujoco_docs_cn.html — MuJoCo docs Chinese translation page
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.2.0
+Author: MuJoCo-Bench-IDO Webviz extension v0.3.0
 """
 
 import asyncio
@@ -49,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.3.0"
+WEBVIZ_VERSION: str = "v0.3.1"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -75,6 +77,7 @@ run_state: RunState = RunState()
 MJVISER_AVAILABLE: bool = False
 mjviser_viewer_thread: Optional[threading.Thread] = None
 mjviser_viewer_running: bool = False
+mjviser_scene_type: str = "plain"
 
 try:
     import mjviser
@@ -109,6 +112,11 @@ class RunRequest(BaseModel):
 class StopRequest(BaseModel):
     """Request body for /api/stop endpoint."""
     force: bool = False
+
+
+class SceneRequest(BaseModel):
+    """Request body for /api/mjviser/scene endpoint."""
+    scene_type: str = "plain"
 
 
 # ── Uvicorn event loop reference (captured at startup) ──
@@ -774,6 +782,24 @@ async def get_results() -> JSONResponse:
     })
 
 
+@app.post("/api/mjviser/scene")
+async def set_mjviser_scene(req: SceneRequest) -> JSONResponse:
+    """Set the 3D scene type for mjviser viewer.
+
+    Args:
+        req: SceneRequest with scene_type field ("plain" or "obstacle").
+
+    Returns:
+        JSONResponse with the current scene_type.
+    """
+    global mjviser_scene_type
+    if req.scene_type not in {"plain", "obstacle"}:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid scene type. Must be 'plain' or 'obstacle'.")
+    mjviser_scene_type = req.scene_type
+    return JSONResponse(content={"scene_type": mjviser_scene_type})
+
+
 @app.post("/api/start_viewer")
 async def start_viewer() -> JSONResponse:
     """Launch mjviser 3D viewer on port 8081 (optional feature).
@@ -799,16 +825,27 @@ async def start_viewer() -> JSONResponse:
         })
 
     def launch_viewer() -> None:
-        """Launch mjviser Viewer in a background thread."""
+        """Launch mjviser Viewer in a background thread with real-time simulation."""
         global mjviser_viewer_running
         try:
             import dm_control.suite as suite
+            import mujoco as mj
             from viser import ViserServer
-            # Load a default environment for visualization
-            env = suite.load("humanoid", "stand")
-            # Get raw mujoco MjModel and MjData from dm_control wrappers
-            mj_model = env.physics.model._model
-            mj_data = env.physics.data._data
+            import time
+
+            # Load scene based on mjviser_scene_type
+            if mjviser_scene_type == "obstacle":
+                scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / "humanoid_obstacle_arena.xml")
+                mj_model = mj.MjModel.from_xml_path(scene_xml_path)
+                mj_data = mj.MjData(mj_model)
+                mj.mj_resetData(mj_model, mj_data)
+                mj.mj_forward(mj_model, mj_data)
+            else:
+                # Default: load dm_control humanoid-stand
+                env = suite.load("humanoid", "stand")
+                mj_model = env.physics.model._model
+                mj_data = env.physics.data._data
+
             # Create ViserServer on port 8081 (avoid conflict with FastAPI on 8080)
             viser_server = ViserServer(port=8081, verbose=False)
             viewer = mjviser.Viewer(
@@ -817,7 +854,50 @@ async def start_viewer() -> JSONResponse:
                 server=viser_server,
             )
             mjviser_viewer_running = True
+
+            # ── Background simulation loop ──
+            def sim_loop() -> None:
+                """Run MuJoCo simulation steps in a background thread."""
+                env_ref = None
+                try:
+                    # If using dm_control env, get action spec for random actions
+                    if mjviser_scene_type == "plain":
+                        env_ref = suite.load("humanoid", "stand")
+                        action_spec = env_ref.action_spec()
+                        action_dim = action_spec.shape[0]
+                    else:
+                        action_dim = mj_model.nu
+                except Exception:
+                    action_dim = mj_model.nu if mj_model.nu > 0 else 1
+
+                while mjviser_viewer_running:
+                    try:
+                        # Generate random action
+                        action = np.random.uniform(-1, 1, action_dim)
+
+                        if mjviser_scene_type == "plain" and env_ref is not None:
+                            # Use dm_control env for stepping (handles timestep properly)
+                            env_ref.step(action)
+                            # Sync mj_data from env
+                            mj_data.qpos[:] = env_ref.physics.data._data.qpos[:]
+                            mj_data.qvel[:] = env_ref.physics.data._data.qvel[:]
+                            mj_data.ctrl[:] = action
+                        else:
+                            # Direct mj_step for custom scenes
+                            mj_data.ctrl[:] = action[:mj_model.nu]
+                            mj.mj_step(mj_model, mj_data)
+
+                        time.sleep(0.01)  # ~100 Hz simulation
+                    except Exception:
+                        break
+
+            sim_thread = threading.Thread(target=sim_loop, daemon=True)
+            sim_thread.start()
+
+            # Run viewer (blocks until viewer is closed)
             viewer.run()
+            # Viewer closed — stop simulation loop
+            mjviser_viewer_running = False
         except Exception as e:
             mjviser_viewer_running = False
             print(f"mjviser viewer failed: {e}")

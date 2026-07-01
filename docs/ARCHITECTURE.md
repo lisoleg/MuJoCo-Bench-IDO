@@ -554,6 +554,95 @@ graph TB
 
 ---
 
-*Document by 高见远（Gao） — Architect*  
-*Date: 2025-07-01*  
+*Document by 高见远（Gao） — Architect*
+*Date: 2025-07-01*
 *v0.3.0 update: 2025-07-01*
+*v0.3.1 update: 2025-07-01 — Language switching, real-time 3D simulation, obstacle scene*
+
+---
+
+### v0.3.1 新增模块（语言切换 + 实时3D仿真 + 障碍物场景）
+
+#### webviz/scenes/ 目录
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `webviz/scenes/__init__.py` | ★ 新 | 包初始化 |
+| `webviz/scenes/humanoid_obstacle_arena.xml` | ★ 新 | MuJoCo XML障碍物竞技场场景（包含墙体、圆柱、方块障碍物+红色目标球+火柴人形机器人） |
+
+#### 语言切换模块
+
+| 修改文件 | 说明 |
+|---------|------|
+| `webviz/dashboard.html` | 新增 i18n 模块：data-i18n 属性 + i18nDict 字典 + toggleLanguage() 函数，localStorage key: `mujoco-bench-lang` |
+| `webviz/user_manual.html` | 新增 i18n 模块：所有标题/段落/列表/表格加 data-i18n，右上角中/EN切换按钮 |
+| `webviz/mujoco_docs_cn.html` | 新增 i18n 模块：侧边栏+节标题加 data-i18n，右上角中/EN切换按钮 |
+
+**语言切换设计**：
+- localStorage key统一为 `mujoco-bench-lang`，值 `zh`/`en`
+- 页面加载时读取 localStorage，默认中文
+- 切换按钮文案："中/EN"，放在右上角固定位置
+- 代码块（XML/C）不翻译，只翻译周围说明文字
+- 翻译质量面向学术/工程师
+
+#### 实时3D仿真循环
+
+| 修改文件 | 说明 |
+|---------|------|
+| `webviz/server.py` | `launch_viewer()` 增加后台仿真线程：随机动作 → mj.mj_step → 实时更新 mjviser data |
+
+**仿真循环设计**：
+- `sim_loop()` 在 daemon 线程中运行
+- plain场景：使用 dm_control env.step(action) 推进仿真
+- obstacle场景：使用 mj.mj_step(mj_model, mj_data) 直接推进
+- 仿真频率：~100Hz（time.sleep(0.01)）
+- viewer 关闭时 mjviser_viewer_running = False，线程自动停止
+
+#### 3D场景选择
+
+| 修改文件 | 说明 |
+|---------|------|
+| `webviz/server.py` | 新增全局变量 `mjviser_scene_type: str = "plain"`，新增 `SceneRequest` Pydantic model，新增 `/api/mjviser/scene` POST endpoint |
+| `webviz/dashboard.html` | 左侧控制面板新增"3D场景"下拉框（选项：plain/obstacle），通过 `/api/mjviser/scene` API保存 |
+
+#### 导航链接修复
+
+| 修改文件 | 说明 |
+|---------|------|
+| `webviz/dashboard.html` | 导航链接从相对路径改为绝对URL `http://localhost:8080/user_manual.html` 和 `http://localhost:8080/mujoco_docs_cn.html` |
+
+#### v0.3.1 模块关系图更新
+
+```mermaid
+graph TB
+    subgraph Core
+        GoalEML["GoalEML"]
+        KappaSnap["κ-Snap"]
+        Noether["Noether-Check"]
+    end
+
+    subgraph Agent
+        IDOAgent["IDOMuJoCoAgent"]
+        PsiAnchor["ψ-Anchor"]
+    end
+
+    subgraph Webviz
+        FastAPI["FastAPI Server<br/>webviz/server.py"]
+        Dashboard["Dashboard<br/>webviz/dashboard.html"]
+        Mjviser["mjviser Viewer<br/>+ sim_loop"]
+        UserManual["用户手册<br/>webviz/user_manual.html"]
+        MuJoCoDocs["MuJoCo文档<br/>webviz/mujoco_docs_cn.html"]
+        ObstacleScene["障碍物场景<br/>webviz/scenes/humanoid_obstacle_arena.xml"]
+        I18nModule["语言切换模块<br/>data-i18n + i18nDict"]
+    end
+
+    FastAPI --> Dashboard
+    FastAPI --> Mjviser
+    FastAPI --> ObstacleScene
+    Dashboard --> I18nModule
+    UserManual --> I18nModule
+    MuJoCoDocs --> I18nModule
+    Dashboard -->|"http://localhost:8080"| UserManual
+    Dashboard -->|"http://localhost:8080"| MuJoCoDocs
+    Mjviser --> FastAPI
+```

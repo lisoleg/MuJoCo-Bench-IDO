@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.3.0</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.3.1</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -215,6 +215,20 @@
       height: 220px;
       width: 100%;
     }
+
+    /* Language toggle button */
+    .lang-toggle-btn {
+      background: #1e293b;
+      color: #60a5fa;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .lang-toggle-btn:hover { background: #3b82f6; color: #fff; }
   </style>
 </head>
 
@@ -228,19 +242,24 @@
     <div class="flex items-center gap-3">
       <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">IDO</div>
       <div>
-        <h1 class="text-lg font-bold text-white tracking-tight">MuJoCo-Bench-IDO</h1>
-        <span class="label-sm">IDO/TOMAS Continuous Physics Benchmark</span>
+        <h1 class="text-lg font-bold text-white tracking-tight" data-i18n="dashboard_title">MuJoCo-Bench-IDO</h1>
+        <span class="label-sm" data-i18n="dashboard_subtitle">IDO/TOMAS Continuous Physics Benchmark</span>
       </div>
     </div>
     <div class="flex items-center gap-4">
-      <a href="/user_manual.html" target="_blank" 
-         class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors">📖 用户手册</a>
-      <a href="/mujoco_docs_cn.html" target="_blank" 
-         class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors">📘 MuJoCo中文文档</a>
-      <span class="text-sm font-medium text-slate-400">v0.3.0</span>
+      <button class="lang-toggle-btn" onclick="toggleLanguage()" data-i18n="lang_btn">中/EN</button>
+      <a href="http://localhost:8080/user_manual.html" target="_blank"
+         class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.684 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.684 5 16.5 5c1.846 0 3.332.477 4.5 1.253v13C19.168 18.477 17.684 18 16.5 18s-3.332.477-4.5-1.253"/></svg>
+        <span data-i18n="nav_manual">User Manual</span></a>
+      <a href="http://localhost:8080/mujoco_docs_cn.html" target="_blank"
+         class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+        <span data-i18n="nav_docs">MuJoCo Docs</span></a>
+      <span class="text-sm font-medium text-slate-400">v0.3.1</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
-        <span id="statusText" class="label-sm">Idle</span>
+        <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
       </div>
     </div>
   </nav>
@@ -256,7 +275,7 @@
 
       <!-- Task Selection -->
       <div>
-        <label class="label-sm mb-1 block">Task Selection</label>
+        <label class="label-sm mb-1 block" data-i18n="label_task_select">Task Selection</label>
         <select id="taskSelect">
           <option value="humanoid-stand">humanoid-stand</option>
           <option value="hopper-stand">hopper-stand</option>
@@ -267,7 +286,7 @@
 
       <!-- Episodes Slider -->
       <div>
-        <label class="label-sm mb-1 block">Episodes</label>
+        <label class="label-sm mb-1 block" data-i18n="label_episodes">Episodes</label>
         <div class="flex items-center gap-2">
           <input type="range" id="episodesSlider" min="1" max="20" value="5">
           <span id="episodesValue" class="value-sm font-mono">5</span>
@@ -276,35 +295,44 @@
 
       <!-- Max Steps -->
       <div>
-        <label class="label-sm mb-1 block">Max Steps</label>
+        <label class="label-sm mb-1 block" data-i18n="label_max_steps">Max Steps</label>
         <input type="number" id="maxStepsInput" value="1000" min="100" max="5000" step="100">
       </div>
 
       <!-- SIP-Bench Toggle -->
       <div>
-        <label class="label-sm mb-1 block">SIP-Bench Mode</label>
+        <label class="label-sm mb-1 block" data-i18n="label_sip_mode">SIP-Bench Mode</label>
         <div class="flex items-center gap-3">
           <div id="sipToggle" class="toggle-switch" onclick="toggleSIP()"></div>
-          <span id="sipLabel" class="value-sm">Standard</span>
+          <span id="sipLabel" class="value-sm" data-i18n="sip_standard">Standard</span>
         </div>
       </div>
 
       <!-- Evolution Rounds (SIP-Bench only) -->
       <div id="evolutionRoundsSection" style="display:none;">
-        <label class="label-sm mb-1 block">Evolution Rounds</label>
+        <label class="label-sm mb-1 block" data-i18n="label_evolution_rounds">Evolution Rounds</label>
         <input type="number" id="evolutionRoundsInput" value="3" min="1" max="10">
       </div>
 
       <!-- Kappa Threshold -->
       <div>
-        <label class="label-sm mb-1 block">κ-Snap Threshold (δ_K)</label>
+        <label class="label-sm mb-1 block" data-i18n="label_kappa_thresh">κ-Snap Threshold (δ_K)</label>
         <input type="number" id="kappaThreshInput" value="0.05" min="0.001" max="1.0" step="0.01">
+      </div>
+
+      <!-- 3D Scene Selection -->
+      <div>
+        <label class="label-sm mb-1 block" data-i18n="label_3d_scene">3D Scene</label>
+        <select id="sceneSelect" onchange="setScene()">
+          <option value="plain" data-i18n-opt="scene_plain">Default (humanoid-stand)</option>
+          <option value="obstacle" data-i18n-opt="scene_obstacle">Obstacle Arena</option>
+        </select>
       </div>
 
       <!-- mjviser 3D Viewer Button -->
       <div>
-        <label class="label-sm mb-1 block">3D Visualization</label>
-        <button id="viewerBtn" class="btn-secondary" onclick="startViewer()">
+        <label class="label-sm mb-1 block" data-i18n="label_3d_vis">3D Visualization</label>
+        <button id="viewerBtn" class="btn-secondary" onclick="startViewer()" data-i18n="btn_open_viewer">
           🎮 Open mjviser (8081)
         </button>
         <span id="viewerStatus" class="label-sm mt-1 block"></span>
@@ -314,23 +342,23 @@
       <div class="border-t border-slate-600 my-2"></div>
 
       <!-- Start / Stop Buttons -->
-      <button id="startBtn" class="btn-primary" onclick="startRun()">
+      <button id="startBtn" class="btn-primary" onclick="startRun()" data-i18n="btn_start_run">
         ▶ Start Run
       </button>
-      <button id="stopBtn" class="btn-danger" onclick="stopRun()" disabled>
+      <button id="stopBtn" class="btn-danger" onclick="stopRun()" disabled data-i18n="btn_stop_run">
         ⏹ Stop Run
       </button>
 
       <!-- Quick Status -->
       <div class="card mt-2">
-        <div class="card-header">Run Status</div>
-        <div id="quickStatus" class="value-sm">No active run</div>
+        <div class="card-header" data-i18n="card_run_status">Run Status</div>
+        <div id="quickStatus" class="value-sm" data-i18n="status_no_active_run">No active run</div>
         <div class="flex items-center gap-2 mt-2">
-          <span class="label-sm">Episode:</span>
+          <span class="label-sm" data-i18n="label_episode">Episode:</span>
           <span id="currentEpisode" class="value-sm font-mono">0 / 0</span>
         </div>
         <div class="flex items-center gap-2 mt-1">
-          <span class="label-sm">Step:</span>
+          <span class="label-sm" data-i18n="label_step">Step:</span>
           <span id="currentStep" class="value-sm font-mono">0</span>
         </div>
       </div>
@@ -343,7 +371,7 @@
       <!-- ═══ η Trajectory Real-time Line Chart ═══ -->
       <div class="card col-span-2">
         <div class="card-header flex items-center justify-between">
-          <span>η (GaussEx Residual) Trajectory</span>
+          <span data-i18n="card_eta_trajectory">η (GaussEx Residual) Trajectory</span>
           <span id="etaLatest" class="value-md font-mono text-blue-400">—</span>
         </div>
         <div class="chart-container" style="height: 280px;">
@@ -353,66 +381,66 @@
 
       <!-- ═══ Noether Violations Counter ═══ -->
       <div class="card">
-        <div class="card-header">Noether Violations</div>
+        <div class="card-header" data-i18n="card_noether_violations">Noether Violations</div>
         <div class="flex items-center gap-3 mb-3">
           <span id="noetherCount" class="value-lg font-mono" style="color: #f87171;">0</span>
           <div class="flex flex-col">
-            <span class="label-sm">Energy Gate (E)</span>
-            <span class="label-sm">Force Gate (F)</span>
-            <span class="label-sm">Collision Gate (C)</span>
+            <span class="label-sm" data-i18n="gate_energy">Energy Gate (E)</span>
+            <span class="label-sm" data-i18n="gate_force">Force Gate (F)</span>
+            <span class="label-sm" data-i18n="gate_collision">Collision Gate (C)</span>
           </div>
         </div>
         <div class="progress-bar-bg">
           <div id="noetherProgressBar" class="progress-bar-fill" style="width: 0%; background: #ef4444;"></div>
         </div>
-        <span id="noetherPctLabel" class="label-sm mt-1 block">0% of max steps</span>
+        <span id="noetherPctLabel" class="label-sm mt-1 block" data-i18n="noether_pct_label">0% of max steps</span>
       </div>
 
       <!-- ═══ κ-Snap Threshold Status Card ═══ -->
       <div class="card">
-        <div class="card-header">κ-Snap Threshold Status</div>
+        <div class="card-header" data-i18n="card_kappa_snap_status">κ-Snap Threshold Status</div>
         <div class="grid grid-cols-2 gap-3 mt-2">
           <div>
-            <span class="label-sm">Current δ_K</span>
+            <span class="label-sm" data-i18n="label_current_delta_k">Current δ_K</span>
             <span id="deltaKValue" class="value-md font-mono text-cyan-400">0.050</span>
           </div>
           <div>
-            <span class="label-sm">Snap Triggered</span>
-            <span id="snapStatus" class="value-md font-mono" style="color: #94a3b8;">No</span>
+            <span class="label-sm" data-i18n="label_snap_triggered">Snap Triggered</span>
+            <span id="snapStatus" class="value-md font-mono" style="color: #94a3b8;" data-i18n="snap_no">No</span>
           </div>
         </div>
         <div class="mt-3 flex items-center gap-2">
-          <span class="label-sm">η vs δ_K:</span>
-          <span id="etaVsDeltaK" class="value-sm font-mono">η > δ_K (far from goal)</span>
+          <span class="label-sm" data-i18n="label_eta_vs_delta_k">η vs δ_K:</span>
+          <span id="etaVsDeltaK" class="value-sm font-mono" data-i18n="eta_far_from_goal">η > δ_K (far from goal)</span>
         </div>
       </div>
 
       <!-- ═══ ψ-Anchor Evolution Panel ═══ -->
       <div class="card">
-        <div class="card-header">ψ-Anchor Evolution Panel</div>
+        <div class="card-header" data-i18n="card_psi_anchor">ψ-Anchor Evolution Panel</div>
         <div class="grid grid-cols-2 gap-3 mt-2">
           <div>
-            <span class="label-sm">Policy</span>
+            <span class="label-sm" data-i18n="label_policy">Policy</span>
             <div class="flex items-center gap-2 mt-1">
               <span id="psiPolicy" class="value-md font-bold" style="color: #818cf8;">light</span>
               <span id="psiPolicyBadge" class="text-xs px-2 py-0.5 rounded-full"
-                    style="background: #312e81; color: #818cf8;">evolving</span>
+                    style="background: #312e81; color: #818cf8;" data-i18n="badge_evolving">evolving</span>
             </div>
           </div>
           <div>
-            <span class="label-sm">Epiplexity</span>
+            <span class="label-sm" data-i18n="label_epiplexity">Epiplexity</span>
             <span id="epiplexityValue" class="value-md font-mono text-yellow-400">0.00</span>
           </div>
         </div>
         <div class="mt-3">
-          <span class="label-sm">η Trend</span>
-          <span id="etaTrend" class="value-sm font-mono ml-2">unknown</span>
+          <span class="label-sm" data-i18n="label_eta_trend">η Trend</span>
+          <span id="etaTrend" class="value-sm font-mono ml-2" data-i18n="trend_unknown">unknown</span>
         </div>
       </div>
 
       <!-- ═══ Motor Primitives IC-Value Bar Chart ═══ -->
       <div class="card">
-        <div class="card-header">Motor Primitives IC-Value Ranking</div>
+        <div class="card-header" data-i18n="card_motor_ic_ranking">Motor Primitives IC-Value Ranking</div>
         <div class="chart-container" style="height: 180px;">
           <canvas id="motorChart"></canvas>
         </div>
@@ -421,35 +449,35 @@
       <!-- ═══ SIP-Bench Results Panel ═══ -->
       <div class="card col-span-2" id="sipPanel" style="display: none;">
         <div class="card-header flex items-center justify-between">
-          <span>SIP-Bench Longitudinal Results</span>
+          <span data-i18n="card_sip_results">SIP-Bench Longitudinal Results</span>
           <span id="sipPhaseIndicator" class="text-xs px-2 py-0.5 rounded-full"
-                style="background: #1e293b; color: #94a3b8;">Waiting</span>
+                style="background: #1e293b; color: #94a3b8;" data-i18n="sip_waiting">Waiting</span>
         </div>
         <div class="overflow-x-auto mt-2">
           <table class="sip-table w-full">
             <thead>
               <tr style="border-bottom: 1px solid #475569;">
-                <th>Phase</th>
-                <th>Avg η</th>
-                <th>Avg Steps</th>
-                <th>Noether Violations</th>
+                <th data-i18n="th_phase">Phase</th>
+                <th data-i18n="th_avg_eta">Avg η</th>
+                <th data-i18n="th_avg_steps">Avg Steps</th>
+                <th data-i18n="th_noether_violations">Noether Violations</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td class="value-sm font-bold">T0 (Initial)</td>
+                <td class="value-sm font-bold" data-i18n="phase_t0_initial">T0 (Initial)</td>
                 <td id="sipT0Eta" class="value-sm font-mono">—</td>
                 <td id="sipT0Steps" class="value-sm font-mono">—</td>
                 <td id="sipT0NV" class="value-sm font-mono">—</td>
               </tr>
               <tr style="background: rgba(99, 102, 241, 0.1);">
-                <td class="value-sm font-bold" style="color: #818cf8;">T1 (Iterated)</td>
+                <td class="value-sm font-bold" style="color: #818cf8;" data-i18n="phase_t1_iterated">T1 (Iterated)</td>
                 <td id="sipT1Eta" class="value-sm font-mono">—</td>
                 <td id="sipT1Steps" class="value-sm font-mono">—</td>
                 <td id="sipT1NV" class="value-sm font-mono">—</td>
               </tr>
               <tr>
-                <td class="value-sm font-bold">T2 (Retention)</td>
+                <td class="value-sm font-bold" data-i18n="phase_t2_retention">T2 (Retention)</td>
                 <td id="sipT2Eta" class="value-sm font-mono">—</td>
                 <td id="sipT2Steps" class="value-sm font-mono">—</td>
                 <td id="sipT2NV" class="value-sm font-mono">—</td>
@@ -459,14 +487,14 @@
         </div>
         <div class="grid grid-cols-2 gap-3 mt-3">
           <div class="card" style="background: #0f172a; padding: 10px;">
-            <span class="label-sm">Retention Gain</span>
+            <span class="label-sm" data-i18n="label_retention_gain">Retention Gain</span>
             <span id="retentionGain" class="value-md font-mono text-emerald-400">—</span>
-            <span class="label-sm">(&gt;1 = improvement persisted)</span>
+            <span class="label-sm" data-i18n="hint_retention">(&gt;1 = improvement persisted)</span>
           </div>
           <div class="card" style="background: #0f172a; padding: 10px;">
-            <span class="label-sm">Stability Index</span>
+            <span class="label-sm" data-i18n="label_stability_index">Stability Index</span>
             <span id="stabilityIndex" class="value-md font-mono text-sky-400">—</span>
-            <span class="label-sm">(&lt;1 = more stable)</span>
+            <span class="label-sm" data-i18n="hint_stability">(&lt;1 = more stable)</span>
           </div>
         </div>
       </div>
@@ -480,23 +508,219 @@
   <footer class="border-t border-slate-700 px-6 py-3 flex items-center justify-between"
           style="background: #1e293b;">
     <div class="flex items-center gap-4">
-      <span class="label-sm">Episode Progress:</span>
+      <span class="label-sm" data-i18n="label_episode_progress">Episode Progress:</span>
       <div class="progress-bar-bg" style="width: 200px;">
         <div id="episodeProgressBar" class="progress-bar-fill" style="width: 0%; background: #22c55e;"></div>
       </div>
       <span id="episodeProgressLabel" class="label-sm font-mono">0%</span>
     </div>
     <div class="flex items-center gap-2">
-      <span class="label-sm">WebSocket:</span>
-      <span id="wsStatus" class="label-sm font-mono" style="color: #64748b;">Disconnected</span>
+      <span class="label-sm" data-i18n="label_websocket">WebSocket:</span>
+      <span id="wsStatus" class="label-sm font-mono" style="color: #64748b;" data-i18n="ws_disconnected">Disconnected</span>
     </div>
     <div class="log-area" id="logArea" style="width: 400px;">
-      <div class="label-sm text-slate-500">Waiting for messages...</div>
+      <div class="label-sm text-slate-500" data-i18n="log_waiting">Waiting for messages...</div>
     </div>
   </footer>
 
   <!-- ═══════════════════════════════════════════════════════════ -->
-  <!-- JAVASCRIPT                                                 -->
+  <!-- i18n LANGUAGE SWITCHING MODULE                              -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <script>
+    // ── i18n Dictionary ──
+    const i18nDict = {
+      zh: {
+        dashboard_title: "MuJoCo-Bench-IDO",
+        dashboard_subtitle: "IDO/TOMAS 连续物理基准验证平台",
+        lang_btn: "中/EN",
+        nav_manual: "用户手册",
+        nav_docs: "MuJoCo 文档",
+        status_idle: "空闲",
+        status_running: "运行中",
+        label_task_select: "任务选择",
+        label_episodes: "Episode 数量",
+        label_max_steps: "最大步数",
+        label_sip_mode: "SIP-Bench 模式",
+        sip_standard: "标准",
+        sip_bench: "SIP-Bench",
+        label_evolution_rounds: "演化轮次",
+        label_kappa_thresh: "κ-Snap 阈值 (δ_K)",
+        label_3d_scene: "3D 场景",
+        scene_plain: "默认 (humanoid-stand)",
+        scene_obstacle: "障碍竞技场",
+        label_3d_vis: "3D 可视化",
+        btn_open_viewer: "🎮 打开 mjviser (8081)",
+        btn_start_run: "▶ 开始运行",
+        btn_stop_run: "⏹ 停止运行",
+        card_run_status: "运行状态",
+        status_no_active_run: "无活跃运行",
+        label_episode: "Episode:",
+        label_step: "步数:",
+        card_eta_trajectory: "η (GaussEx 残差) 轨迹",
+        card_noether_violations: "Noether 违规",
+        gate_energy: "能量门 (E)",
+        gate_force: "力矩门 (F)",
+        gate_collision: "碰撞门 (C)",
+        noether_pct_label: "0% of max steps",
+        card_kappa_snap_status: "κ-Snap 阈值状态",
+        label_current_delta_k: "当前 δ_K",
+        label_snap_triggered: "Snap 触发",
+        snap_no: "否",
+        snap_yes: "是",
+        label_eta_vs_delta_k: "η vs δ_K:",
+        eta_far_from_goal: "η > δ_K (远离目标 — NARLA 原语)",
+        eta_near_goal: "η < δ_K (接近目标 — PD 稳定)",
+        card_psi_anchor: "ψ-Anchor 演化面板",
+        label_policy: "策略",
+        label_epiplexity: "Epiplexity",
+        label_eta_trend: "η 趋势",
+        trend_unknown: "未知",
+        badge_evolving: "演化中",
+        badge_frozen: "冻结",
+        badge_none: "无",
+        card_motor_ic_ranking: "Motor Primitive IC-Value 排名",
+        card_sip_results: "SIP-Bench 纵向结果",
+        sip_waiting: "等待",
+        sip_complete: "完成",
+        th_phase: "阶段",
+        th_avg_eta: "平均 η",
+        th_avg_steps: "平均步数",
+        th_noether_violations: "Noether 违规",
+        phase_t0_initial: "T0 (初始)",
+        phase_t1_iterated: "T1 (迭代演化)",
+        phase_t2_retention: "T2 (保持测试)",
+        label_retention_gain: "Retention Gain",
+        label_stability_index: "Stability Index",
+        hint_retention: "(>1 = 改善持久)",
+        hint_stability: "(<1 = 更稳定)",
+        label_episode_progress: "Episode 进度:",
+        label_websocket: "WebSocket:",
+        ws_disconnected: "未连接",
+        ws_connected: "已连接",
+        log_waiting: "等待消息...",
+        viewer_available: "mjviser 可用",
+        viewer_not_installed: "mjviser 未安装",
+        viewer_opening: "正在打开",
+        viewer_already_running: "mjviser 已在运行",
+      },
+      en: {
+        dashboard_title: "MuJoCo-Bench-IDO",
+        dashboard_subtitle: "IDO/TOMAS Continuous Physics Benchmark",
+        lang_btn: "中/EN",
+        nav_manual: "User Manual",
+        nav_docs: "MuJoCo Docs",
+        status_idle: "Idle",
+        status_running: "Running",
+        label_task_select: "Task Selection",
+        label_episodes: "Episodes",
+        label_max_steps: "Max Steps",
+        label_sip_mode: "SIP-Bench Mode",
+        sip_standard: "Standard",
+        sip_bench: "SIP-Bench",
+        label_evolution_rounds: "Evolution Rounds",
+        label_kappa_thresh: "κ-Snap Threshold (δ_K)",
+        label_3d_scene: "3D Scene",
+        scene_plain: "Default (humanoid-stand)",
+        scene_obstacle: "Obstacle Arena",
+        label_3d_vis: "3D Visualization",
+        btn_open_viewer: "🎮 Open mjviser (8081)",
+        btn_start_run: "▶ Start Run",
+        btn_stop_run: "⏹ Stop Run",
+        card_run_status: "Run Status",
+        status_no_active_run: "No active run",
+        label_episode: "Episode:",
+        label_step: "Step:",
+        card_eta_trajectory: "η (GaussEx Residual) Trajectory",
+        card_noether_violations: "Noether Violations",
+        gate_energy: "Energy Gate (E)",
+        gate_force: "Force Gate (F)",
+        gate_collision: "Collision Gate (C)",
+        noether_pct_label: "0% of max steps",
+        card_kappa_snap_status: "κ-Snap Threshold Status",
+        label_current_delta_k: "Current δ_K",
+        label_snap_triggered: "Snap Triggered",
+        snap_no: "No",
+        snap_yes: "Yes",
+        label_eta_vs_delta_k: "η vs δ_K:",
+        eta_far_from_goal: "η > δ_K (far from goal — NARLA primitive)",
+        eta_near_goal: "η < δ_K (near goal — PD stabilize)",
+        card_psi_anchor: "ψ-Anchor Evolution Panel",
+        label_policy: "Policy",
+        label_epiplexity: "Epiplexity",
+        label_eta_trend: "η Trend",
+        trend_unknown: "unknown",
+        badge_evolving: "evolving",
+        badge_frozen: "frozen",
+        badge_none: "none",
+        card_motor_ic_ranking: "Motor Primitives IC-Value Ranking",
+        card_sip_results: "SIP-Bench Longitudinal Results",
+        sip_waiting: "Waiting",
+        sip_complete: "Complete",
+        th_phase: "Phase",
+        th_avg_eta: "Avg η",
+        th_avg_steps: "Avg Steps",
+        th_noether_violations: "Noether Violations",
+        phase_t0_initial: "T0 (Initial)",
+        phase_t1_iterated: "T1 (Iterated)",
+        phase_t2_retention: "T2 (Retention)",
+        label_retention_gain: "Retention Gain",
+        label_stability_index: "Stability Index",
+        hint_retention: "(>1 = improvement persisted)",
+        hint_stability: "(<1 = more stable)",
+        label_episode_progress: "Episode Progress:",
+        label_websocket: "WebSocket:",
+        ws_disconnected: "Disconnected",
+        ws_connected: "Connected",
+        log_waiting: "Waiting for messages...",
+        viewer_available: "mjviser available",
+        viewer_not_installed: "mjviser not installed",
+        viewer_opening: "Opening",
+        viewer_already_running: "mjviser already running",
+      }
+    };
+
+    // ── Language Toggle Logic ──
+    let currentLang = localStorage.getItem('mujoco-bench-lang') || 'zh';
+
+    function applyLanguage(lang) {
+      currentLang = lang;
+      localStorage.setItem('mujoco-bench-lang', lang);
+      const dict = i18nDict[lang];
+      if (!dict) return;
+
+      // Update all data-i18n elements
+      document.querySelectorAll('[data-i18n]').forEach(function(el) {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key] !== undefined) {
+          el.textContent = dict[key];
+        }
+      });
+
+      // Update select option text
+      document.querySelectorAll('[data-i18n-opt]').forEach(function(el) {
+        const key = el.getAttribute('data-i18n-opt');
+        if (dict[key] !== undefined) {
+          el.textContent = dict[key];
+        }
+      });
+
+      // Update document language attribute
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+    }
+
+    function toggleLanguage() {
+      const newLang = currentLang === 'zh' ? 'en' : 'zh';
+      applyLanguage(newLang);
+    }
+
+    // ── Apply language on load ──
+    document.addEventListener('DOMContentLoaded', function() {
+      applyLanguage(currentLang);
+    });
+  </script>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- JAVASCRIPT (Core Dashboard Logic)                          -->
   <!-- ═══════════════════════════════════════════════════════════ -->
   <script>
     // ── Global State ──
@@ -508,7 +732,6 @@
     let maxStepsForRun = 1000;
 
     // ── Chart Data ──
-    // Each episode has its own dataset on the η chart
     let etaDatasets = {};
     let etaStepCounter = {};
     let motorICValues = [0.70, 0.65, 0.65, 0.50, 0.40];
@@ -528,7 +751,6 @@
 
     // ── Initialize Charts ──
     function initCharts() {
-      // η Trajectory Chart
       const etaCtx = document.getElementById('etaChart').getContext('2d');
       etaChart = new Chart(etaCtx, {
         type: 'line',
@@ -559,7 +781,6 @@
         },
       });
 
-      // Motor IC-Value Bar Chart
       const motorCtx = document.getElementById('motorChart').getContext('2d');
       motorChart = new Chart(motorCtx, {
         type: 'bar',
@@ -609,16 +830,17 @@
       ws = new WebSocket(wsUrl);
 
       ws.onopen = function() {
-        document.getElementById('wsStatus').textContent = 'Connected';
+        const dict = i18nDict[currentLang];
+        document.getElementById('wsStatus').textContent = dict.ws_connected;
         document.getElementById('wsStatus').style.color = '#22c55e';
         addLog('WebSocket connected to /ws/stream');
       };
 
       ws.onclose = function() {
-        document.getElementById('wsStatus').textContent = 'Disconnected';
+        const dict = i18nDict[currentLang];
+        document.getElementById('wsStatus').textContent = dict.ws_disconnected;
         document.getElementById('wsStatus').style.color = '#64748b';
         addLog('WebSocket disconnected');
-        // Reconnect after 3 seconds
         setTimeout(connectWebSocket, 3000);
       };
 
@@ -634,14 +856,15 @@
 
     // ── Handle Incoming WebSocket Messages ──
     function handleWebSocketMessage(data) {
+      const dict = i18nDict[currentLang];
       switch (data.type) {
         case 'connected':
           addLog(`Connected to server v${data.version}`);
           if (data.mjviser_available) {
-            document.getElementById('viewerStatus').textContent = 'mjviser available';
+            document.getElementById('viewerStatus').textContent = dict.viewer_available;
             document.getElementById('viewerBtn').disabled = false;
           } else {
-            document.getElementById('viewerStatus').textContent = 'mjviser not installed';
+            document.getElementById('viewerStatus').textContent = dict.viewer_not_installed;
             document.getElementById('viewerBtn').disabled = true;
           }
           break;
@@ -653,17 +876,13 @@
           maxStepsForRun = data.max_steps;
           updateRunningUI(true);
           addLog(`Run started: ${data.task}, ${data.episodes} episodes, max_steps=${data.max_steps}, mode=${data.eval_mode}`);
-          // Clear previous chart data
           clearChartData();
-          // Show SIP panel if SIP mode
           if (data.eval_mode === 'sip') {
             document.getElementById('sipPanel').style.display = '';
           }
           break;
 
-        // Per-step metrics (the main streaming data)
         default:
-          // If the message has 'step' and 'episode' keys, it's a step update
           if (data.step !== undefined && data.episode !== undefined) {
             updateStepMetrics(data);
           }
@@ -691,8 +910,6 @@
           break;
 
         case 'sip_phase_step':
-          // This is an episode-aggregated summary, not per-step data
-          // Per-step streaming data is received separately via the default case
           addLog(`SIP ${data.phase} episode ${data.episode} complete: steps=${data.metrics.steps_to_goal}, η=${data.metrics.final_eta.toFixed(4)}`);
           break;
 
@@ -717,11 +934,11 @@
 
     // ── Update Step Metrics (per-step WebSocket data) ──
     function updateStepMetrics(data) {
+      const dict = i18nDict[currentLang];
       const episode = data.episode;
       const step = data.step;
       const eta = data.eta;
 
-      // ── η Chart: add data point to the current episode's dataset ──
       if (!etaDatasets[episode]) {
         const colorIdx = (episode - 1) % episodeColors.length;
         etaDatasets[episode] = {
@@ -738,10 +955,8 @@
       etaDatasets[episode].data.push({ x: step, y: eta });
       etaChart.update('none');
 
-      // ── Update η latest value ──
       document.getElementById('etaLatest').textContent = eta.toFixed(4);
 
-      // ── Noether Violations ──
       const nv = data.noether_violations;
       document.getElementById('noetherCount').textContent = nv;
       const nvPct = Math.min(100, (nv / maxStepsForRun) * 100);
@@ -753,54 +968,52 @@
         document.getElementById('noetherCount').style.color = '#22c55e';
       }
 
-      // ── κ-Snap Status ──
       document.getElementById('deltaKValue').textContent = data.delta_k.toFixed(4);
       const snapTriggered = data.kappa_snap_triggered;
       const snapEl = document.getElementById('snapStatus');
       if (snapTriggered) {
-        snapEl.textContent = 'Yes';
+        snapEl.textContent = dict.snap_yes;
         snapEl.style.color = '#22c55e';
       } else {
-        snapEl.textContent = 'No';
+        snapEl.textContent = dict.snap_no;
         snapEl.style.color = '#94a3b8';
       }
 
-      // η vs δ_K comparison
+      const etaVsDeltaEl = document.getElementById('etaVsDeltaK');
       if (eta < data.delta_k) {
-        document.getElementById('etaVsDeltaK').textContent = `η < δ_K (near goal — PD stabilize)`;
-        document.getElementById('etaVsDeltaK').style.color = '#22c55e';
+        etaVsDeltaEl.textContent = dict.eta_near_goal;
+        etaVsDeltaEl.style.color = '#22c55e';
       } else {
-        document.getElementById('etaVsDeltaK').textContent = `η > δ_K (far from goal — NARLA primitive)`;
-        document.getElementById('etaVsDeltaK').style.color = '#f87171';
+        etaVsDeltaEl.textContent = dict.eta_far_from_goal;
+        etaVsDeltaEl.style.color = '#f87171';
       }
 
-      // ── ψ-Anchor Panel ──
       const policy = data.psi_anchor_policy;
-      document.getElementById('psiPolicy').textContent = policy;
+      const policyEl = document.getElementById('psiPolicy');
+      const badgeEl = document.getElementById('psiPolicyBadge');
+      policyEl.textContent = policy;
       if (policy === 'freeze') {
-        document.getElementById('psiPolicy').style.color = '#f87171';
-        document.getElementById('psiPolicyBadge').textContent = 'frozen';
-        document.getElementById('psiPolicyBadge').style.background = '#7f1d1d';
-        document.getElementById('psiPolicyBadge').style.color = '#f87171';
+        policyEl.style.color = '#f87171';
+        badgeEl.textContent = dict.badge_frozen;
+        badgeEl.style.background = '#7f1d1d';
+        badgeEl.style.color = '#f87171';
       } else if (policy === 'light') {
-        document.getElementById('psiPolicy').style.color = '#818cf8';
-        document.getElementById('psiPolicyBadge').textContent = 'evolving';
-        document.getElementById('psiPolicyBadge').style.background = '#312e81';
-        document.getElementById('psiPolicyBadge').style.color = '#818cf8';
+        policyEl.style.color = '#818cf8';
+        badgeEl.textContent = dict.badge_evolving;
+        badgeEl.style.background = '#312e81';
+        badgeEl.style.color = '#818cf8';
       } else {
-        document.getElementById('psiPolicy').style.color = '#94a3b8';
-        document.getElementById('psiPolicyBadge').textContent = 'none';
-        document.getElementById('psiPolicyBadge').style.background = '#1e293b';
-        document.getElementById('psiPolicyBadge').style.color = '#94a3b8';
+        policyEl.style.color = '#94a3b8';
+        badgeEl.textContent = dict.badge_none;
+        badgeEl.style.background = '#1e293b';
+        badgeEl.style.color = '#94a3b8';
       }
 
       document.getElementById('epiplexityValue').textContent = data.epiplexity.toFixed(2);
 
-      // ── Motor IC-Values Bar Chart ──
       if (data.motor_ic_values && data.motor_ic_values.length > 0) {
         motorICValues = data.motor_ic_values;
         motorChart.data.datasets[0].data = motorICValues;
-        // Update labels if count changed
         if (motorICValues.length !== motorChart.data.labels.length) {
           motorLabels = [];
           for (let i = 0; i < motorICValues.length; i++) {
@@ -811,11 +1024,9 @@
         motorChart.update('none');
       }
 
-      // ── Update status indicators ──
       document.getElementById('currentEpisode').textContent = `${episode} / ${totalEpisodes}`;
       document.getElementById('currentStep').textContent = step;
 
-      // Episode progress bar
       const epProgress = (episode / totalEpisodes) * 100;
       document.getElementById('episodeProgressBar').style.width = epProgress + '%';
       document.getElementById('episodeProgressLabel').textContent = epProgress.toFixed(0) + '%';
@@ -824,6 +1035,7 @@
     // ── Update SIP-Bench Results ──
     function updateSIPResults(sipResult) {
       if (!sipResult) return;
+      const dict = i18nDict[currentLang];
 
       document.getElementById('sipT0Eta').textContent = sipResult.T0.avg_eta.toFixed(4);
       document.getElementById('sipT0Steps').textContent = sipResult.T0.avg_steps.toFixed(1);
@@ -840,9 +1052,10 @@
       document.getElementById('retentionGain').textContent = sipResult.retention_gain.toFixed(3);
       document.getElementById('stabilityIndex').textContent = sipResult.stability_index.toFixed(3);
 
-      document.getElementById('sipPhaseIndicator').textContent = 'Complete';
-      document.getElementById('sipPhaseIndicator').style.background = '#14532d';
-      document.getElementById('sipPhaseIndicator').style.color = '#22c55e';
+      const indicatorEl = document.getElementById('sipPhaseIndicator');
+      indicatorEl.textContent = dict.sip_complete;
+      indicatorEl.style.background = '#14532d';
+      indicatorEl.style.color = '#22c55e';
     }
 
     // ── Clear Chart Data for New Run ──
@@ -852,7 +1065,6 @@
       etaChart.data.datasets = [];
       etaChart.update('none');
 
-      // Reset dashboard values
       document.getElementById('noetherCount').textContent = '0';
       document.getElementById('noetherProgressBar').style.width = '0%';
       document.getElementById('noetherPctLabel').textContent = '0% of max steps';
@@ -862,7 +1074,6 @@
       document.getElementById('epiplexityValue').textContent = '0.00';
       document.getElementById('psiPolicy').textContent = 'light';
 
-      // Reset SIP panel
       ['sipT0Eta', 'sipT0Steps', 'sipT0NV',
        'sipT1Eta', 'sipT1Steps', 'sipT1NV',
        'sipT2Eta', 'sipT2Steps', 'sipT2NV',
@@ -873,6 +1084,7 @@
 
     // ── UI Helpers ──
     function updateRunningUI(running) {
+      const dict = i18nDict[currentLang];
       const statusDot = document.getElementById('statusDot');
       const statusText = document.getElementById('statusText');
       const startBtn = document.getElementById('startBtn');
@@ -880,12 +1092,12 @@
 
       if (running) {
         statusDot.className = 'status-dot running';
-        statusText.textContent = 'Running';
+        statusText.textContent = dict.status_running;
         startBtn.disabled = true;
         stopBtn.disabled = false;
       } else {
         statusDot.className = 'status-dot idle';
-        statusText.textContent = 'Idle';
+        statusText.textContent = dict.status_idle;
         startBtn.disabled = false;
         stopBtn.disabled = true;
       }
@@ -899,7 +1111,6 @@
       line.style.color = '#94a3b8';
       line.textContent = `[${timeStr}] ${msg}`;
       logArea.appendChild(line);
-      // Keep only last 50 log entries
       while (logArea.children.length > 50) {
         logArea.removeChild(logArea.firstChild);
       }
@@ -958,13 +1169,13 @@
       fetch('/api/start_viewer', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
+        const dict = i18nDict[currentLang];
         if (data.error) {
           addLog(data.error);
           document.getElementById('viewerStatus').textContent = data.error;
         } else {
           addLog(`mjviser starting at ${data.url}`);
-          document.getElementById('viewerStatus').textContent = `Opening ${data.url}...`;
-          // Open viewer in new tab
+          document.getElementById('viewerStatus').textContent = `${dict.viewer_opening} ${data.url}...`;
           window.open(data.url, '_blank');
         }
       })
@@ -973,8 +1184,25 @@
       });
     }
 
+    function setScene() {
+      const sceneType = document.getElementById('sceneSelect').value;
+      fetch('/api/mjviser/scene', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scene_type: sceneType }),
+      })
+      .then(res => res.json())
+      .then(data => {
+        addLog(`3D scene set to: ${data.scene_type}`);
+      })
+      .catch(err => {
+        addLog(`Scene request error: ${err.message}`);
+      });
+    }
+
     function toggleSIP() {
       sipMode = !sipMode;
+      const dict = i18nDict[currentLang];
       const toggle = document.getElementById('sipToggle');
       const label = document.getElementById('sipLabel');
       const evoSection = document.getElementById('evolutionRoundsSection');
@@ -982,14 +1210,13 @@
 
       if (sipMode) {
         toggle.className = 'toggle-switch active';
-        label.textContent = 'SIP-Bench';
+        label.textContent = dict.sip_bench;
         evoSection.style.display = '';
         sipPanel.style.display = '';
       } else {
         toggle.className = 'toggle-switch';
-        label.textContent = 'Standard';
+        label.textContent = dict.sip_standard;
         evoSection.style.display = 'none';
-        // Don't hide SIP panel if it has results
         if (!document.getElementById('retentionGain').textContent ||
             document.getElementById('retentionGain').textContent === '—') {
           sipPanel.style.display = 'none';
@@ -1007,6 +1234,7 @@
       fetch('/api/status')
       .then(res => res.json())
       .then(data => {
+        const dict = i18nDict[currentLang];
         const wasRunning = isRunning;
         isRunning = data.is_running;
 
@@ -1022,10 +1250,10 @@
 
         if (data.mjviser_available) {
           document.getElementById('viewerBtn').disabled = false;
-          document.getElementById('viewerStatus').textContent = 'mjviser available';
+          document.getElementById('viewerStatus').textContent = dict.viewer_available;
         } else {
           document.getElementById('viewerBtn').disabled = true;
-          document.getElementById('viewerStatus').textContent = 'mjviser not installed';
+          document.getElementById('viewerStatus').textContent = dict.viewer_not_installed;
         }
       })
       .catch(() => {});
@@ -1033,11 +1261,11 @@
 
     // ── Initialize ──
     window.addEventListener('DOMContentLoaded', function() {
+      applyLanguage(currentLang);
       initCharts();
       connectWebSocket();
-      // Poll status every 2 seconds as fallback
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.3.0');
+      addLog('Dashboard initialized v0.3.1');
     });
   </script>
 
