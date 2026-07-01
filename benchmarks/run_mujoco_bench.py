@@ -6,7 +6,7 @@ Runs IDO/TOMAS agent episodes on dm_control benchmark tasks and
 collects performance metrics (steps-to-goal, final η, Noether
 violations, elapsed time, average return).
 
-Supported tasks: humanoid-reach, hopper-stand, walker-run, reacher-easy.
+Supported tasks: humanoid-stand, hopper-stand, walker-run, reacher-easy.
 
 v0.2.0 Upgrade: SIP-Bench longitudinal evaluation mode
   - Three phases: T0 (Initial), T1 (Iterated), T2 (Retention)
@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 from agent.mujoco_ido_agent import IDOMuJoCoAgent
 from agent.psi_anchor import PsiAnchor
 from core.goal_eml_mj import (GoalEML,
-                               make_humanoid_reach_eml,
+                               make_humanoid_stand_eml,
                                make_hopper_stand_eml,
                                make_walker_run_eml,
                                make_reacher_easy_eml)
@@ -38,7 +38,7 @@ from core.kappa_snap_mj import FlowMatchingEtaPredictor
 IDO_RUN_MUJOCO_BENCH_VERSION: str = "v0.2.0"
 
 TASK_REGISTRY: dict = {
-    'humanoid-reach':  make_humanoid_reach_eml,
+    'humanoid-stand':  make_humanoid_stand_eml,
     'hopper-stand':    make_hopper_stand_eml,
     'walker-run':      make_walker_run_eml,
     'reacher-easy':    make_reacher_easy_eml,
@@ -53,7 +53,7 @@ def _import_env(task: str):
     dm_control is not installed or the task name is invalid.
 
     Args:
-        task: Task identifier string (e.g., 'humanoid-reach').
+        task: Task identifier string (e.g., 'humanoid-stand').
 
     Returns:
         dm_control Environment instance.
@@ -65,8 +65,9 @@ def _import_env(task: str):
     except ImportError:
         print("ERROR: dm_control not installed. pip install dm_control mujoco")
         sys.exit(1)
-    except ValueError:
-        print(f"ERROR: unknown task '{task}'. Choose from: {list(TASK_REGISTRY.keys())}")
+    except Exception as e:
+        print(f"ERROR: failed to load task '{task}': {e}")
+        print(f"Choose from: {list(TASK_REGISTRY.keys())}")
         sys.exit(1)
 
 
@@ -113,7 +114,7 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
         if replay is not None:
             action = replay
         else:
-            action = agent.choose_action(timestep)
+            action = agent.choose_action(timestep, physics=env.physics)
 
         try:
             timestep = env.step(action)
@@ -204,7 +205,7 @@ def _aggregate_metrics(results: List[dict]) -> dict:
     return summary
 
 
-def run_benchmark(task: str = 'humanoid-reach',
+def run_benchmark(task: str = 'humanoid-stand',
                   episodes: int = 5,
                   max_steps: int = 2000,
                   kappa_thresh: float = 0.05,
@@ -316,7 +317,7 @@ def _run_sip_phase(env, agent: IDOMuJoCoAgent,
     return phase_summary
 
 
-def run_sip_benchmark(task: str = 'humanoid-reach',
+def run_sip_benchmark(task: str = 'humanoid-stand',
                       episodes: int = 5,
                       max_steps: int = 2000,
                       kappa_thresh: float = 0.05,
@@ -530,7 +531,7 @@ def run_sip_benchmark(task: str = 'humanoid-reach',
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="IDO/TOMAS MuJoCo Benchmark Runner (v0.2.0)")
-    parser.add_argument('--task', default='humanoid-reach',
+    parser.add_argument('--task', default='humanoid-stand',
                         help=f"Task name. Available: {list(TASK_REGISTRY.keys())}")
     parser.add_argument('--episodes', type=int, default=5)
     parser.add_argument('--max_steps', type=int, default=2000)

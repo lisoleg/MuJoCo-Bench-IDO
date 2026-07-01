@@ -20,7 +20,7 @@ if PROJECT_ROOT not in sys.path:
 
 from core.goal_eml_mj import (
     GoalEML, IDO_GOAL_EML_MJ_VERSION,
-    make_humanoid_reach_eml,
+    make_humanoid_stand_eml,
     make_hopper_stand_eml,
     make_walker_run_eml,
     make_reacher_easy_eml,
@@ -177,39 +177,22 @@ class TestGoalEMLFactories(unittest.TestCase):
             xpos_map['torso'] = torso_pos
         return MockPhysics(xpos_map=xpos_map)
 
-    def test_make_humanoid_reach_default(self):
-        """make_humanoid_reach_eml with mock physics should return correct GoalEML."""
-        phys = self._make_mock_physics(torso_pos=np.array([0.0, 0.0, 1.5]))
-        g = make_humanoid_reach_eml(phys)
-        self.assertEqual(g.name, 'humanoid_reach')
+    def test_make_humanoid_stand_default(self):
+        """make_humanoid_stand_eml with mock physics should return correct GoalEML."""
+        phys = self._make_mock_physics()
+        g = make_humanoid_stand_eml(phys)
+        self.assertEqual(g.name, 'humanoid_stand')
         self.assertEqual(g.invariants,
-                         ['ee_at_target', 'torso_upright', 'no_self_collide'])
-        # target_pos should be torso + offset [0.5, 0, 0.3]
-        expected = np.array([0.0, 0.0, 1.5]) + np.array([0.5, 0.0, 0.3])
-        np.testing.assert_array_almost_equal(g.target_pos, expected)
+                         ['torso_upright', 'feet_on_ground', 'no_self_collide'])
+        np.testing.assert_array_almost_equal(g.target_pos, [0.0, 0.0, 1.4])
         self.assertAlmostEqual(g.max_energy_inject, 500.0)
         self.assertAlmostEqual(g.delta_K, 0.05)
 
-    def test_make_humanoid_reach_custom_target(self):
-        """make_humanoid_reach_eml should use provided target_pos."""
+    def test_make_humanoid_stand_custom_delta_K(self):
+        """make_humanoid_stand_eml should use provided delta_K."""
         phys = self._make_mock_physics()
-        custom_target = np.array([3.0, 4.0, 5.0])
-        g = make_humanoid_reach_eml(phys, target_pos=custom_target)
-        np.testing.assert_array_almost_equal(g.target_pos, custom_target)
-
-    def test_make_humanoid_reach_custom_delta_K(self):
-        """make_humanoid_reach_eml should use provided delta_K."""
-        phys = self._make_mock_physics(torso_pos=np.array([0.0, 0.0, 1.5]))
-        g = make_humanoid_reach_eml(phys, delta_K=0.1)
+        g = make_humanoid_stand_eml(phys, delta_K=0.1)
         self.assertAlmostEqual(g.delta_K, 0.1)
-
-    def test_make_humanoid_reach_no_torso_key(self):
-        """make_humanoid_reach_eml should fallback when xpos lacks 'torso'."""
-        phys = self._make_mock_physics()  # no torso in xpos_map
-        # KeyError on xpos['torso'] → fallback root = [0,0,1.5]
-        g = make_humanoid_reach_eml(phys)
-        expected = np.array([0.0, 0.0, 1.5]) + np.array([0.5, 0.0, 0.3])
-        np.testing.assert_array_almost_equal(g.target_pos, expected)
 
     def test_make_hopper_stand(self):
         """make_hopper_stand_eml should return correct GoalEML."""

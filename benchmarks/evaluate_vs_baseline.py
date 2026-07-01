@@ -28,7 +28,7 @@ from benchmarks.run_mujoco_bench import (
     _import_env,
     run_single_episode,
 )
-from core.goal_eml_mj import GoalEML, make_humanoid_reach_eml
+from core.goal_eml_mj import GoalEML, make_humanoid_stand_eml
 
 BASELINE_REGISTRY: Dict[str, Callable] = {}
 
@@ -219,7 +219,7 @@ def _remap_ido_metrics(raw: dict, max_steps: int) -> dict:
     }
 
 
-def run_evaluation(task: str = 'humanoid-reach',
+def run_evaluation(task: str = 'humanoid-stand',
                    episodes: int = 5,
                    max_steps: int = 2000,
                    kappa_thresh: float = 0.05,
@@ -420,7 +420,7 @@ def run_evaluation(task: str = 'humanoid-reach',
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="IDO vs PPO/SAC/TD-MPC2 Comparative Evaluation")
-    parser.add_argument('--task', default='humanoid-reach',
+    parser.add_argument('--task', default='humanoid-stand',
                         help=f"dm_control task. Available: {list(TASK_REGISTRY.keys())}")
     parser.add_argument('--episodes', type=int, default=5)
     parser.add_argument('--max_steps', type=int, default=2000)

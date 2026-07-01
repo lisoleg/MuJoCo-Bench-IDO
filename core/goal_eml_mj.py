@@ -6,7 +6,7 @@ Defines the GoalEML dataclass that encodes IDO task invariants
 (position, orientation, energy budget, tolerance) and factory
 functions for four dm_control benchmark tasks:
 
-  - humanoid-reach: end-effector reach with upright torso
+  - humanoid-stand: upright standing with ground contact
   - hopper-stand:   standing balance with ground contact
   - walker-run:     forward locomotion without falling
   - reacher-easy:   simple 2-DOF reaching
@@ -47,37 +47,27 @@ class GoalEML:
     ori_tol: float = 0.15
 
 
-def make_humanoid_reach_eml(physics,
-                             target_pos: Optional[np.ndarray] = None,
+def make_humanoid_stand_eml(physics,
                              delta_K: float = 0.05) -> GoalEML:
-    """Factory for humanoid reach GoalEML.
+    """Factory for humanoid stand GoalEML.
 
-    Creates a GoalEML for the humanoid-reach task where the right hand
-    must reach a target position while keeping the torso upright and
-    avoiding self-collision.
+    Creates a GoalEML for the humanoid-stand task where the torso must
+    remain upright with feet on the ground.
 
     Args:
-        physics: dm_control Physics instance (used to derive default target).
-        target_pos: Override target position. If None, derived from torso.
+        physics: dm_control Physics instance.
         delta_K: κ-Snap residual threshold.
 
     Returns:
-        GoalEML instance for humanoid-reach task.
+        GoalEML instance for humanoid-stand task.
     """
-    if target_pos is None:
-        try:
-            root: np.ndarray = physics.named.data.xpos['torso', :].copy()
-        except (KeyError, IndexError):
-            root = np.array([0.0, 0.0, 1.5])
-        target_pos = root + np.array([0.5, 0.0, 0.3])
-
     return GoalEML(
-        name='humanoid_reach',
-        invariants=['ee_at_target', 'torso_upright', 'no_self_collide'],
-        target_pos=target_pos,
+        name='humanoid_stand',
+        invariants=['torso_upright', 'feet_on_ground', 'no_self_collide'],
+        target_pos=np.array([0.0, 0.0, 1.4]),
         delta_K=delta_K,
         max_energy_inject=500.0,
-        pos_tol=0.02,
+        pos_tol=0.05,
         ori_tol=0.15,
     )
 

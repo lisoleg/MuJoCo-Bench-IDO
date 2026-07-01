@@ -63,9 +63,10 @@ class MotorPrimitives:
         ]
 
     def step_forward(self, phy) -> None:
-        """Apply forward stepping control and advance physics one step.
+        """Apply forward stepping control.
 
         Adds +0.3 to the first two joint controls, clipped to [-1, 1].
+        Note: Does NOT advance physics; env.step() handles stepping.
 
         Args:
             phy: dm_control Physics instance.
@@ -74,11 +75,9 @@ class MotorPrimitives:
         if self.n_joints >= 2:
             ctrl[:2] = np.clip(ctrl[:2] + 0.3, -1.0, 1.0)
         phy.data.ctrl[:] = ctrl
-        import dm_control.mujoco as mj
-        mj.mj_step(phy.model, phy.data)
 
     def step_left(self, phy) -> None:
-        """Apply leftward stepping control and advance physics one step.
+        """Apply leftward stepping control.
 
         Subtracts 0.3 from the first joint control, clipped to [-1, 1].
 
@@ -89,11 +88,9 @@ class MotorPrimitives:
         if self.n_joints >= 2:
             ctrl[0] = np.clip(ctrl[0] - 0.3, -1.0, 1.0)
         phy.data.ctrl[:] = ctrl
-        import dm_control.mujoco as mj
-        mj.mj_step(phy.model, phy.data)
 
     def step_right(self, phy) -> None:
-        """Apply rightward stepping control and advance physics one step.
+        """Apply rightward stepping control.
 
         Adds 0.3 to the first joint control, clipped to [-1, 1].
 
@@ -104,11 +101,9 @@ class MotorPrimitives:
         if self.n_joints >= 2:
             ctrl[0] = np.clip(ctrl[0] + 0.3, -1.0, 1.0)
         phy.data.ctrl[:] = ctrl
-        import dm_control.mujoco as mj
-        mj.mj_step(phy.model, phy.data)
 
     def squat(self, phy) -> None:
-        """Apply squatting control and advance physics one step.
+        """Apply squatting control.
 
         Subtracts 0.2 from the second joint control, clipped to [-1, 1].
 
@@ -119,11 +114,9 @@ class MotorPrimitives:
         if self.n_joints >= 2:
             ctrl[1] = np.clip(ctrl[1] - 0.2, -1.0, 1.0)
         phy.data.ctrl[:] = ctrl
-        import dm_control.mujoco as mj
-        mj.mj_step(phy.model, phy.data)
 
     def torque_explore(self, phy) -> None:
-        """Apply random torque exploration and advance physics one step.
+        """Apply random torque exploration.
 
         Adds uniform noise in [-0.1, 0.1] to all joint controls.
 
@@ -134,8 +127,6 @@ class MotorPrimitives:
         noise = np.random.uniform(-0.1, 0.1, size=self.n_joints)
         ctrl[:self.n_joints] = np.clip(ctrl[:self.n_joints] + noise, -1.0, 1.0)
         phy.data.ctrl[:] = ctrl
-        import dm_control.mujoco as mj
-        mj.mj_step(phy.model, phy.data)
 
     def pd_stabilize(self, phy, target_pos: np.ndarray,
                      ee_pos: np.ndarray) -> np.ndarray:
@@ -234,19 +225,19 @@ class IDOMuJoCoAgent:
         self.psi_anchor: Optional[PsiAnchor] = psi_anchor
         self.flow_predictor: Optional[FlowMatchingEtaPredictor] = flow_predictor
 
-    def _extract_eml_obs(self, timestep) -> dict:
-        """Extract EML observation dict from a dm_control timestep.
+    def _extract_eml_obs(self, physics) -> dict:
+        """Extract EML observation dict from dm_control physics state.
 
         Reads qpos, qvel, end-effector position/velocity, and potential/
         kinetic/total energy from the physics state.
 
         Args:
-            timestep: dm_control TimeStep with .physics attribute.
+            physics: dm_control Physics instance (from env.physics).
 
         Returns:
             Dict with keys: ee_pos, qpos, qvel, E_pot, E_kin, E_total, ee_vel.
         """
-        phys = timestep.physics
+        phys = physics
         obs: dict = {}
 
         # End-effector position (fallback to first 3 qpos)
@@ -301,7 +292,7 @@ class IDOMuJoCoAgent:
                                 self.env.physics.data,
                                 self.goal)
 
-    def choose_action(self, timestep) -> np.ndarray:
+    def choose_action(self, timestep, physics=None) -> np.ndarray:
         """Select control action via IDO decision loop.
 
         Decision path:
@@ -315,13 +306,17 @@ class IDOMuJoCoAgent:
         6. Critique: if stall detected, relax κ_thresh / increase max_stall.
 
         Args:
-            timestep: dm_control TimeStep with .physics attribute.
+            timestep: dm_control TimeStep (observation, reward, etc).
+            physics: dm_control Physics instance (from env.physics).
+                If None, attempts timestep.physics (legacy compatibility).
 
         Returns:
             Control array of shape (nu,) clipped to [-1, 1].
         """
-        phys = timestep.physics
-        z_i = self._extract_eml_obs(timestep)
+        phys = physics if physics is not None else getattr(timestep, 'physics', None)
+        if phys is None:
+            raise ValueError("physics must be provided (either via physics arg or timestep.physics)")
+        z_i = self._extract_eml_obs(phys)
 
         # ── v0.2.0: κ-Snap with flow predictor (forward-looking η) ──
         eta: float = self._compute_kappa_snap(z_i)

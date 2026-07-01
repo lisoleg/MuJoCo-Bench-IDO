@@ -131,7 +131,7 @@ class TestSIPBenchStructure:
 
     def test_task_registry_has_all_tasks(self) -> None:
         """TASK_REGISTRY contains all four standard tasks."""
-        expected_tasks: list = ['humanoid-reach', 'hopper-stand',
+        expected_tasks: list = ['humanoid-stand', 'hopper-stand',
                                 'walker-run', 'reacher-easy']
         for task in expected_tasks:
             assert task in TASK_REGISTRY
