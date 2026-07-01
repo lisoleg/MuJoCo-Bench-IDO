@@ -287,13 +287,16 @@ def gauss_ex_residual(z_i: dict,
         Scalar residual η (float). Lower η means closer to goal manifold.
         If flow_predictor is provided, η is trend-adjusted with predicted future.
     """
-    # Position error
-    ee: np.ndarray = z_i.get('ee_pos', np.zeros(3))
-    target: np.ndarray = goal.target_pos
-    if ee is None or target is None:
-        pos_err: float = 0.0
-    else:
-        pos_err = float(np.linalg.norm(np.asarray(ee) - np.asarray(target)))
+    # Position error — align ee and target dimensions (pad/trim to same length)
+    ee: np.ndarray = np.asarray(z_i.get('ee_pos', np.zeros(3)))
+    target: np.ndarray = np.asarray(goal.target_pos)
+    # Pad shorter array with zeros to match dimensions
+    max_dim: int = max(len(ee), len(target))
+    ee_padded: np.ndarray = np.zeros(max_dim)
+    ee_padded[:len(ee)] = ee
+    target_padded: np.ndarray = np.zeros(max_dim)
+    target_padded[:len(target)] = target
+    pos_err: float = float(np.linalg.norm(ee_padded - target_padded))
 
     # Orientation (tilt) error via quaternion → z-axis
     quat: Optional[np.ndarray] = None

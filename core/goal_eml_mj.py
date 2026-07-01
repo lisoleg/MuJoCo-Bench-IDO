@@ -127,7 +127,7 @@ def make_reacher_easy_eml(physics,
     """Factory for reacher easy GoalEML.
 
     Creates a GoalEML for the reacher-easy task where the end-effector
-    must reach a small target offset.
+    must reach a small target offset (2D task in XY plane).
 
     Args:
         physics: dm_control Physics instance.
@@ -139,7 +139,7 @@ def make_reacher_easy_eml(physics,
     return GoalEML(
         name='reacher_easy',
         invariants=['ee_at_target'],
-        target_pos=np.array([0.1, 0.1, 0.0]),
+        target_pos=np.array([0.0, 0.0]),  # 2D target (reacher operates in XY plane)
         delta_K=delta_K,
         max_energy_inject=50.0,
         pos_tol=0.01,

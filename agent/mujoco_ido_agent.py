@@ -225,14 +225,20 @@ class IDOMuJoCoAgent:
         self.psi_anchor: Optional[PsiAnchor] = psi_anchor
         self.flow_predictor: Optional[FlowMatchingEtaPredictor] = flow_predictor
 
-    def _extract_eml_obs(self, physics) -> dict:
+    def _extract_eml_obs(self, physics, timestep=None) -> dict:
         """Extract EML observation dict from dm_control physics state.
 
         Reads qpos, qvel, end-effector position/velocity, and potential/
         kinetic/total energy from the physics state.
 
+        Handles task-specific observation differences:
+        - humanoid: ee_pos from xpos['right_hand']
+        - reacher: ee_pos from timestep.observation['position'] + 'to_target'
+        - hopper/walker: ee_pos from qpos[:3] (center-of-mass proxy)
+
         Args:
             physics: dm_control Physics instance (from env.physics).
+            timestep: dm_control TimeStep (optional, used for observation-based extraction).
 
         Returns:
             Dict with keys: ee_pos, qpos, qvel, E_pot, E_kin, E_total, ee_vel.
@@ -240,11 +246,24 @@ class IDOMuJoCoAgent:
         phys = physics
         obs: dict = {}
 
-        # End-effector position (fallback to first 3 qpos)
+        # End-effector position — fallback chain:
+        # 1. Try xpos['right_hand'] (humanoid)
+        # 2. Try timestep.observation for reacher-style tasks
+        # 3. Fallback to qpos[:3] (hopper/walker)
         try:
             obs['ee_pos'] = phys.named.data.xpos['right_hand', :].copy()
-        except (KeyError, IndexError):
-            obs['ee_pos'] = phys.data.qpos[:3].copy()
+        except (KeyError, IndexError, AttributeError):
+            if timestep is not None and hasattr(timestep, 'observation'):
+                # For reacher: to_target gives vector to target
+                to_target = timestep.observation.get('to_target', None)
+                if to_target is not None:
+                    # reacher: position + to_target → ee_pos relative to target
+                    pos = timestep.observation.get('position', np.zeros(2))
+                    obs['ee_pos'] = np.array(pos)  # 2D ee_pos
+                else:
+                    obs['ee_pos'] = phys.data.qpos[:3].copy()
+            else:
+                obs['ee_pos'] = phys.data.qpos[:min(3, len(phys.data.qpos))].copy()
 
         # Generalized positions and velocities (clipped to model dimensions)
         nq: int = min(phys.model.nq, len(phys.data.qpos))
@@ -316,7 +335,7 @@ class IDOMuJoCoAgent:
         phys = physics if physics is not None else getattr(timestep, 'physics', None)
         if phys is None:
             raise ValueError("physics must be provided (either via physics arg or timestep.physics)")
-        z_i = self._extract_eml_obs(phys)
+        z_i = self._extract_eml_obs(phys, timestep=timestep)
 
         # ── v0.2.0: κ-Snap with flow predictor (forward-looking η) ──
         eta: float = self._compute_kappa_snap(z_i)
@@ -367,7 +386,13 @@ class IDOMuJoCoAgent:
         best_score: float = -np.inf
 
         for macro_fn, base_score in self.macros:
-            desired = target - ee_pos
+            # Align dimensions: pad shorter array to match
+            max_d: int = max(len(ee_pos), len(target))
+            ee_pad: np.ndarray = np.zeros(max_d)
+            ee_pad[:len(ee_pos)] = ee_pos
+            tgt_pad: np.ndarray = np.zeros(max_d)
+            tgt_pad[:len(target)] = target
+            desired = tgt_pad - ee_pad
             score: float = base_score - np.linalg.norm(desired)
             if score > best_score:
                 best_score = score

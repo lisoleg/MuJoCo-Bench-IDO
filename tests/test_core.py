@@ -232,7 +232,7 @@ class TestGoalEMLFactories(unittest.TestCase):
         g = make_reacher_easy_eml(phys)
         self.assertEqual(g.name, 'reacher_easy')
         self.assertEqual(g.invariants, ['ee_at_target'])
-        np.testing.assert_array_almost_equal(g.target_pos, [0.1, 0.1, 0.0])
+        np.testing.assert_array_almost_equal(g.target_pos, [0.0, 0.0])
         self.assertAlmostEqual(g.max_energy_inject, 50.0)
         self.assertAlmostEqual(g.delta_K, 0.02)
         self.assertAlmostEqual(g.pos_tol, 0.01)

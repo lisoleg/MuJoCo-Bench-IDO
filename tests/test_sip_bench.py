@@ -266,6 +266,8 @@ class TestRunSingleEpisodeMetrics:
         mock_timestep.physics = mock_physics
         mock_timestep.reward = 0.5
         mock_timestep.last = MagicMock(return_value=False)
+        # Ensure timestep.observation doesn't have 'to_target' (not a reacher task)
+        mock_timestep.observation = {}
 
         mock_env.physics = mock_physics
         mock_env.reset = MagicMock(return_value=mock_timestep)
