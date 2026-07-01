@@ -9,8 +9,8 @@
 
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0.1 0.2 0.4" width="512" height="512"/>
-    <texture name="grid_tex" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.15 0.25 0.35" width="512" height="512" mark="0" markrgb="0.4 0.6 0.8"/>
-    <material name="grid_mat" texture="grid_tex" texrepeat="8 8" reflectance="0.2"/>
+    <texture name="grid_tex" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.15 0.25 0.35" width="512" height="512" mark="none" markrgb="0.4 0.6 0.8"/>
+    <material name="grid_mat" texture="grid_tex" texrepeat="12 12" reflectance="0.2"/>
     <material name="wall_mat" rgba="0.6 0.3 0.2 1" reflectance="0.1"/>
     <material name="cylinder_mat" rgba="0.8 0.7 0.2 1" reflectance="0.3"/>
     <material name="block_mat" rgba="0.4 0.6 0.3 1" reflectance="0.1"/>
@@ -19,51 +19,50 @@
   </asset>
 
   <worldbody>
-    <!-- Ground plane -->
-    <geom name="ground" type="plane" size="10 10 0.1" material="grid_mat" contype="1" conaffinity="1"/>
+    <!-- Ground plane — size 12×12 to accommodate waypoint range [-6, 6] -->
+    <geom name="ground" type="plane" size="12 12 0.1" material="grid_mat" contype="1" conaffinity="1"/>
     <light directional="true" pos="0 0 5" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3"/>
 
-    <!-- ─── Obstacles ─── -->
+    <!-- ─── Static Obstacles (no joints — fixed to worldbody) ─── -->
 
-    <!-- Wall 1: Low wall in front of starting area -->
-    <body name="wall_front" pos="2 0 0.3">
-      <joint type="free" damping="0.001"/>
-      <geom name="wall_front_geom" type="box" size="0.4 3 0.3" material="wall_mat" mass="1000" contype="1" conaffinity="3"/>
+    <!-- Wall 1: Tall wall forcing detour -->
+    <body name="wall_front" pos="3 0 0.5">
+      <geom name="wall_front_geom" type="box" size="0.3 2.5 0.5" material="wall_mat" mass="1000" contype="1" conaffinity="3"/>
     </body>
 
     <!-- Wall 2: Side wall creating corridor -->
-    <body name="wall_side" pos="1.5 2.5 0.5">
-      <joint type="free" damping="0.001"/>
-      <geom name="wall_side_geom" type="box" size="0.3 0.4 0.5" material="wall_mat" mass="1000" contype="1" conaffinity="3"/>
+    <body name="wall_side" pos="-1.5 3 0.4">
+      <geom name="wall_side_geom" type="box" size="2 0.3 0.4" material="wall_mat" mass="1000" contype="1" conaffinity="3"/>
     </body>
 
-    <!-- Cylinder 1: Large cylinder obstacle -->
-    <body name="cylinder_big" pos="4 1 0.8">
-      <joint type="free" damping="0.001"/>
-      <geom name="cylinder_big_geom" type="cylinder" size="0.4 0.8" material="cylinder_mat" mass="1000" contype="1" conaffinity="3"/>
+    <!-- Cylinder 1: Medium cylinder obstacle -->
+    <body name="cylinder_big" pos="4.5 1.5 0.5">
+      <geom name="cylinder_big_geom" type="cylinder" size="0.3 0.5" material="cylinder_mat" mass="1000" contype="1" conaffinity="3"/>
     </body>
 
     <!-- Cylinder 2: Small cylinder obstacle -->
-    <body name="cylinder_small" pos="5 -1.5 0.4">
-      <joint type="free" damping="0.001"/>
-      <geom name="cylinder_small_geom" type="cylinder" size="0.2 0.4" material="cylinder_mat" mass="1000" contype="1" conaffinity="3"/>
+    <body name="cylinder_small" pos="-3 -2 0.3">
+      <geom name="cylinder_small_geom" type="cylinder" size="0.2 0.3" material="cylinder_mat" mass="1000" contype="1" conaffinity="3"/>
     </body>
 
-    <!-- Block 1: Large block obstacle -->
-    <body name="block_large" pos="3 -2 0.5">
-      <joint type="free" damping="0.001"/>
-      <geom name="block_large_geom" type="box" size="0.5 0.5 0.5" material="block_mat" mass="1000" contype="1" conaffinity="3"/>
+    <!-- Block 1: Medium block obstacle -->
+    <body name="block_large" pos="1.5 -3 0.4">
+      <geom name="block_large_geom" type="box" size="0.4 0.4 0.4" material="block_mat" mass="1000" contype="1" conaffinity="3"/>
     </body>
 
-    <!-- Block 2: Small block obstacle -->
-    <body name="block_small" pos="6 0 0.3">
-      <joint type="free" damping="0.001"/>
+    <!-- Block 2: Flat block obstacle -->
+    <body name="block_small" pos="-4.5 1 0.3">
       <geom name="block_small_geom" type="box" size="0.3 0.6 0.3" material="block_mat" mass="1000" contype="1" conaffinity="3"/>
     </body>
 
+    <!-- Block 3: Additional small obstacle for variety -->
+    <body name="block_extra" pos="0.5 -5 0.25">
+      <geom name="block_extra_geom" type="box" size="0.25 0.25 0.25" material="block_mat" mass="1000" contype="1" conaffinity="3"/>
+    </body>
+
     <!-- ─── Target Marker ─── -->
-    <body name="target_marker" pos="7 0 0.15">
-      <geom name="target_geom" type="sphere" size="0.15" material="target_mat" contype="0" conaffinity="0"/>
+    <body name="target_marker" pos="5 3 0.2">
+      <geom name="target_geom" type="sphere" size="0.2" material="target_mat" contype="0" conaffinity="0"/>
     </body>
 
     <!-- ─── Simplified Stick-figure Humanoid ─── -->
@@ -74,7 +73,7 @@
 
       <!-- Head -->
       <body name="head" pos="0 0 0.5">
-        <joint name="head_joint" type="ball" damping="1" armature="0.2" range="-0.5 0.5"/>
+        <joint name="head_joint" type="ball" damping="1" armature="0.2"/>
         <geom name="head_geom" type="sphere" size="0.08" material="body_mat" mass="1"/>
       </body>
 
@@ -137,40 +136,41 @@
   </worldbody>
 
   <!-- Actuators for the stick-figure humanoid -->
+  <!-- In MuJoCo 3.x, gear is 6-valued; gain scaling moved to gainprm on general actuators -->
   <actuator>
-    <!-- Root (free joint) has no actuator — controlled by torque on body -->
-    <!-- Head -->
-    <motor name="head_x" joint="head_joint" gear="0 0 0 1 0 0 0.1" ctrlrange="-1 1"/>
-    <motor name="head_y" joint="head_joint" gear="0 0 0 0 1 0 0.1" ctrlrange="-1 1"/>
-    <motor name="head_z" joint="head_joint" gear="0 0 0 0 0 1 0.1" ctrlrange="-1 1"/>
-    <!-- Left hip -->
-    <motor name="hip_l_x" joint="hip_l" gear="0 0 0 1 0 0 1" ctrlrange="-1 1"/>
-    <motor name="hip_l_y" joint="hip_l" gear="0 0 0 0 1 0 1" ctrlrange="-1 1"/>
-    <motor name="hip_l_z" joint="hip_l" gear="0 0 0 0 0 1 1" ctrlrange="-1 1"/>
-    <!-- Right hip -->
-    <motor name="hip_r_x" joint="hip_r" gear="0 0 0 1 0 0 1" ctrlrange="-1 1"/>
-    <motor name="hip_r_y" joint="hip_r" gear="0 0 0 0 1 0 1" ctrlrange="-1 1"/>
-    <motor name="hip_r_z" joint="hip_r" gear="0 0 0 0 0 1 1" ctrlrange="-1 1"/>
-    <!-- Left knee -->
-    <motor name="knee_l" joint="knee_l" gear="0 0 0 0 1 0 1" ctrlrange="-1 1"/>
-    <!-- Right knee -->
-    <motor name="knee_r" joint="knee_r" gear="0 0 0 0 1 0 1" ctrlrange="-1 1"/>
-    <!-- Left ankle -->
-    <motor name="ankle_l" joint="ankle_l" gear="0 0 0 0 1 0 0.5" ctrlrange="-1 1"/>
-    <!-- Right ankle -->
-    <motor name="ankle_r" joint="ankle_r" gear="0 0 0 0 1 0 0.5" ctrlrange="-1 1"/>
-    <!-- Left shoulder -->
-    <motor name="shoulder_l_x" joint="shoulder_l" gear="0 0 0 1 0 0 0.5" ctrlrange="-1 1"/>
-    <motor name="shoulder_l_y" joint="shoulder_l" gear="0 0 0 0 1 0 0.5" ctrlrange="-1 1"/>
-    <motor name="shoulder_l_z" joint="shoulder_l" gear="0 0 0 0 0 1 0.5" ctrlrange="-1 1"/>
-    <!-- Right shoulder -->
-    <motor name="shoulder_r_x" joint="shoulder_r" gear="0 0 0 1 0 0 0.5" ctrlrange="-1 1"/>
-    <motor name="shoulder_r_y" joint="shoulder_r" gear="0 0 0 0 1 0 0.5" ctrlrange="-1 1"/>
-    <motor name="shoulder_r_z" joint="shoulder_r" gear="0 0 0 0 0 1 0.5" ctrlrange="-1 1"/>
-    <!-- Left elbow -->
-    <motor name="elbow_l" joint="elbow_l" gear="0 0 0 0 1 0 0.3" ctrlrange="-1 1"/>
-    <!-- Right elbow -->
-    <motor name="elbow_r" joint="elbow_r" gear="0 0 0 0 1 0 0.3" ctrlrange="-1 1"/>
+    <!-- Root (free joint) has no actuator — controlled by qfrc_applied -->
+    <!-- Head (ball joint, 3 DOF, gain=0.1) -->
+    <general name="head_x" joint="head_joint" gear="0 0 0 1 0 0" gainprm="0.1" ctrlrange="-1 1"/>
+    <general name="head_y" joint="head_joint" gear="0 0 0 0 1 0" gainprm="0.1" ctrlrange="-1 1"/>
+    <general name="head_z" joint="head_joint" gear="0 0 0 0 0 1" gainprm="0.1" ctrlrange="-1 1"/>
+    <!-- Left hip (ball joint, 3 DOF, gain=1) -->
+    <general name="hip_l_x" joint="hip_l" gear="0 0 0 1 0 0" gainprm="1" ctrlrange="-1 1"/>
+    <general name="hip_l_y" joint="hip_l" gear="0 0 0 0 1 0" gainprm="1" ctrlrange="-1 1"/>
+    <general name="hip_l_z" joint="hip_l" gear="0 0 0 0 0 1" gainprm="1" ctrlrange="-1 1"/>
+    <!-- Right hip (ball joint, 3 DOF, gain=1) -->
+    <general name="hip_r_x" joint="hip_r" gear="0 0 0 1 0 0" gainprm="1" ctrlrange="-1 1"/>
+    <general name="hip_r_y" joint="hip_r" gear="0 0 0 0 1 0" gainprm="1" ctrlrange="-1 1"/>
+    <general name="hip_r_z" joint="hip_r" gear="0 0 0 0 0 1" gainprm="1" ctrlrange="-1 1"/>
+    <!-- Left knee (hinge, gain=1) -->
+    <motor name="knee_l" joint="knee_l" gear="1" ctrlrange="-1 1"/>
+    <!-- Right knee (hinge, gain=1) -->
+    <motor name="knee_r" joint="knee_r" gear="1" ctrlrange="-1 1"/>
+    <!-- Left ankle (hinge, gain=0.5) -->
+    <general name="ankle_l" joint="ankle_l" gear="0 0 0 0 1 0" gainprm="0.5" ctrlrange="-1 1"/>
+    <!-- Right ankle (hinge, gain=0.5) -->
+    <general name="ankle_r" joint="ankle_r" gear="0 0 0 0 1 0" gainprm="0.5" ctrlrange="-1 1"/>
+    <!-- Left shoulder (ball joint, 3 DOF, gain=0.5) -->
+    <general name="shoulder_l_x" joint="shoulder_l" gear="0 0 0 1 0 0" gainprm="0.5" ctrlrange="-1 1"/>
+    <general name="shoulder_l_y" joint="shoulder_l" gear="0 0 0 0 1 0" gainprm="0.5" ctrlrange="-1 1"/>
+    <general name="shoulder_l_z" joint="shoulder_l" gear="0 0 0 0 0 1" gainprm="0.5" ctrlrange="-1 1"/>
+    <!-- Right shoulder (ball joint, 3 DOF, gain=0.5) -->
+    <general name="shoulder_r_x" joint="shoulder_r" gear="0 0 0 1 0 0" gainprm="0.5" ctrlrange="-1 1"/>
+    <general name="shoulder_r_y" joint="shoulder_r" gear="0 0 0 0 1 0" gainprm="0.5" ctrlrange="-1 1"/>
+    <general name="shoulder_r_z" joint="shoulder_r" gear="0 0 0 0 0 1" gainprm="0.5" ctrlrange="-1 1"/>
+    <!-- Left elbow (hinge, gain=0.3) -->
+    <general name="elbow_l" joint="elbow_l" gear="0 0 0 0 1 0" gainprm="0.3" ctrlrange="-1 1"/>
+    <!-- Right elbow (hinge, gain=0.3) -->
+    <general name="elbow_r" joint="elbow_r" gear="0 0 0 0 1 0" gainprm="0.3" ctrlrange="-1 1"/>
   </actuator>
 
   <!-- Contact exclusions: prevent self-collision between adjacent body parts -->
@@ -186,9 +186,5 @@
     <exclude body1="upper_arm_l" body2="lower_arm_l"/>
     <exclude body1="upper_arm_r" body2="lower_arm_r"/>
     <exclude body1="torso" body2="head"/>
-    <!-- Obstacles should not collide with each other -->
-    <exclude body1="wall_front" body2="wall_side"/>
-    <exclude body1="cylinder_big" body2="cylinder_small"/>
-    <exclude body1="block_large" body2="block_small"/>
   </contact>
 </mujoco>

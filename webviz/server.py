@@ -16,7 +16,7 @@ API Endpoints:
   GET  /user_manual.html — User manual HTML page
   GET  /mujoco_docs_cn.html — MuJoCo docs Chinese translation page
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.3.0
+Author: MuJoCo-Bench-IDO Webviz extension v0.4.3
 """
 
 import asyncio
@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.4.2"
+WEBVIZ_VERSION: str = "v0.4.3"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -844,10 +844,9 @@ async def start_viewer() -> JSONResponse:
             from viser import ViserServer
             import time as _time
 
-            # Load scene based on mjviser_scene_type
+            # ── Load scene based on mjviser_scene_type ──
             env_ref = None
-            target_qpos = None  # PD controller target for plain scene
-            actuator_to_qpos_dof = None  # Mapping for PD controller
+            target_height: float = 1.4  # Default for dm_control humanoid
 
             if mjviser_scene_type == "obstacle":
                 scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / "humanoid_obstacle_arena.xml")
@@ -855,135 +854,424 @@ async def start_viewer() -> JSONResponse:
                 mj_data = mj.MjData(mj_model)
                 mj.mj_resetData(mj_model, mj_data)
                 mj.mj_forward(mj_model, mj_data)
+                target_height = 1.0  # Stick-figure humanoid is shorter
             else:
                 # Default: load dm_control humanoid-stand
                 env_ref = suite.load("humanoid", "stand")
                 env_ref.reset()  # Reset to get initial upright pose
-
-                # ── Capture initial joint positions as PD target ──
-                # The dm_control humanoid-stand reset() places the robot upright.
-                # We use this as the target posture for the PD controller.
-                target_qpos = env_ref.physics.data._data.qpos.copy()
-
                 mj_model = env_ref.physics.model._model
                 mj_data = env_ref.physics.data._data
+                target_height = 1.4  # dm_control humanoid standing height
 
-                # ── Build actuator → (qpos_adr, dof_adr) mapping ──
-                # Each dm_control humanoid actuator is a single-DOF hinge joint.
-                # model.actuator_trnid[i, 0] gives the joint ID for actuator i.
-                # model.jnt_qposadr[jnt_id] gives the qpos address for that joint.
-                # model.jnt_dofadr[jnt_id] gives the DOF (qvel) address.
-                actuator_to_qpos_dof = []
-                num_actuators = mj_model.nu
-                for i in range(num_actuators):
-                    jnt_id = int(mj_model.actuator_trnid[i, 0])
-                    qpos_adr = int(mj_model.jnt_qposadr[jnt_id])
-                    dof_adr = int(mj_model.jnt_dofadr[jnt_id])
-                    actuator_to_qpos_dof.append((qpos_adr, dof_adr))
+            # ── Helper functions for walking controller ──
 
-            # Create ViserServer on port 8081 (avoid conflict with FastAPI on 8080)
+            def _quat_to_z_axis(quat: np.ndarray) -> np.ndarray:
+                """Extract z-axis direction from quaternion [w, x, y, z].
+
+                The z-axis of the rotation matrix represented by the quaternion
+                indicates which direction the torso top is pointing.
+                For an upright torso, z_axis ≈ [0, 0, 1].
+                """
+                w, x, y, z = float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3])
+                zx = 2.0 * (x * z + w * y)
+                zy = 2.0 * (y * z - w * x)
+                zz = 1.0 - 2.0 * (x * x + y * y)
+                return np.array([zx, zy, zz])
+
+            def _quat_conjugate(q: np.ndarray) -> np.ndarray:
+                """Return conjugate of quaternion [w, x, y, z]."""
+                return np.array([q[0], -q[1], -q[2], -q[3]])
+
+            def _quat_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
+                """Hamilton product of two quaternions q1 * q2, each [w, x, y, z]."""
+                w1, x1, y1, z1 = q1
+                w2, x2, y2, z2 = q2
+                return np.array([
+                    w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                    w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                    w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                    w1*z2 + x1*y2 - y1*x2 + z1*w2,
+                ])
+
+            def _build_joint_map(mdl: "mj.MjModel") -> dict:
+                """Build named joint address map from MuJoCo model.
+
+                Returns dict mapping joint_name → {qpos_adr, dof_adr, nq, nv, type}.
+                Joint type: 0=free, 1=ball, 2=slide, 3=hinge.
+                """
+                jnt_type_nqnv: dict = {0: (7, 6), 1: (3, 3), 2: (1, 1), 3: (1, 1)}
+                jm: dict = {}
+                for jid in range(mdl.njnt):
+                    name: str = mj.mj_id2name(mdl, mj.mjtObj.mjOBJ_JOINT, jid)
+                    if name is None:
+                        continue
+                    jtype: int = int(mdl.jnt_type[jid])
+                    if jtype not in jnt_type_nqnv:
+                        continue
+                    nq, nv = jnt_type_nqnv[jtype]
+                    jm[name] = {
+                        'qpos_adr': int(mdl.jnt_qposadr[jid]),
+                        'dof_adr': int(mdl.jnt_dofadr[jid]),
+                        'nq': nq, 'nv': nv, 'type': jtype,
+                    }
+                return jm
+
+            # ── Build joint map ──
+            joint_map: dict = _build_joint_map(mj_model)
+
+            # ── Compute humanoid mass (exclude obstacle bodies) ──
+            obstacle_body_names: set = {
+                "wall_front", "wall_side", "cylinder_big", "cylinder_small",
+                "block_large", "block_small", "block_extra", "target_marker",
+            }
+            humanoid_mass: float = 0.0
+            for bid in range(1, mj_model.nbody):
+                bname: str = mj.mj_id2name(mj_model, mj.mjtObj.mjOBJ_BODY, bid)
+                if bname is None or bname not in obstacle_body_names:
+                    humanoid_mass += float(mj_model.body_mass[bid])
+
+            # ── Walking controller constants ──
+            # Random seed: fixed default (42) for reproducibility,
+            # override via MUJOCO_BENCH_WALK_SEED environment variable.
+            WALK_SEED: int = int(os.environ.get("MUJOCO_BENCH_WALK_SEED", "42"))
+            WAYPOINT_RADIUS: float = 6.0    # x,y ∈ [-6, 6]
+            WAYPOINT_CHANGE_SEC: float = 5.0  # Change waypoint every 5 sim-seconds
+            WALK_FREQ: float = 1.5           # Walking cycle frequency (Hz)
+            HIP_AMP: float = 0.3             # Sagittal hip oscillation amplitude (rad)
+            KNEE_AMP: float = 0.15           # Knee bend amplitude during swing (rad)
+            ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
+            DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
+            MIN_HEIGHT: float = 0.5 * target_height  # Recovery threshold
+
+            # Mass-proportional PD gains for root stabilization
+            KP_HEIGHT: float = humanoid_mass * 100.0   # Strong height spring
+            KD_HEIGHT: float = humanoid_mass * 10.0    # Height damping
+            KP_MOVE: float = humanoid_mass * 5.0       # Horizontal velocity PD
+            KP_TILT: float = humanoid_mass * 7.5       # Orientation tilt PD
+            KD_TILT: float = humanoid_mass * 2.5       # Tilt damping
+            KP_YAW: float = humanoid_mass * 2.0        # Yaw steering PD
+            KD_YAW: float = humanoid_mass * 0.8        # Yaw damping
+
+            # Joint PD gains (not mass-proportional — joint inertia is small)
+            KP_JOINT: float = 50.0
+            KD_JOINT: float = 15.0
+
+            # Safety clipping limits
+            MAX_ROOT_FORCE: float = humanoid_mass * 120.0
+            MAX_ROOT_TORQUE: float = humanoid_mass * 12.0
+            MAX_JOINT_TORQUE: float = 200.0
+
+            # ── Walking controller state ──
+            walk_rng: np.random.RandomState = np.random.RandomState(WALK_SEED)
+
+            def _generate_waypoint(rng: np.random.RandomState) -> np.ndarray:
+                """Generate a random waypoint within the arena bounds."""
+                wx: float = rng.uniform(-WAYPOINT_RADIUS, WAYPOINT_RADIUS)
+                wy: float = rng.uniform(-WAYPOINT_RADIUS, WAYPOINT_RADIUS)
+                return np.array([wx, wy])
+
+            walk_state: dict = {
+                'waypoint': _generate_waypoint(walk_rng),
+                'last_wp_time': 0.0,
+                'initial_qpos': mj_data.qpos.copy(),
+            }
+
+            # ── Unified walking step function (v0.4.3) ──
+            # Replaces hard-lock root standing controller with random walking
+            # controller + waypoint navigation. The robot now moves around the
+            # arena instead of being pinned in place.
+            #
+            # Multi-layer control architecture:
+            #   L1: Root height — gravity compensation + PD spring
+            #   L2: Root horizontal — velocity PD toward waypoint
+            #   L3: Root orientation — tilt PD (keep torso upright)
+            #   L4: Root yaw — heading PD toward waypoint
+            #   L5: Walking gait — sinusoidal hip/knee oscillation
+            #   L6: Joint stabilization — PD hold for non-walking joints
+            #   L7: Safety — recovery force if height drops too low
+
+            def step_fn(model: mj.MjModel, data: mj.MjData) -> None:
+                """Random walking controller with waypoint navigation.
+
+                The robot walks toward randomly generated waypoints while
+                maintaining upright posture. Waypoints change every
+                WAYPOINT_CHANGE_SEC seconds. Walking gait uses sinusoidal
+                hip flexion with alternating leg phases.
+
+                Args:
+                    model: MuJoCo model.
+                    data: MuJoCo data (modified in-place).
+                """
+                # ── 0. Clear applied forces ──
+                data.qfrc_applied[:] = 0.0
+                data.ctrl[:] = 0.0
+
+                initial_qpos: np.ndarray = walk_state['initial_qpos']
+
+                # ── 1. Waypoint update ──
+                sim_time: float = float(data.time)
+                if sim_time - walk_state['last_wp_time'] > WAYPOINT_CHANGE_SEC:
+                    walk_state['waypoint'] = _generate_waypoint(walk_rng)
+                    walk_state['last_wp_time'] = sim_time
+
+                waypoint: np.ndarray = walk_state['waypoint']
+
+                # ── 2. Root state read ──
+                root_x: float = float(data.qpos[0])
+                root_y: float = float(data.qpos[1])
+                root_z: float = float(data.qpos[2])
+                root_vx: float = float(data.qvel[0])
+                root_vy: float = float(data.qvel[1])
+                root_vz: float = float(data.qvel[2])
+
+                # ── 3. Root height: gravity compensation + PD ──
+                gravity_comp: float = humanoid_mass * 9.81
+                height_force: float = gravity_comp + KP_HEIGHT * (target_height - root_z) - KD_HEIGHT * root_vz
+                data.qfrc_applied[2] = float(np.clip(height_force, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
+
+                # ── 4. Root horizontal movement toward waypoint ──
+                dx: float = waypoint[0] - root_x
+                dy: float = waypoint[1] - root_y
+                dist: float = float(np.sqrt(dx*dx + dy*dy))
+
+                if dist > 0.3:
+                    dir_x: float = dx / dist
+                    dir_y: float = dy / dist
+                    desired_vx: float = DESIRED_WALK_SPEED * dir_x
+                    desired_vy: float = DESIRED_WALK_SPEED * dir_y
+                else:
+                    # Near waypoint: decelerate
+                    desired_vx: float = 0.0
+                    desired_vy: float = 0.0
+
+                move_fx: float = KP_MOVE * (desired_vx - root_vx)
+                move_fy: float = KP_MOVE * (desired_vy - root_vy)
+                data.qfrc_applied[0] = float(np.clip(move_fx, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
+                data.qfrc_applied[1] = float(np.clip(move_fy, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
+
+                # ── 5. Root orientation stabilization ──
+                # Compute torso z-axis from root quaternion.
+                # For upright torso, z_axis ≈ [0, 0, 1].
+                # Tilt correction: push z_axis back toward [0, 0, 1].
+                quat: np.ndarray = data.qpos[3:7].copy()
+                z_axis: np.ndarray = _quat_to_z_axis(quat)
+                # z_axis[0] > 0 → torso tilts right → need -torque around y (DOF 4)
+                # z_axis[1] > 0 → torso tilts forward → need -torque around x (DOF 3)
+                tilt_torque_x: float = -KP_TILT * float(z_axis[1]) - KD_TILT * float(data.qvel[3])
+                tilt_torque_y: float = -KP_TILT * float(z_axis[0]) - KD_TILT * float(data.qvel[4])
+                data.qfrc_applied[3] = float(np.clip(tilt_torque_x, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
+                data.qfrc_applied[4] = float(np.clip(tilt_torque_y, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
+
+                # ── 6. Root yaw steering toward waypoint ──
+                # Compute current heading from quaternion (forward = x-axis of rotation).
+                fwd_x: float = 1.0 - 2.0 * (quat[2]*quat[2] + quat[3]*quat[3])
+                fwd_y: float = 2.0 * (quat[1]*quat[2] + quat[0]*quat[3])
+                current_heading: float = float(np.arctan2(fwd_y, fwd_x))
+
+                if dist > 0.3:
+                    desired_heading: float = float(np.arctan2(dy, dx))
+                else:
+                    desired_heading: float = current_heading  # Don't steer when close
+
+                heading_err: float = desired_heading - current_heading
+                # Wrap to [-π, π]
+                heading_err = float((heading_err + np.pi) % (2.0 * np.pi) - np.pi)
+
+                yaw_torque: float = KP_YAW * heading_err - KD_YAW * float(data.qvel[5])
+                data.qfrc_applied[5] = float(np.clip(yaw_torque, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
+
+                # ── 7. Walking gait: sinusoidal joint oscillation ──
+                phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
+
+                # Leg joints: alternate between left (phase+π) and right (phase)
+                for side_tag, leg_phase_offset in [('right', 0.0), ('left', np.pi)]:
+                    side_char: str = side_tag[0]  # 'r' or 'l'
+
+                    # ── Hip flexion (sagittal plane) ──
+                    # dm_control naming: hip_y_right / hip_y_left (hinge)
+                    # Obstacle naming: hip_r / hip_l (ball joint, 3 DOF)
+                    hip_name: str = ''
+                    if f'hip_y_{side_tag}' in joint_map:
+                        hip_name = f'hip_y_{side_tag}'
+                    elif f'hip_{side_char}' in joint_map:
+                        hip_name = f'hip_{side_char}'
+
+                    if hip_name:
+                        jinfo: dict = joint_map[hip_name]
+                        if jinfo['type'] == 3:  # hinge joint (1 DOF)
+                            qa: int = jinfo['qpos_adr']
+                            da: int = jinfo['dof_adr']
+                            target_val: float = float(initial_qpos[qa]) + HIP_AMP * float(np.sin(phase + leg_phase_offset))
+                            error: float = target_val - float(data.qpos[qa])
+                            vel: float = float(data.qvel[da])
+                            torque: float = KP_JOINT * error - KD_JOINT * vel
+                            data.qfrc_applied[da] = float(np.clip(torque, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+                        elif jinfo['type'] == 1:  # ball joint (3 DOF)
+                            # Compute relative rotation from initial pose
+                            quat_init: np.ndarray = initial_qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
+                            quat_cur: np.ndarray = data.qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
+                            quat_rel: np.ndarray = _quat_multiply(_quat_conjugate(quat_init), quat_cur)
+                            # Small-angle approximation: theta ≈ 2 * quat_rel[1:4]
+                            theta_x: float = 2.0 * quat_rel[1]
+                            theta_y: float = 2.0 * quat_rel[2]
+                            theta_z: float = 2.0 * quat_rel[3]
+                            # Target: oscillate on y-axis (flexion), stabilize x and z
+                            target_ty: float = HIP_AMP * float(np.sin(phase + leg_phase_offset))
+                            for ax_i, (tgt, cur) in enumerate([
+                                (0.0, theta_x), (target_ty, theta_y), (0.0, theta_z)
+                            ]):
+                                dof_i: int = jinfo['dof_adr'] + ax_i
+                                err_i: float = tgt - cur
+                                vel_i: float = float(data.qvel[dof_i])
+                                tau_i: float = KP_JOINT * err_i - KD_JOINT * vel_i
+                                data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                    # ── Knee ──
+                    knee_name: str = f'knee_{side_char}'
+                    if knee_name in joint_map:
+                        jinfo = joint_map[knee_name]
+                        qa = jinfo['qpos_adr']
+                        da = jinfo['dof_adr']
+                        # Knee bends during swing phase (when hip is forward)
+                        swing: float = float(np.sin(phase + leg_phase_offset))
+                        target_k: float = float(initial_qpos[qa]) - KNEE_AMP * max(0.0, swing)
+                        error_k: float = target_k - float(data.qpos[qa])
+                        vel_k: float = float(data.qvel[da])
+                        torque_k: float = KP_JOINT * error_k - KD_JOINT * vel_k
+                        data.qfrc_applied[da] = float(np.clip(torque_k, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                    # ── Ankle (obstacle scene: ankle_r / ankle_l hinge) ──
+                    ankle_name: str = f'ankle_{side_char}'
+                    if ankle_name in joint_map:
+                        jinfo = joint_map[ankle_name]
+                        qa = jinfo['qpos_adr']
+                        da = jinfo['dof_adr']
+                        target_a: float = float(initial_qpos[qa])
+                        error_a: float = target_a - float(data.qpos[qa])
+                        vel_a: float = float(data.qvel[da])
+                        torque_a: float = KP_JOINT * error_a - KD_JOINT * vel_a
+                        data.qfrc_applied[da] = float(np.clip(torque_a, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                    # ── dm_control ankle_x and ankle_z (lateral + rotational) ──
+                    for ax_suffix in ['x', 'z']:
+                        ankle_ax_name: str = f'ankle_{ax_suffix}_{side_tag}'
+                        if ankle_ax_name in joint_map:
+                            jinfo = joint_map[ankle_ax_name]
+                            qa = jinfo['qpos_adr']
+                            da = jinfo['dof_adr']
+                            target_a2: float = float(initial_qpos[qa])
+                            error_a2: float = target_a2 - float(data.qpos[qa])
+                            vel_a2: float = float(data.qvel[da])
+                            torque_a2: float = KP_JOINT * error_a2 - KD_JOINT * vel_a2
+                            data.qfrc_applied[da] = float(np.clip(torque_a2, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                    # ── Arm swing (contralateral: opposite phase to same-side leg) ──
+                    arm_phase: float = phase + leg_phase_offset + np.pi  # Opposite to leg
+
+                    shoulder_name: str = ''
+                    if f'shoulder_y_{side_tag}' in joint_map:
+                        shoulder_name = f'shoulder_y_{side_tag}'
+                    elif f'shoulder_{side_char}' in joint_map:
+                        shoulder_name = f'shoulder_{side_char}'
+
+                    if shoulder_name:
+                        jinfo = joint_map[shoulder_name]
+                        if jinfo['type'] == 3:  # hinge
+                            qa = jinfo['qpos_adr']
+                            da = jinfo['dof_adr']
+                            target_s: float = float(initial_qpos[qa]) + ARM_AMP * float(np.sin(arm_phase))
+                            error_s: float = target_s - float(data.qpos[qa])
+                            vel_s: float = float(data.qvel[da])
+                            torque_s: float = KP_JOINT * 0.5 * error_s - KD_JOINT * 0.5 * vel_s
+                            data.qfrc_applied[da] = float(np.clip(torque_s, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+                        elif jinfo['type'] == 1:  # ball joint
+                            quat_init = initial_qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
+                            quat_cur = data.qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
+                            quat_rel = _quat_multiply(_quat_conjugate(quat_init), quat_cur)
+                            theta_x = 2.0 * quat_rel[1]
+                            theta_y = 2.0 * quat_rel[2]
+                            theta_z = 2.0 * quat_rel[3]
+                            target_sy: float = ARM_AMP * float(np.sin(arm_phase))
+                            for ax_i, (tgt, cur) in enumerate([
+                                (0.0, theta_x), (target_sy, theta_y), (0.0, theta_z)
+                            ]):
+                                dof_i = jinfo['dof_adr'] + ax_i
+                                err_i = tgt - cur
+                                vel_i = float(data.qvel[dof_i])
+                                tau_i = KP_JOINT * 0.5 * err_i - KD_JOINT * 0.5 * vel_i
+                                data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                    # ── Elbow ──
+                    elbow_name: str = f'elbow_{side_char}'
+                    if elbow_name in joint_map:
+                        jinfo = joint_map[elbow_name]
+                        qa = jinfo['qpos_adr']
+                        da = jinfo['dof_adr']
+                        target_e: float = float(initial_qpos[qa])
+                        error_e: float = target_e - float(data.qpos[qa])
+                        vel_e: float = float(data.qvel[da])
+                        torque_e: float = KP_JOINT * 0.3 * error_e - KD_JOINT * 0.3 * vel_e
+                        data.qfrc_applied[da] = float(np.clip(torque_e, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                # ── 8. Abdomen / torso stabilization ──
+                for jname in joint_map:
+                    if 'abdomen' in jname:
+                        jinfo = joint_map[jname]
+                        qa = jinfo['qpos_adr']
+                        da = jinfo['dof_adr']
+                        target_ab: float = float(initial_qpos[qa])
+                        error_ab: float = target_ab - float(data.qpos[qa])
+                        vel_ab: float = float(data.qvel[da])
+                        torque_ab: float = KP_JOINT * error_ab - KD_JOINT * vel_ab
+                        data.qfrc_applied[da] = float(np.clip(torque_ab, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                # ── 9. Head stabilization ──
+                if 'head_joint' in joint_map:
+                    jinfo = joint_map['head_joint']
+                    if jinfo['type'] == 1:  # ball joint
+                        quat_init = initial_qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
+                        quat_cur = data.qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
+                        quat_rel = _quat_multiply(_quat_conjugate(quat_init), quat_cur)
+                        for ax_i in range(3):
+                            theta_i: float = 2.0 * quat_rel[ax_i + 1]
+                            dof_i: int = jinfo['dof_adr'] + ax_i
+                            vel_i: float = float(data.qvel[dof_i])
+                            tau_i: float = KP_JOINT * 0.5 * (0.0 - theta_i) - KD_JOINT * 0.5 * vel_i
+                            data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                # ── 10. Stabilize remaining dm_control hinge joints ──
+                # Covers: hip_x, hip_z, shoulder_x, shoulder_z (not yet controlled)
+                for jname in joint_map:
+                    jinfo = joint_map[jname]
+                    if jinfo['type'] != 3:  # Only hinge joints (1 DOF)
+                        continue
+                    # Skip joints already controlled in walking gait
+                    if any(kw in jname for kw in [
+                        'hip_y', 'knee', 'ankle', 'shoulder_y', 'elbow', 'abdomen'
+                    ]):
+                        continue
+                    qa = jinfo['qpos_adr']
+                    da = jinfo['dof_adr']
+                    target_r: float = float(initial_qpos[qa])
+                    error_r: float = target_r - float(data.qpos[qa])
+                    vel_r: float = float(data.qvel[da])
+                    torque_r: float = KP_JOINT * 0.5 * error_r - KD_JOINT * 0.5 * vel_r
+                    data.qfrc_applied[da] = float(np.clip(torque_r, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
+
+                # ── 11. Safety: recovery if robot height drops too low ──
+                if root_z < MIN_HEIGHT:
+                    data.qfrc_applied[2] += float(humanoid_mass * 50.0)  # Strong upward push
+
+                # ── 12. Step physics ──
+                mj.mj_step(model, data)
+
+            # ── Create ViserServer on port 8081 ──
+            # Avoid conflict with FastAPI on 8080.
             viser_server = ViserServer(port=8081, verbose=False)
 
             # Get the actual port (ViserServer auto-increments if port is occupied)
             actual_port: int = viser_server._websock_server._port
             mjviser_viewer_url = f"http://localhost:{actual_port}"
-
-            # ── Standing Controller for plain humanoid scene ──
-            # The dm_control humanoid has a FREE root joint (7 qpos, 6 DOF)
-            # with no actuator. Without stabilization the robot falls under
-            # gravity (≈400N downward).
-            #
-            # Strategy (hard-lock root + joint PD):
-            # After each physics step, we hard-reset root position and
-            # orientation to their initial values and zero root velocity.
-            # This is equivalent to pinning the robot at a fixed point in
-            # space — zero drift, zero flash, zero twitching.
-            # Joint PD via qfrc_applied keeps the limbs at their upright pose.
-            # NO periodic motion — pure pose lock for a calm, stable display.
-            #
-            # Verified: root stays at EXACTLY (0, 0, 1.5) for ≥20 simulated
-            # seconds with zero horizontal drift and zero flash/twitch.
-            KP_JOINT: float = 50.0
-            KD_JOINT: float = 15.0
-
-            def plain_step_fn(model: mj.MjModel, data: mj.MjData) -> None:
-                """Standing controller — hard-lock root + joint PD (no motion).
-
-                Two-layer approach:
-                1. Joint PD via qfrc_applied: drives each hinge toward
-                   target_qpos for upright pose. No periodic motion offsets.
-                2. Hard-lock root after each step: reset root position,
-                   orientation, and velocity to initial values. This pins
-                   the robot at a fixed point — eliminates all drift, tilt,
-                   and flash/twitch that PD-only root control cannot prevent.
-
-                Args:
-                    model: MuJoCo model.
-                    data: MuJoCo data (modified in-place).
-                """
-                # ── Apply joint PD via qfrc_applied ──
-                data.qfrc_applied[:] = 0.0
-                for qpos_adr, dof_adr in actuator_to_qpos_dof:
-                    error = target_qpos[qpos_adr] - data.qpos[qpos_adr]
-                    vel = data.qvel[dof_adr]
-                    torque = KP_JOINT * error - KD_JOINT * vel
-                    torque = float(np.clip(torque, -200.0, 200.0))
-                    data.qfrc_applied[dof_adr] = torque
-
-                # ── Step physics ──
-                mj.mj_step(model, data)
-
-                # ── Hard-lock root position + orientation + velocity ──
-                # After mj_step, reset root to exact initial pose. This
-                # eliminates all drift (root_x, root_y) and tilt (root
-                # rotation), while keeping joint angles governed by PD.
-                data.qpos[0:3] = target_qpos[0:3]  # Lock root x, y, z
-                data.qpos[3:7] = target_qpos[3:7]  # Lock root quaternion
-                data.qvel[0:6] = 0.0                # Zero root velocity
-
-            # ── obstacle scene: capture initial pose for hard-lock ──
-            obstacle_target_qpos: np.ndarray = mj_data.qpos.copy()
-            # Build actuator mapping for obstacle scene too
-            obstacle_actuator_to_qpos_dof: list = []
-            if mj_model.nu > 0:
-                for i in range(mj_model.nu):
-                    jnt_id = int(mj_model.actuator_trnid[i, 0])
-                    qpos_adr = int(mj_model.jnt_qposadr[jnt_id])
-                    dof_adr = int(mj_model.jnt_dofadr[jnt_id])
-                    obstacle_actuator_to_qpos_dof.append((qpos_adr, dof_adr))
-
-            def obstacle_step_fn(model: mj.MjModel, data: mj.MjData) -> None:
-                """Standing controller for obstacle scene — hard-lock root + joint PD.
-
-                Same strategy as plain scene: hard-lock root position and
-                orientation after each step, use joint PD to hold upright
-                pose. This keeps the humanoid standing amid obstacles instead
-                of falling to the ground.
-
-                Args:
-                    model: MuJoCo model.
-                    data: MuJoCo data (modified in-place).
-                """
-                # ── Apply joint PD via qfrc_applied ──
-                data.qfrc_applied[:] = 0.0
-                data.ctrl[:] = 0.0
-                for qpos_adr, dof_adr in obstacle_actuator_to_qpos_dof:
-                    error = obstacle_target_qpos[qpos_adr] - data.qpos[qpos_adr]
-                    vel = data.qvel[dof_adr]
-                    torque = KP_JOINT * error - KD_JOINT * vel
-                    torque = float(np.clip(torque, -200.0, 200.0))
-                    data.qfrc_applied[dof_adr] = torque
-
-                # ── Step physics ──
-                mj.mj_step(model, data)
-
-                # ── Hard-lock root position + orientation + velocity ──
-                data.qpos[0:3] = obstacle_target_qpos[0:3]
-                data.qpos[3:7] = obstacle_target_qpos[3:7]
-                data.qvel[0:6] = 0.0
-
-            # Select step_fn based on scene type
-            step_fn = plain_step_fn if mjviser_scene_type == "plain" else obstacle_step_fn
 
             viewer = mjviser.Viewer(
                 model=mj_model,

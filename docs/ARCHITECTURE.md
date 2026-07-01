@@ -559,6 +559,7 @@ graph TB
 *v0.3.0 update: 2025-07-01*
 *v0.3.1 update: 2025-07-01 — Language switching, real-time 3D simulation, obstacle scene*
 *v0.4.2 update: 2025-07-01 — Three-layer PD standing controller (gravity comp + root orientation + joint PD)*
+*v0.4.3 update: 2025-07-01 — Random walking controller + waypoint navigation + obstacle arena (replaces hard-lock root)*
 
 ---
 
@@ -586,21 +587,36 @@ graph TB
 - 代码块（XML/C）不翻译，只翻译周围说明文字
 - 翻译质量面向学术/工程师
 
-#### 实时3D仿真循环（v0.3.1→v0.4.2 硬锁定站立控制器）
+#### 实时3D仿真循环（v0.4.3 随机走动控制器 + 航点导航）
 
 | 修改文件 | 说明 |
 |---------|------|
-| `webviz/server.py` | `launch_viewer()` 重写：硬锁定root+关节PD站立控制器 + 手动 viewer loop + 暂停启动 |
+| `webviz/server.py` | `launch_viewer()` 重写：随机走动控制器 + 航点导航 + 障碍物竞技场 + 手动 viewer loop + 暂停启动 |
+| `webviz/scenes/humanoid_obstacle_arena.xml` | 障碍物改为静态（移除free joint），调整位置适配走动范围，增加地面尺寸 |
 
-**仿真循环设计（v0.4.2 硬锁定站立控制器）**：
+**仿真循环设计（v0.4.3 随机走动控制器）**：
 - `viewer.run()` 在后台线程中调用 `signal.signal()` 会抛 ValueError → 手动 `_setup_gui()+_render()+_tick()` 循环规避
-- plain 场景（humanoid-stand）：`plain_step_fn` 硬锁定root + 关节PD
-  - dm_control 位置执行器太弱（gain=1, ctrlrange=[-1,1]）无法撑住站立姿态
-  - **关节PD**: KP=50, KD=15，通过 `qfrc_applied` 驱动21个铰链关节趋向target_qpos
-  - **硬锁定root**: 每步仿真后直接重置 `qpos[0:7]` 和 `qvel[0:6]` → root位置/朝向完全锁定，零漂移零抽搐
-  - 无周期性运动：机器人稳定直立，不晃不闪不四处走动
-  - 启动暂停模式：用户看到直立姿态，点 Play 后机器人继续稳定站立
-- obstacle 场景：`obstacle_step_fn` 同样使用硬锁定root + 关节PD，机器人站立在障碍物之间
+- **统一走动控制器** `step_fn`：同时适用于 plain 和 obstacle 场景
+  - 不再硬锁定root — 机器人可自由移动
+  - 7层控制架构：
+    1. **Root高度**: 重力补偿 + PD弹簧 → `qfrc_applied[2] = m·g + KP·(h_target - z) - KD·vz`
+    2. **Root水平移动**: 速度PD朝航点 → `qfrc_applied[0:2] = KP·(v_desired - v_current)`
+    3. **Root朝向稳定**: z轴倾斜PD → `qfrc_applied[3:4] = -KP·tilt - KD·ω`
+    4. **Root航向转向**: heading PD朝航点 → `qfrc_applied[5] = KP·Δθ - KD·ω_yaw`
+    5. **行走步态**: 正弦髋/膝振荡（左右交替相位），手臂对侧摆动
+    6. **关节稳定**: 非行走关节PD锁定初始姿态
+    7. **安全恢复**: 高度过低时施加强向上力
+  - **航点机制**: 每5秒随机更换目标点（x,y ∈ [-6, 6]），随机种子默认42（可通过 `MUJOCO_BENCH_WALK_SEED` 环境变量覆盖）
+  - **PD增益质量比例**: root增益 = mass × 常数，关节增益固定 KP=50 KD=15
+  - **球关节控制**: 使用四元数相对旋转 + 小角度近似（θ ≈ 2·quat_rel[1:4]）实现PD
+  - **dm_control humanoid**: 21个弱执行器绕过 → 全部通过 `qfrc_applied` 驱动
+  - **obstacle场景火柴人**: 同样通过 `qfrc_applied` 驱动，16kg总质量
+  - 启动暂停模式：用户看到直立姿态，点 Play 后机器人开始走动
+- obstacle 场景改进：
+  - 障碍物改为静态（移除free joint），防止漂移
+  - 地面尺寸从10×10增大到12×12，适配航点范围 [-6, 6]
+  - 障碍物位置重新分布：墙、圆柱、方块散布在整个走动区域
+  - 移除障碍物间 `<exclude>`（静态物体不需要）
 - ViserServer 端口：从 `viser_server._websock_server._port` 读取实际端口
 - viewer 关闭时 `viser_server.stop()` + `mjviser_viewer_running = False`
 
@@ -609,7 +625,8 @@ graph TB
 > - v0.4.1：`viewer.run()` 在后台线程崩溃 + 随机动作导致机器人疯狂抽搐
 > - v0.4.2a：仅执行器关节PD → 重力使free root关节下坠，机器人倒地
 > - v0.4.2b：三层PD站立控制器 → 重力补偿+朝向稳定+关节锁定，但root_xy漂移+周期动作太闪
-> - v0.4.2c：硬锁定root（每步重置qpos/qvel）+ 关节PD → 零漂移零抽搐，稳如磐石20s
+> - v0.4.2c：硬锁定root（每步重置qpos/qvel）+ 关节PD → 零漂移零抽搐，稳如磐石20s，但机器人被钉在原地不动
+> - v0.4.3：随机走动控制器 + 航点导航 → 机器人直立走动，朝随机航点移动，不抽搐不躺倒
 
 #### 3D场景选择
 
@@ -642,7 +659,7 @@ graph TB
     subgraph Webviz
         FastAPI["FastAPI Server<br/>webviz/server.py"]
         Dashboard["Dashboard<br/>webviz/dashboard.html"]
-        Mjviser["mjviser Viewer<br/>+ hard-lock root"]
+        Mjviser["mjviser Viewer<br/>+ random walking + waypoint"]
         UserManual["用户手册<br/>webviz/user_manual.html"]
         MuJoCoDocs["MuJoCo文档<br/>webviz/mujoco_docs_cn.html"]
         ObstacleScene["障碍物场景<br/>webviz/scenes/humanoid_obstacle_arena.xml"]
@@ -692,7 +709,7 @@ graph TB
     subgraph Webviz
         FastAPI["FastAPI Server<br/>webviz/server.py"]
         Dashboard["Dashboard<br/>webviz/dashboard.html"]
-        Mjviser["mjviser Viewer<br/>+ hard-lock root"]
+        Mjviser["mjviser Viewer<br/>+ random walking + waypoint"]
         UserManual["用户手册<br/>webviz/user_manual.html"]
         MuJoCoDocs["MuJoCo文档<br/>webviz/mujoco_docs_cn.html"]
         ObstacleScene["障碍物场景<br/>webviz/scenes/humanoid_obstacle_arena.xml"]

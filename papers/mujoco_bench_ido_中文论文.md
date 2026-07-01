@@ -602,16 +602,16 @@ v0.3.0修复了mjviser Viewer的3个bug：
 - Bug B：env.model不存在 → env.physics.model._model
 - Bug C：缺少data参数 → env.physics.data._data
 
-v0.4.1–v0.4.2修复了mjviser Viewer的系列bug：
+v0.4.1–v0.4.3修复了mjviser Viewer的系列bug：
 - Bug D：viewer.run()在后台线程中调用signal.signal()抛ValueError → 手动调用_setup_gui()+_render()+_tick()循环规避signal限制
 - Bug E：独立sim_loop线程与Viewer _tick()并发写同一MjData → 使用Viewer step_fn参数注入stepping，消除数据竞争
-- Bug F：dm_control位置执行器太弱(gain=1,ctrlrange=[-1,1])无法撑住站立姿态 → 硬锁定root站立控制器：
-  - 关节PD通过qfrc_applied驱动21个铰链趋向target_qpos（KP=50, KD=15）
-  - 硬锁定root：每步仿真后直接重置qpos[0:7]和qvel[0:6] → root位置/朝向完全锁定，零漂移零抽搐
-  - 无周期性运动：机器人稳定直立，不晃不闪不四处走动
-  - dm_control humanoid有free root关节（7 qpos, 6 DOF，无执行器），总质量≈40.84kg
-  - PD-only root控制仍有xy漂移+周期动作太闪 → 硬锁定方案彻底解决
-  - 验证结果：root EXACTLY (0,0,1.5)，机器人直立 ≥20 模拟秒
+- Bug F：dm_control位置执行器太弱(gain=1,ctrlrange=[-1,1])无法撑住站立姿态 → v0.4.2硬锁定root站立控制器，v0.4.3改为随机走动控制器：
+  - v0.4.2：硬锁定root + 关节PD → root位置/朝向每步重置，机器人钉在原地直立不动
+  - v0.4.3：随机走动控制器 + 航点导航 → 7层控制架构（重力补偿+水平移动+朝向稳定+航向转向+行走步态+关节稳定+安全恢复），机器人直立走动朝随机航点移动
+  - 航点机制：每5秒随机更换目标点(x,y ∈ [-6, 6])，随机种子默认42，可通过MUJOCO_BENCH_WALK_SEED环境变量覆盖
+  - PD增益质量比例：root增益 = mass × 常数，关节KP=50 KD=15
+  - 球关节控制：四元数相对旋转 + 小角度近似
+  - 障碍物场景改进：障碍物改为静态(移除free joint)，地面尺寸12×12，障碍物位置重新分布
 
 ### 4.4 Baseline集成
 
