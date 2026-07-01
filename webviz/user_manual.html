@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuJoCo-Bench-IDO 用户手册</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
+    .sidebar { background: #1e293b; border-right: 1px solid #475569; position: fixed; top: 0; left: 0; width: 260px; height: 100vh; overflow-y: auto; z-index: 10; }
+    .sidebar a { display: block; padding: 10px 16px; color: #94a3b8; font-size: 0.85rem; border-bottom: 1px solid rgba(71,85,105,0.3); transition: all 0.2s; }
+    .sidebar a:hover, .sidebar a.active { color: #60a5fa; background: rgba(59,130,246,0.08); }
+    .sidebar-title { padding: 16px; font-size: 1rem; font-weight: 700; color: #e2e8f0; border-bottom: 2px solid #3b82f6; }
+    .main-content { margin-left: 260px; padding: 32px 40px; max-width: 900px; }
+    .section-card { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border: 1px solid #475569; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+    h2.section-title { font-size: 1.4rem; font-weight: 700; color: #60a5fa; margin-bottom: 16px; }
+    h3.sub-title { font-size: 1.1rem; font-weight: 600; color: #e2e8f0; margin-bottom: 12px; }
+    p { line-height: 1.7; margin-bottom: 12px; }
+    .quote-block { background: #0f172a; border-left: 3px solid #3b82f6; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
+    pre { background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 16px; overflow-x: auto; margin-bottom: 16px; }
+    code { background: #0f172a; color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; }
+    pre code { background: none; padding: 0; color: #e2e8f0; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    th { background: #1e293b; color: #94a3b8; font-weight: 600; padding: 10px 12px; text-align: left; border-bottom: 2px solid #475569; }
+    td { padding: 10px 12px; border-bottom: 1px solid rgba(71,85,105,0.3); }
+    tr:nth-child(even) { background: rgba(30,41,59,0.5); }
+    tr:nth-child(odd) { background: rgba(51,65,85,0.3); }
+    .label-sm { font-size: 0.7rem; color: #94a3b8; font-weight: 500; }
+    ul, ol { padding-left: 20px; margin-bottom: 12px; }
+    li { margin-bottom: 6px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-blue { background: #1e40af; color: #60a5fa; }
+    .badge-green { background: #14532d; color: #22c55e; }
+    @media (max-width: 768px) { .sidebar { display: none; } .main-content { margin-left: 0; padding: 16px; } }
+  </style>
+</head>
+<body>
+
+<!-- LEFT SIDEBAR -->
+<nav class="sidebar">
+  <div class="sidebar-title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.3.0</div>
+  <a href="#sec1">1. 项目简介</a>
+  <a href="#sec2">2. 环境要求</a>
+  <a href="#sec3">3. 快速开始</a>
+  <a href="#sec4">4. Web可视化仪表盘指南</a>
+  <a href="#sec5">5. mjviser 3D可视化指南</a>
+  <a href="#sec6">6. SIP-Bench模式</a>
+  <a href="#sec7">7. 核心概念通俗解释</a>
+  <a href="#sec8">8. Benchmark任务详解</a>
+  <a href="#sec9">9. Baseline对比使用</a>
+  <a href="#sec10">10. 物理/数学速查表</a>
+  <a href="#sec11">11. 常见问题与故障排查</a>
+</nav>
+
+<!-- MAIN CONTENT -->
+<div class="main-content">
+
+<!-- HEADER -->
+<div class="section-card" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: none; margin-bottom: 32px;">
+  <h1 style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-bottom: 8px;">MuJoCo-Bench-IDO 用户手册</h1>
+  <p style="color: #94a3b8;">版本 v0.3.0 · 最后更新 2025-07-01 · IDO/TOMAS Continuous Physics Benchmark</p>
+</div>
+
+<!-- ═══ Section 1: 项目简介 ═══ -->
+<div id="sec1" class="section-card">
+  <h2 class="section-title">1. 项目简介</h2>
+
+  <p><strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。</p>
+
+  <h3 class="sub-title">什么是 IDO/TOMAS？</h3>
+  <p>IDO（Information-Driven Orchestration）是一种<strong>非冯诺依曼架构</strong>的决策框架，核心思想是：</p>
+  <ul>
+    <li><strong>守恒优先</strong>（Conservation-First）：先检查物理守恒定律是否被违反，再决定下一步行动</li>
+    <li><strong>方向引导</strong>（κ-Snap Gate）：通过 η（GaussEx 残差）衡量当前状态距离目标的远近，η 小到阈值以下才"扣合"执行</li>
+    <li><strong>自演化</strong>（ψ-Anchor Meta-Layer）：根据 η 趋势动态调整策略，像教练看比赛数据调整战术</li>
+  </ul>
+  <p>TOMAS（Theory of Multi-Agent Systems）是 IDO 的理论基础，包含五层本体结构（L1-L5），从底层感知到顶层 Oracle 约束。</p>
+
+  <h3 class="sub-title">MuJoCo-Bench-IDO 做什么？</h3>
+  <p>它把 IDO 的决策循环映射到 MuJoCo 物理仿真环境，让机器人（人形、跳跃者、行走者、机械臂）在物理约束下尝试完成控制任务，同时验证 IDO 理论预言：</p>
+
+  <table>
+    <thead><tr><th>预言</th><th>内容</th><th>验证方式</th></tr></thead>
+    <tbody>
+      <tr><td>P1</td><td>IDO 永不违反物理守恒（NVR ≡ 0）</td><td>Noether-Check 门控</td></tr>
+      <tr><td>P2</td><td>IDO 比传统 RL 更快到达目标（SER ≥ 1.2）</td><td>步数对比</td></tr>
+      <tr><td>P3</td><td>传统 RL 会违反物理守恒（Baseline NVR > 0）</td><td>Baseline 评估</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══ Section 2: 环境要求 ═══ -->
+<div id="sec2" class="section-card">
+  <h2 class="section-title">2. 环境要求</h2>
+
+  <h3 class="sub-title">系统要求</h3>
+  <ul>
+    <li><strong>操作系统</strong>: Windows / Linux / macOS</li>
+    <li><strong>Python</strong>: 3.10+（推荐 3.11 或 3.12）</li>
+    <li><strong>内存</strong>: ≥ 4 GB RAM</li>
+    <li><strong>GPU</strong>: 非必需（IDO 运行纯 CPU）；Cosmos-Predict baseline 需 GPU + CUDA</li>
+  </ul>
+
+  <h3 class="sub-title">安装依赖</h3>
+  <pre><code># 核心依赖（必须）
+pip install dm_control mujoco numpy
+
+# Web 可视化（必须）
+pip install fastapi uvicorn websockets
+
+# mjviser 3D 可视化（可选）
+pip install mjviser
+
+# Baseline 对比（可选）
+pip install stable-baselines3 gymnasium  # PPO/SAC
+pip install tdmpc2                         # TD-MPC2
+
+# Cosmos-Predict 世界模型（可选，需 GPU）
+pip install nvidia-cosmos-predict1         # 需 CUDA + 7B+ 模型</code></pre>
+
+  <h3 class="sub-title">一键安装</h3>
+  <pre><code>pip install dm_control mujoco numpy fastapi uvicorn websockets mjviser</code></pre>
+</div>
+
+<!-- ═══ Section 3: 快速开始 ═══ -->
+<div id="sec3" class="section-card">
+  <h2 class="section-title">3. 快速开始</h2>
+
+  <h3 class="sub-title">Step 1: 安装依赖</h3>
+  <pre><code>pip install dm_control mujoco numpy fastapi uvicorn websockets</code></pre>
+  <p>可选安装 mjviser（3D 可视化）：</p>
+  <pre><code>pip install mjviser viser</code></pre>
+
+  <h3 class="sub-title">Step 2: 运行 Benchmark</h3>
+  <p>最简单的运行方式——单任务 3 个 episode：</p>
+  <pre><code>cd /path/to/mujoco-bench-ido
+python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 3</code></pre>
+
+  <p>输出示例：</p>
+  <pre><code>=== MuJoCo-Bench-IDO v0.2.0 ===
+Task: reacher-easy | Episodes: 3 | Max steps: 1000
+Episode 1: steps=1000, final_eta=2.45, NV=0, time=3.2s
+Episode 2: steps=1000, final_eta=3.10, NV=0, time=3.1s
+Episode 3: steps=1000, final_eta=2.80, NV=0, time=3.3s
+=== Summary ===
+avg_final_eta: 2.78
+avg_steps: 1000.0
+total_noether_violations: 0</code></pre>
+
+  <h3 class="sub-title">所有可用任务</h3>
+  <table>
+    <thead><tr><th>任务名</th><th>说明</th><th>推荐入门</th></tr></thead>
+    <tbody>
+      <tr><td><code>reacher-easy</code></td><td>2-DOF 机械臂到达目标（最简单）</td><td><span class="badge badge-green">⭐ 推荐新手</span></td></tr>
+      <tr><td><code>hopper-stand</code></td><td>单腿跳跃机器人站立</td><td>中等难度</td></tr>
+      <tr><td><code>walker-run</code></td><td>双足行走机器人跑步</td><td>较难</td></tr>
+      <tr><td><code>humanoid-stand</code></td><td>人形机器人站立（21 自由度）</td><td>最难</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title">更多 CLI 参数</h3>
+  <pre><code># 自定义 κ-Snap 阈值
+python benchmarks/run_mujoco_bench.py --task humanoid-stand --episodes 5 --kappa-thresh 0.05
+
+# SIP-Bench 纵向评估模式
+python benchmarks/run_mujoco_bench.py --task humanoid-stand --eval-mode sip --episodes 5 --evolution-rounds 3
+
+# 自定义最大步数
+python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-steps 500</code></pre>
+
+  <h3 class="sub-title">Step 3: 启动 Web 仪表盘</h3>
+  <pre><code>python webviz/run_webviz.py</code></pre>
+  <p>打开浏览器访问 <code>http://localhost:8080</code>，即可看到实时监控仪表盘。</p>
+</div>
+
+<!-- ═══ Section 4: Web可视化仪表盘指南 ═══ -->
+<div id="sec4" class="section-card">
+  <h2 class="section-title">4. Web 可视化仪表盘指南</h2>
+  <p>启动 Web 仪表盘后，浏览器将显示完整的监控界面。</p>
+
+  <h3 class="sub-title">顶部导航栏</h3>
+  <ul>
+    <li><strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz</li>
+    <li><strong>版本号</strong>: v0.3.0</li>
+    <li><strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行</li>
+    <li><strong>导航链接</strong>: 用户手册、MuJoCo中文文档</li>
+  </ul>
+
+  <h3 class="sub-title">左侧控制面板</h3>
+  <p><strong>任务选择下拉框</strong>：选择要运行的 dm_control 任务（humanoid-stand / hopper-stand / walker-run / reacher-easy）。</p>
+  <p><strong>Episode 配置</strong>：</p>
+  <ul>
+    <li><strong>Episode 数量</strong>: 输入要运行的 episode 数（默认 5）</li>
+    <li><strong>最大步数</strong>: 每个 episode 的最大步数（默认 1000）</li>
+  </ul>
+  <p><strong>SIP-Bench Toggle</strong>：勾选后切换到 SIP-Bench 纵向评估模式（T0/T1/T2 三阶段）。</p>
+  <p><strong>mjviser 3D 按钮</strong>：点击 "🎮 Open mjviser (8081)" 按钮，在端口 8081 启动 3D 物理可视化。需先安装 <code>mjviser</code> 和 <code>viser</code>。</p>
+  <p><strong>运行 / 停止按钮</strong>：</p>
+  <ul>
+    <li><strong>Run</strong>: 开始 benchmark 运行</li>
+    <li><strong>Stop</strong>: 停止当前运行的 benchmark</li>
+  </ul>
+
+  <h3 class="sub-title">右侧仪表盘</h3>
+  <p><strong>η 轨迹图</strong>：实时显示每个 episode 的 η（GaussEx 残差）随步数变化的曲线。η 趋近 0 说明接近目标。</p>
+  <p><strong>Noether 计数器</strong>：累计显示 Noether 违规次数。理想状态：IDO 模式下 NVR ≡ 0。</p>
+  <p><strong>κ-Snap 状态</strong>：显示当前 κ-Snap 门控是否触发（η < δ_K → snap，η ≥ δ_K → 探索）。</p>
+  <p><strong>ψ-Anchor 面板</strong>：显示 ψ-Anchor 元管理层状态：</p>
+  <ul>
+    <li>当前演化策略（light/freeze）</li>
+    <li>epiplexity 评分</li>
+    <li>动态调整的 δ_K 值</li>
+  </ul>
+  <p><strong>IC-Value 柱状图</strong>：各 Motor Primitive 的 IC-Value 评分柱状图，显示哪个元动作被优先选择。</p>
+  <p><strong>SIP-Bench 结果面板</strong>（SIP 模式下）：显示 T0/T1/T2 三阶段的结果对比：</p>
+  <ul>
+    <li>Retention Gain（>1 表示改善保持）</li>
+    <li>Stability Index（<1 表示更稳定）</li>
+  </ul>
+
+  <h3 class="sub-title">底部状态栏</h3>
+  <ul>
+    <li>当前任务名</li>
+    <li>当前 episode / 总 episode</li>
+    <li>当前步数</li>
+    <li>mjviser 可用状态</li>
+  </ul>
+</div>
+
+<!-- ═══ Section 5: mjviser 3D可视化指南 ═══ -->
+<div id="sec5" class="section-card">
+  <h2 class="section-title">5. mjviser 3D 可视化指南</h2>
+
+  <h3 class="sub-title">启动步骤</h3>
+  <ol>
+    <li>安装 mjviser 和 viser：<code>pip install mjviser viser</code></li>
+    <li>在 Web 仪表盘中点击 "🎮 Open mjviser (8081)" 按钮</li>
+    <li>等待几秒钟，mjviser 服务在端口 8081 启动</li>
+    <li>打开浏览器访问 <code>http://localhost:8081</code></li>
+  </ol>
+
+  <h3 class="sub-title">3D 交互操作</h3>
+  <p>在 mjviser 3D 视窗中，你可以：</p>
+  <ul>
+    <li><strong>旋转视角</strong>: 鼠标左键拖拽</li>
+    <li><strong>缩放</strong>: 鼠标滚轮</li>
+    <li><strong>平移</strong>: 鼠标右键拖拽</li>
+    <li><strong>选择关节</strong>: 点击关节高亮</li>
+    <li><strong>实时物理</strong>: 查看人形机器人当前姿态</li>
+  </ul>
+
+  <h3 class="sub-title">注意事项</h3>
+  <ul>
+    <li>mjviser 服务使用端口 <strong>8081</strong>，FastAPI 仪表盘使用端口 <strong>8080</strong>，两者不冲突</li>
+    <li>mjviser 只能同时运行一个实例，重复点击按钮会返回 "already_running" 状态</li>
+    <li>关闭浏览器页面不会停止 mjviser 服务，需要重启 webviz 服务来停止</li>
+  </ul>
+
+  <h3 class="sub-title">故障排查</h3>
+  <table>
+    <thead><tr><th>问题</th><th>解决方案</th></tr></thead>
+    <tbody>
+      <tr><td>按钮显示 "mjviser not installed"</td><td>运行 <code>pip install mjviser viser</code></td></tr>
+      <tr><td>8081 端口打不开</td><td>检查防火墙，或等待 3-5 秒后刷新</td></tr>
+      <tr><td>3D 视窗空白</td><td>确认 dm_control 和 mujoco 正常安装</td></tr>
+      <tr><td>启动失败</td><td>查看终端输出的 <code>mjviser viewer failed:</code> 错误信息</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══ Section 6: SIP-Bench模式 ═══ -->
+<div id="sec6" class="section-card">
+  <h2 class="section-title">6. SIP-Bench 模式</h2>
+
+  <h3 class="sub-title">什么是 SIP-Bench？</h3>
+  <p>SIP-Bench（Self-evolving Iteration Protocol Benchmark）是 IDO 的纵向评估协议，测量 Agent 在<strong>学习→适应→保持</strong>三个阶段的性能变化。</p>
+
+  <h3 class="sub-title">T0/T1/T2 三阶段</h3>
+  <table>
+    <thead><tr><th>阶段</th><th>名称</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><strong>T0</strong></td><td>初始基线</td><td>运行 IDO Agent，ψ-Anchor 观察但不主动调整</td></tr>
+      <tr><td><strong>T1</strong></td><td>迭代演化</td><td>ψ-Anchor 主动演化（light/freeze 循环），调整 δ_K 和 Motor Primitive IC-Value</td></tr>
+      <tr><td><strong>T2</strong></td><td>保持测试</td><td>使用 T1 演化后的策略，但不再进一步演化，测试改善是否持久</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title">关键指标</h3>
+  <p><strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps</p>
+  <ul>
+    <li>> 1 → T2 比 T0 更快（改善持久）✅</li>
+    <li>= 1 → 无变化</li>
+    <li>< 1 → T2 更慢（改善未保持）</li>
+  </ul>
+  <p><strong>Stability Index</strong> = T2_std_steps / T0_std_steps</p>
+  <ul>
+    <li>< 1 → T2 比 T0 更稳定（方差降低）✅</li>
+    <li>= 1 → 稳定性相同</li>
+    <li>> 1 → T2 更不稳定</li>
+  </ul>
+
+  <h3 class="sub-title">运行 SIP-Bench</h3>
+  <pre><code># CLI 方式
+python benchmarks/run_mujoco_bench.py --task humanoid-stand --eval-mode sip --episodes 5 --evolution-rounds 3
+
+# Web 仪表盘方式
+勾选 "SIP-Bench" toggle → 设置 evolution rounds → 点击 Run</code></pre>
+</div>
+
+<!-- ═══ Section 7: 核心概念通俗解释 ═══ -->
+<div id="sec7" class="section-card">
+  <h2 class="section-title">7. 核心概念通俗解释</h2>
+
+  <h3 class="sub-title">η (GaussEx) — 距离目标的度量</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: η 就像是你离家还有多远。越接近目标，η 越小，就像高斯分布——越靠近中心点密度越高。η 不是简单的距离，而是综合了位置、姿态、能量、速度四个维度的"加权距离平方"。
+  </div>
+  <p>公式：<code>η = w_pos · ‖ee − target‖² + w_ori · tilt² + w_eng · max(0, E − E_budget)² + w_vel · ‖v_ee‖²</code></p>
+
+  <h3 class="sub-title">Noether 违规 — 物理守恒定律被违反</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: Noether 违规就是"物理定律被违反的次数"。能量不该凭空产生或消失，力矩不该超过电机限制，机器人不该自己撞自己。IDO 的 Noether-Check 就像物理老师批改作业——每个动作都要通过物理定律考试。
+  </div>
+  <p>三重守恒门：</p>
+  <ol>
+    <li><strong>能量门</strong>: ΔE ≤ max_energy_inject + ε（能量不能凭空出现）</li>
+    <li><strong>力矩门</strong>: |actuator_force| ≤ MAX_TORQUE × margin（不能超功率）</li>
+    <li><strong>碰撞门</strong>: min_geom_distance ≥ threshold（不能自己撞自己）</li>
+  </ol>
+
+  <h3 class="sub-title">κ-Snap 门控 — 想清楚再行动</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: κ-Snap 门控就像是"当优化足够收敛时才'扣合'执行"。还没想清楚就行动是危险的——η 太大说明还在探索，只有当 η 降到阈值以下（η < δ_K），才认为当前方向足够好，可以"扣合"到 PD 控制精细调整。
+  </div>
+  <ul>
+    <li>η ≥ δ_K → 探索模式（Motor Primitive 尝试不同策略）</li>
+    <li>η < δ_K → κ-Snap 模式（PD 稳定控制精细收敛）</li>
+  </ul>
+
+  <h3 class="sub-title">ψ-Anchor — 元管理层（教练角色）</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: ψ-Anchor 就像教练看比赛数据调整战术。它监测 η 的趋势（上升、停滞、下降），动态调整 δ_K 阈值，决定是"放开探索"（light策略）还是"锁定当前最优"（freeze策略）。
+  </div>
+  <ul>
+    <li>η 下降 → 收紧 δ_K（×0.8），追求更精确</li>
+    <li>η 停滞 → 放宽 δ_K（×1.2），打破僵局</li>
+    <li>η 上升 → 保持 δ_K 不变，避免恶化</li>
+  </ul>
+
+  <h3 class="sub-title">FlowMatching — 预判未来走势</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: FlowMatching 就像天气预报——预测 η 的未来轨迹。如果预测 η 不会下降（停滞），就触发 ψ-Anchor 演化，换策略。
+  </div>
+  <p>关键指标：</p>
+  <ul>
+    <li><strong>Hesitation-RMSE</strong>: η 来回震荡的幅度（犹豫不决程度）</li>
+    <li><strong>Retry-VOC</strong>: η 方向频繁翻转的频率（反复尝试程度）</li>
+  </ul>
+
+  <h3 class="sub-title">epiplexity — 策略困惑度</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: epiplexity 衡量策略的"困惑程度"。困惑度高说明当前策略不够用，需要演化新策略。就像考试前越焦虑，说明准备越不充分。
+  </div>
+  <p>公式：<code>epiplexity = n_invariants × (1/δ_K) × log(max_energy)</code></p>
+
+  <h3 class="sub-title">VG-Pair ≠ GAN — 不是对抗训练</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: VG-Pair（Verifier-Generator Pair）和 GAN（生成对抗网络）看起来都有"生成器+验证器"，但本质完全不同。GAN 的验证器是<strong>学出来的</strong>，生成器试图骗过验证器——就像考试时学生和考官互相博弈。VG-Pair 的验证器是<strong>物理定律本身</strong>——你不可能骗过牛顿定律，能量守恒就是守恒。
+  </div>
+  <table>
+    <thead><tr><th>对比</th><th>VG-Pair</th><th>GAN</th></tr></thead>
+    <tbody>
+      <tr><td>目标</td><td>生成→验证→修正→执行</td><td>min_G max_D 对抗博弈</td></tr>
+      <tr><td>验证器</td><td>物理定律（不可欺骗）</td><td>学出来的判别器（可以骗）</td></tr>
+      <tr><td>Soundness</td><td>物理定律保证</td><td>无形式化保证</td></tr>
+      <tr><td>训练方式</td><td>无对抗训练</td><td>对抗训练</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title">C-IPP — 连续交互式证明协议</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: C-IPP 就像数学证明的交互式验证过程——提出一个解决方案→验证→如果验证失败就修正→再次验证→通过后执行。不是一次性提交答案，而是反复验证直到确定正确。
+  </div>
+  <p>流程：<strong>生成 → 验证 → 拒绝 → 修正 → 接受 → 执行</strong></p>
+
+  <h3 class="sub-title">GEL — Goal-EML 注入损失</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: GEL 把物理约束当作"惩罚项"，迫使策略遵守物理定律。就像给自动驾驶加上"不能闯红灯"的硬约束——不是靠学习后可能遵守，而是从一开始就被强制遵守。
+  </div>
+  <p>公式：<code>L_GEL = λ₁ · ‖η_Noether‖² + λ₂ · ‖η_contact‖² + λ₃ · ‖η_task‖² + λ₄ · hinge(task_success)</code></p>
+
+  <h3 class="sub-title">Dual-Engine AGI — 双引擎驱动</h3>
+  <div class="quote-block">
+    <strong>通俗理解</strong>: Dual-Engine AGI 用两个引擎驱动——数字引擎（LLM 推理，像大脑思考）+ 具身引擎（物理执行，像身体行动）。大脑负责规划和逻辑验证，身体负责物理世界验证和执行。两个引擎各自独立验证（VG-Pair），互相补充。
+  </div>
+</div>
+
+<!-- ═══ Section 8: Benchmark任务详解 ═══ -->
+<div id="sec8" class="section-card">
+  <h2 class="section-title">8. Benchmark 任务详解</h2>
+
+  <h3 class="sub-title">humanoid-stand: 人形机器人站立</h3>
+  <ul>
+    <li><strong>自由度</strong>: 21 DOF（3D 空间）</li>
+    <li><strong>目标</strong>: 人形机器人从初始姿态站立保持平衡</li>
+    <li><strong>难点</strong>: 多关节协调、重心控制、地面接触约束</li>
+    <li><strong>GoalEML 不变量</strong>: ee_at_target, torso_upright, no_self_collide</li>
+    <li><strong>能量预算</strong>: 500 J</li>
+  </ul>
+
+  <h3 class="sub-title">hopper-stand: 单腿跳跃机器人站立</h3>
+  <ul>
+    <li><strong>自由度</strong>: 6 DOF</li>
+    <li><strong>目标</strong>: 单腿机器人站立保持平衡</li>
+    <li><strong>难点</strong>: 单腿平衡、足部接触约束</li>
+    <li><strong>GoalEML 不变量</strong>: torso_upright, foot_on_ground, no_self_collide</li>
+    <li><strong>能量预算</strong>: 200 J</li>
+  </ul>
+
+  <h3 class="sub-title">walker-run: 双足行走机器人跑步</h3>
+  <ul>
+    <li><strong>自由度</strong>: 6 DOF</li>
+    <li><strong>目标</strong>: 双足机器人向前跑步不跌倒</li>
+    <li><strong>难点</strong>: 连续前进、动态平衡、跑步周期</li>
+    <li><strong>GoalEML 不变量</strong>: com_x_advancing, not_fallen, no_self_collide</li>
+    <li><strong>能量预算</strong>: 600 J</li>
+  </ul>
+
+  <h3 class="sub-title">reacher-easy: 2-DOF 机械臂到达目标</h3>
+  <ul>
+    <li><strong>自由度</strong>: 2 DOF（最简单）</li>
+    <li><strong>目标</strong>: 机械臂末端到达目标位置</li>
+    <li><strong>难点</strong>: 简单到达，适合入门调试</li>
+    <li><strong>GoalEML 不变量</strong>: ee_at_target</li>
+    <li><strong>能量预算</strong>: 50 J</li>
+  </ul>
+</div>
+
+<!-- ═══ Section 9: Baseline对比使用 ═══ -->
+<div id="sec9" class="section-card">
+  <h2 class="section-title">9. Baseline 对比使用</h2>
+
+  <h3 class="sub-title">IDO vs TD-MPC2 控制对比</h3>
+  <pre><code># 控制对比模式（步数、NVR、SER）
+python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --episodes 5
+
+# 指定 TD-MPC2 baseline
+python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --baseline tdmpc2_v2
+
+# 仅运行 IDO（无 baseline）
+python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --ido_only</code></pre>
+
+  <h3 class="sub-title">Cosmos-Predict η 预测对比</h3>
+  <pre><code># η 轨迹预测对比（需 GPU + Cosmos-Predict 安装）
+python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosmos-predict</code></pre>
+
+  <h3 class="sub-title">对比指标</h3>
+  <table>
+    <thead><tr><th>对比类型</th><th>模式</th><th>指标</th></tr></thead>
+    <tbody>
+      <tr><td>控制对比</td><td><code>control</code></td><td>Steps, NVR, SER, Survival Rate</td></tr>
+      <tr><td>预测对比</td><td><code>cosmos-predict</code></td><td>η trajectory RMSE, η correlation</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title">优雅降级</h3>
+  <p>如果 baseline 包未安装，系统会自动降级：</p>
+  <ul>
+    <li>TD-MPC2 未安装 → 使用 Random Agent 替代</li>
+    <li>Cosmos-Predict 未安装 → 跳过该 baseline</li>
+    <li>SB3 未安装 → 跳过 PPO/SAC</li>
+  </ul>
+</div>
+
+<!-- ═══ Section 10: 物理/数学速查表 ═══ -->
+<div id="sec10" class="section-card">
+  <h2 class="section-title">10. 大学物理/数学速查表</h2>
+  <p>边跑 Benchmark 边学，以下是 EML 映射表：</p>
+
+  <table>
+    <thead><tr><th>大学课程</th><th>核心概念</th><th>EML 映射</th><th>IDO 层</th></tr></thead>
+    <tbody>
+      <tr><td>经典力学</td><td>牛顿-欧拉方程、能量守恒、Signorini 接触</td><td>Goal-EML 物理约束</td><td>L2</td></tr>
+      <tr><td>线性代数</td><td>向量空间、投影、陪集</td><td>η = 距 Goal-EML 陪集的距离</td><td>L2</td></tr>
+      <tr><td>概率论</td><td>高斯分布、概率密度</td><td>GaussEx η（越近→密度越高→η 越小）</td><td>L2</td></tr>
+      <tr><td>微积分/优化</td><td>Jacobian、梯度下降</td><td>κ-Snap 阈值门控、PD 控制</td><td>L2</td></tr>
+      <tr><td>信息论</td><td>Shannon 熵、有效复杂度</td><td>IC（信息基数）、epiplexity</td><td>L1-L4</td></tr>
+      <tr><td>微分方程</td><td>流、轨迹预测</td><td>FlowMatching η 轨迹</td><td>L1</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title">边跑边学建议</h3>
+  <ul>
+    <li><strong>η 曲线</strong> = "物理+数学可视化"——看 η 随时间下降的过程就是收敛过程</li>
+    <li><strong>Noether 违规</strong> = "哪个物理定律被违反了"——每种违规类型对应一个守恒定律</li>
+    <li><strong>κ-Snap 触发</strong> = "优化够收敛了才扣合"——δ_K 阈值决定何时接受当前状态</li>
+    <li><strong>SIP-Bench 阶段</strong> = "学习如何稳定"——T0→T1→T2 展示改善是否持久</li>
+  </ul>
+</div>
+
+<!-- ═══ Section 11: 常见问题与故障排查 ═══ -->
+<div id="sec11" class="section-card">
+  <h2 class="section-title">11. 常见问题与故障排查</h2>
+
+  <h3 class="sub-title">mjviser 启动失败</h3>
+  <p><strong>症状</strong>: 点击 mjviser 按钮后无反应或报错</p>
+  <p><strong>排查步骤</strong>:</p>
+  <ol>
+    <li>确认安装了 mjviser 和 viser：<code>pip install mjviser viser</code></li>
+    <li>确认 dm_control 正常：<code>python -c "import dm_control.suite; print('OK')"</code></li>
+    <li>查看终端输出的 <code>mjviser viewer failed:</code> 错误信息</li>
+    <li>常见错误：<code>Viewer.__init__()</code> 参数不对 → v0.3.0 已修复此 bug</li>
+  </ol>
+
+  <h3 class="sub-title">端口冲突</h3>
+  <p><strong>症状</strong>: 8080 或 8081 端口无法访问</p>
+  <p><strong>排查步骤</strong>:</p>
+  <ol>
+    <li>8080 被 FastAPI 占用是正常的——检查是否有其他 FastAPI 服务占用</li>
+    <li>8081 被 mjviser 占用是正常的——检查是否有其他 viser 服务占用</li>
+    <li>查看占用进程：<code>netstat -ano | findstr 8080</code>（Windows）或 <code>lsof -i :8080</code>（Linux）</li>
+    <li>杀死占用进程或更改端口配置</li>
+  </ol>
+
+  <h3 class="sub-title">dm_control 兼容性</h3>
+  <p><strong>症状</strong>: <code>import dm_control</code> 报错或环境加载失败</p>
+  <p><strong>排查步骤</strong>:</p>
+  <ol>
+    <li>确认 Python 版本 ≥ 3.10</li>
+    <li>安装 dm_control：<code>pip install dm_control</code></li>
+    <li>确认 mujoco 版本 ≥ 2.3.0：<code>pip show mujoco</code></li>
+    <li>dm_control 需要 mujoco 作为底层依赖</li>
+  </ol>
+
+  <h3 class="sub-title">GPU 需求</h3>
+  <p><strong>症状</strong>: Cosmos-Predict baseline 无法运行</p>
+  <p><strong>排查步骤</strong>:</p>
+  <ol>
+    <li>Cosmos-Predict 7B/14B 模型需要 CUDA GPU</li>
+    <li>检查 CUDA 是否可用：<code>python -c "import torch; print(torch.cuda.is_available())"</code></li>
+    <li>如无 GPU，跳过 Cosmos-Predict baseline（使用 <code>--ido_only</code> 参数）</li>
+  </ol>
+
+  <h3 class="sub-title">η 值异常大</h3>
+  <p><strong>症状</strong>: η 值超过 100 或 1000</p>
+  <p><strong>解释</strong>: 这是正常的——不同任务的 η 尺度不同：</p>
+  <ul>
+    <li>reacher-easy: η ≈ 10000（机械臂距离远，η 自然大）</li>
+    <li>walker-run: η ≈ 130（行走任务距离中等）</li>
+    <li>humanoid-stand: η ≈ 2.6（站立任务距离近）</li>
+    <li>hopper-stand: η ≈ 6.88（跳跃任务距离中等）</li>
+  </ul>
+
+  <h3 class="sub-title">Noether 违规数很大</h3>
+  <p><strong>症状</strong>: humanoid/hopper/walker 的 NV > 2000</p>
+  <p><strong>解释</strong>: v0.2.2 数据中这三个任务确实存在大量 Noether 违规（NVR ≈ 1.47），原因：</p>
+  <ol>
+    <li>Motor Primitive 设计未充分考虑碰撞约束</li>
+    <li>能量预算参数需要调优</li>
+    <li>只有 reacher-easy 实现了 NV ≡ 0（预言 P1 在此任务上通过）</li>
+  </ol>
+  <p><strong>改善方向</strong>: 使用 SIP-Bench 模式进行演化优化，或调整 GoalEML 参数。</p>
+</div>
+
+<!-- FOOTER -->
+<div style="text-align: center; padding: 32px 0; color: #64748b; border-top: 1px solid #475569; margin-top: 40px;">
+  <p>MuJoCo-Bench-IDO v0.3.0 用户手册</p>
+  <p>最后更新: 2025-07-01</p>
+</div>
+
+</div><!-- end main-content -->
+
+<!-- Sidebar active link highlighting -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const sections = document.querySelectorAll('.section-card[id]');
+  const navLinks = document.querySelectorAll('.sidebar a');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(link => link.classList.remove('active'));
+        const activeLink = document.querySelector(`.sidebar a[href="#${entry.target.id}"]`);
+        if (activeLink) activeLink.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3 });
+  sections.forEach(sec => observer.observe(sec));
+});
+</script>
+
+</body>
+</html>

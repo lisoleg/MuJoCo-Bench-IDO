@@ -481,6 +481,8 @@ graph TD
 | `webviz/__init__.py` | ★ 新 | 包初始化 |
 | `webviz/server.py` | ★ 新(v0.3.0修复) | FastAPI REST API + WebSocket + mjviser服务 |
 | `webviz/dashboard.html` | ★ 新 | 实时监控仪表盘HTML（Chart.js + WebSocket） |
+| `webviz/user_manual.html` | ★ 新(v0.3.0) | 用户手册HTML版本（从Markdown转换，深色主题单文件，左侧目录导航） |
+| `webviz/mujoco_docs_cn.html` | ★ 新(v0.3.0) | MuJoCo官方文档Overview中文翻译版（深色主题单文件，左侧目录导航） |
 | `webviz/run_webviz.py` | ★ 新 | uvicorn启动脚本 |
 
 **server.py v0.3.0 mjviser Bug修复**：
@@ -519,6 +521,8 @@ graph TB
         FastAPI["FastAPI Server<br/>webviz/server.py"]
         Dashboard["Dashboard<br/>webviz/dashboard.html"]
         Mjviser["mjviser Viewer<br/>webviz/server.py (launch_viewer)"]
+        UserManual["用户手册HTML<br/>webviz/user_manual.html"]
+        MuJoCoDocs["MuJoCo中文文档<br/>webviz/mujoco_docs_cn.html"]
     end
     
     subgraph Benchmarks
@@ -541,6 +545,10 @@ graph TB
     
     FastAPI --> Dashboard
     FastAPI --> RunBench
+    FastAPI --> UserManual
+    FastAPI --> MuJoCoDocs
+    Dashboard --> UserManual
+    Dashboard --> MuJoCoDocs
     Mjviser --> FastAPI
 ```
 

@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Any
 import numpy as np
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
 
 # ── Add project root to PYTHONPATH so imports work ──
@@ -49,7 +49,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.2.0"
+WEBVIZ_VERSION: str = "v0.3.0"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -902,6 +902,29 @@ async def serve_dashboard() -> HTMLResponse:
         return HTMLResponse(content=html_content)
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Dashboard HTML not found</h1>", status_code=404)
+
+
+# ── Serve Documentation HTML Pages ──
+WEBVIZ_DIR: str = os.path.dirname(os.path.abspath(__file__))
+
+@app.get("/user_manual.html")
+async def serve_user_manual() -> FileResponse:
+    """Serve the user manual HTML page.
+
+    Returns:
+        FileResponse with the user_manual.html content.
+    """
+    return FileResponse(os.path.join(WEBVIZ_DIR, "user_manual.html"), media_type="text/html")
+
+
+@app.get("/mujoco_docs_cn.html")
+async def serve_mujoco_docs_cn() -> FileResponse:
+    """Serve the MuJoCo Overview Chinese translation HTML page.
+
+    Returns:
+        FileResponse with the mujoco_docs_cn.html content.
+    """
+    return FileResponse(os.path.join(WEBVIZ_DIR, "mujoco_docs_cn.html"), media_type="text/html")
 
 
 # ── CORS middleware (for development) ──

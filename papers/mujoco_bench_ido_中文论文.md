@@ -556,6 +556,31 @@ v0.3.0实现了两个baseline adapter：
 - 7B/14B模型需GPU + CUDA
 - 优雅降级：未安装时跳过
 
+### 4.5 Web可视化与文档系统
+
+v0.3.0新增了Web可视化与文档系统，增强用户体验和降低学习门槛：
+
+**Webviz仪表盘**（FastAPI + WebSocket + Chart.js）提供实时η曲线和Noether违规可视化：
+- 顶部导航栏集成项目信息、版本号、文档入口
+- 左侧控制面板支持任务选择、Episode配置、SIP-Bench切换
+- 右侧仪表盘实时显示η轨迹图、Noether计数器、κ-Snap状态、ψ-Anchor面板、IC-Value柱状图
+- mjviser 3D Viewer在端口8081提供交互式物理可视化
+
+**用户手册HTML版**（`webviz/user_manual.html`）提供交互式文档浏览：
+- 从Markdown转换的完整11章节内容
+- 深色主题（与仪表盘一致的bg #0f172a配色）
+- 左侧侧边栏目录导航（可点击跳转各章节）
+- 挂到仪表盘首页导航栏"📖 用户手册"链接
+- 单文件HTML，不依赖外部文件
+
+**MuJoCo官方文档中文翻译版**（`webviz/mujoco_docs_cn.html`）降低国内研究者学习门槛：
+- MuJoCo Overview页面完整中文翻译（引言、14项核心特性、模型实例、示例、模型元素、澄清）
+- 深色主题（与仪表盘一致）
+- 左侧侧边栏目录导航（所有章节可点击跳转）
+- 代码块保留原文，注释翻译为中文
+- 挂到仪表盘首页导航栏"📘 MuJoCo中文文档"链接
+- FastAPI路由：/user_manual.html 和 /mujoco_docs_cn.html
+
 ---
 
 ## 5 实验结果

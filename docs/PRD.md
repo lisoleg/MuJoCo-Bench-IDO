@@ -64,6 +64,8 @@
 | R18 | SIP-Bench Web支持 | Web仪表盘支持SIP-Bench toggle，实时显示T0/T1/T2阶段结果和Retention Gain/Stability Index |
 | R19 | 中文顶刊论文 | `papers/mujoco_bench_ido_中文论文.md`：面向国内顶级学术期刊的完整论文（8,000-12,000字），含VG-Pair≠GAN理论框架 |
 | R20 | 用户手册 | `docs/用户手册.md`：通俗易懂的中文用户手册，含快速开始、概念通俗解释、故障排查 |
+| R21 | 用户手册HTML版 | `webviz/user_manual.html`：用户手册的交互式HTML版本，深色主题，左侧目录导航，挂到仪表盘首页 |
+| R22 | MuJoCo中文文档 | `webviz/mujoco_docs_cn.html`：MuJoCo Overview完整中文翻译，深色主题，左侧目录导航，挂到仪表盘首页 |
 
 ### UI Design Draft
 
@@ -101,10 +103,21 @@ evaluate_vs_baseline.py --task humanoid-stand --baseline tdmpc2_v2
 ```
 python webviz/run_webviz.py
   → 打开 localhost:8080
+  → 顶部导航栏：项目名称 + 用户手册链接 + MuJoCo中文文档链接 + 版本号(v0.3.0) + 运行状态
   → 左侧：任务选择、Episode配置、SIP-Bench toggle、mjviser按钮、Run/Stop
   → 右侧：η轨迹图、Noether计数器、κ-Snap状态、ψ-Anchor面板、IC-Value柱状图、SIP-Bench结果
   → 底部：状态栏
   → mjviser 3D Viewer：点击按钮 → localhost:8081 → 3D交互操作
+
+用户手册HTML版：导航栏"📖 用户手册"链接 → /user_manual.html（新窗口）
+  → 左侧：11章节目录（可点击跳转）
+  → 右侧：完整用户手册内容（深色主题）
+  → 底部版权：MuJoCo-Bench-IDO v0.3.0
+
+MuJoCo中文文档：导航栏"📘 MuJoCo中文文档"链接 → /mujoco_docs_cn.html（新窗口）
+  → 左侧：所有章节目录（可点击跳转）
+  → 右侧：MuJoCo Overview完整中文翻译（深色主题）
+  → 底部标注：中文翻译版 · 原文链接 · MuJoCo由Google DeepMind开源
 ```
 
 ### Open Questions

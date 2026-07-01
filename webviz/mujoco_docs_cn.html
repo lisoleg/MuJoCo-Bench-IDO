@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuJoCo 官方文档 · Overview 中文翻译</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-color: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    }
+    .sidebar {
+      background: #1e293b;
+      border-right: 1px solid #475569;
+      overflow-y: auto;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 260px;
+      height: 100vh;
+      z-index: 10;
+    }
+    .sidebar a {
+      color: #94a3b8;
+      display: block;
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+      border-radius: 4px;
+      margin: 2px 8px;
+    }
+    .sidebar a:hover, .sidebar a.active {
+      color: #e2e8f0;
+      background: #334155;
+    }
+    .sidebar .sidebar-title {
+      color: #f1f5f9;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 16px;
+      border-bottom: 1px solid #475569;
+    }
+    .sidebar .sidebar-subtitle {
+      color: #64748b;
+      font-size: 0.7rem;
+      padding: 4px 16px 4px;
+    }
+    .sidebar .sidebar-section {
+      color: #818cf8;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 12px 16px 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .sidebar .sidebar-indent {
+      padding-left: 24px;
+    }
+    .main-content {
+      margin-left: 260px;
+      padding: 24px 32px;
+      max-width: 900px;
+    }
+    .main-content h2 {
+      color: #f1f5f9;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 8px;
+    }
+    .main-content h3 {
+      color: #e2e8f0;
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .main-content h4 {
+      color: #cbd5e1;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    .main-content p {
+      color: #e2e8f0;
+      line-height: 1.7;
+      margin-bottom: 0.8rem;
+    }
+    .main-content blockquote {
+      background: #1e293b;
+      border-left: 3px solid #3b82f6;
+      padding: 12px 16px;
+      margin: 1rem 0;
+      border-radius: 4px;
+      color: #cbd5e1;
+      font-size: 0.9rem;
+    }
+    .main-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      background: #1e293b;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .main-content th {
+      background: #334155;
+      color: #94a3b8;
+      padding: 10px 12px;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-align: left;
+    }
+    .main-content td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #475569;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+    }
+    .main-content code {
+      background: #334155;
+      color: #22c55e;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: 'Consolas', 'Monaco', monospace;
+    }
+    .main-content pre {
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 1rem 0;
+      overflow-x: auto;
+    }
+    .main-content pre code {
+      background: none;
+      padding: 0;
+      color: #22c55e;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    .main-content ul, .main-content ol {
+      margin: 0.5rem 0;
+      padding-left: 1.5rem;
+      color: #e2e8f0;
+    }
+    .main-content li {
+      margin-bottom: 0.3rem;
+      line-height: 1.6;
+    }
+    .main-content hr {
+      border: none;
+      border-top: 1px solid #475569;
+      margin: 2rem 0;
+    }
+    .main-content strong {
+      color: #f1f5f9;
+    }
+    .card {
+      background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+      border: 1px solid #475569;
+      border-radius: 12px;
+      padding: 16px;
+      margin: 1rem 0;
+    }
+    .footer {
+      margin-top: 3rem;
+      padding: 1rem 0;
+      border-top: 1px solid #475569;
+      color: #64748b;
+      font-size: 0.75rem;
+      text-align: center;
+    }
+    @media (max-width: 768px) {
+      .sidebar { width: 200px; }
+      .main-content { margin-left: 200px; padding: 16px; }
+    }
+    @media (max-width: 600px) {
+      .sidebar { display: none; }
+      .main-content { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 左侧侧边栏目录 -->
+  <nav class="sidebar">
+    <div class="sidebar-title">📘 MuJoCo 中文文档</div>
+    <div class="sidebar-subtitle">Overview 中文翻译版</div>
+
+    <div class="sidebar-section">引言</div>
+    <a href="#intro">引言</a>
+    <a href="#key-features">核心特性</a>
+    <a href="#feat-gencoord" class="sidebar-indent">广义坐标+现代接触动力学</a>
+    <a href="#feat-softcontact" class="sidebar-indent">柔性凸优化可逆接触动力学</a>
+    <a href="#feat-tendon" class="sidebar-indent">腱几何</a>
+    <a href="#feat-actuator" class="sidebar-indent">通用驱动模型</a>
+    <a href="#feat-pipeline" class="sidebar-indent">可重构计算管线</a>
+    <a href="#feat-compilation" class="sidebar-indent">模型编译</a>
+    <a href="#feat-separation" class="sidebar-indent">模型与数据分离</a>
+    <a href="#feat-performance" class="sidebar-indent">性能</a>
+    <a href="#feat-interactive" class="sidebar-indent">交互仿真与可视化</a>
+    <a href="#feat-mjcf" class="sidebar-indent">强大直观的建模语言</a>
+    <a href="#feat-flex" class="sidebar-indent">自动生成复合柔性物体</a>
+    <a href="#feat-islands" class="sidebar-indent">约束岛与休眠</a>
+    <a href="#feat-plugins" class="sidebar-indent">插件系统</a>
+    <a href="#feat-gpu" class="sidebar-indent">GPU加速后端</a>
+
+    <div class="sidebar-section">模型实例</div>
+    <a href="#model-instances">模型实例</a>
+
+    <div class="sidebar-section">示例</div>
+    <a href="#examples">示例</a>
+
+    <div class="sidebar-section">模型元素</div>
+    <a href="#model-elements">模型元素</a>
+    <a href="#options" class="sidebar-indent">选项</a>
+    <a href="#assets" class="sidebar-indent">资产</a>
+    <a href="#kinematic-tree" class="sidebar-indent">运动学树</a>
+    <a href="#stand-alone" class="sidebar-indent">独立元素</a>
+
+    <div class="sidebar-section">澄清</div>
+    <a href="#clarifications">澄清</a>
+    <a href="#clar-divergence" class="sidebar-indent">仿真发散</a>
+    <a href="#clar-units" class="sidebar-indent">单位未指定</a>
+    <a href="#clar-collision" class="sidebar-indent">意外碰撞</a>
+    <a href="#clar-datadesign" class="sidebar-indent">数据导向设计</a>
+    <a href="#clar-softness" class="sidebar-indent">柔性与滑动</a>
+    <a href="#clar-types" class="sidebar-indent">类型/名称/ID</a>
+    <a href="#clar-bgs" class="sidebar-indent">体/几何/站点</a>
+    <a href="#clar-jointcoord" class="sidebar-indent">关节坐标</a>
+    <a href="#clar-floating" class="sidebar-indent">浮动物体</a>
+  </nav>
+
+  <!-- 主内容区 -->
+  <div class="main-content">
+
+    <h1 style="color:#f1f5f9; font-size:1.8rem; font-weight:800; margin-bottom:0.5rem;">MuJoCo Overview</h1>
+    <p style="color:#94a3b8; font-size:0.9rem;">中文翻译版 · 原文: <a href="https://mujoco.readthedocs.io/en/stable/overview.html" style="color:#3b82f6;">https://mujoco.readthedocs.io/en/stable/overview.html</a></p>
+    <hr>
+
+    <!-- 引言 -->
+    <h2 id="intro">引言</h2>
+    <p><strong>MuJoCo</strong> 代表 <strong>Mu</strong>lti-<strong>Jo</strong>int dynamics with <strong>Co</strong>ntact（多关节动力学与接触）。它是一个通用物理引擎，旨在促进机器人、生物力学、图形和动画、机器学习以及其他需要快速且精确模拟铰接结构与其环境交互的领域的研究与开发。</p>
+    <p>MuJoCo 最初由 Roboti LLC 开发，于 2021 年 10 月被 Google DeepMind 收购并<a href="https://github.com/google-deepmind/mujoco/blob/main/LICENSE" style="color:#3b82f6;">免费提供</a>，并于 2022 年 5 月开源。MuJoCo 代码库可在 GitHub 上的 <a href="https://github.com/google-deepmind/mujoco" style="color:#3b82f6;">google-deepmind/mujoco</a> 仓库中获取。</p>
+    <p>MuJoCo 是一个带有 C API 的 C/C++ 库，面向研究人员和开发人员。运行时模拟模块经过调优以最大化性能，并操作由内置 XML 解析器和编译器预分配的低级数据结构。用户使用原生 MJCF 场景描述语言（一种旨在尽可能易于人类阅读和编辑的 XML 文件格式）定义模型。也可以加载 URDF 模型文件。该库包括带有原生 GUI 的交互式可视化，在 OpenGL 中渲染。MuJoCo 还暴露了大量用于计算物理相关量的实用函数。</p>
+    <p>MuJoCo 可用于实现基于模型的计算，如控制综合、状态估计、系统辨识、机构设计、通过逆动力学进行数据分析，以及机器学习应用的并行采样。它也可以用作更传统的模拟器，包括用于游戏和交互式虚拟环境。</p>
+
+    <!-- 核心特性 -->
+    <h2 id="key-features">核心特性</h2>
+    <p>MuJoCo 有很长的功能列表。这里我们概述最显著的那些。</p>
+
+    <h3 id="feat-gencoord">广义坐标结合现代接触动力学</h3>
+    <p>物理引擎传统上分为两类。机器人与生物力学引擎在广义或关节坐标中使用高效且准确的递归算法。然而，它们要么省略了接触动力学，要么依赖较早的弹簧-阻尼器方法，这需要非常小的时间步长。游戏引擎使用更现代的方法，其中接触力通过求解优化问题来找到。然而，它们通常依赖于过度指定的笛卡尔表示，其中关节约束被数值施加，导致在涉及复杂运动学结构时出现不准确和不稳定。</p>
+    <p><strong>MuJoCo 开创了在广义坐标中进行模拟与基于优化的接触动力学相结合的方法</strong>。这种方法后来被其他模拟器采用。习惯于游戏引擎的用户最初可能会发现广义坐标违反直觉；请参阅下面的澄清部分。</p>
+
+    <h3 id="feat-softcontact">柔性、凸且可解析求逆的接触动力学</h3>
+    <p>在现代接触动力学方法中，由摩擦性接触引起的力或冲量通常被定义为线性或非线性互补问题（LCP 或 NCP）的解，两者都是 NP-hard 的。MuJoCo 基于一种不同的接触物理学公式，它简化为<strong>凸优化问题</strong>。我们的模型允许软接触和其他约束，并具有唯一定义的逆，便于数据分析和控制应用。</p>
+    <p>默认的牛顿求解器提供二次收敛；替代算法包括共梯度法和可以处理椭圆摩擦锥的广义 Projected Gauss-Seidel 方法。求解器提供摩擦性接触（包括扭转和滚动摩擦）、无摩擦接触、关节和肌腱限制、关节和肌腱中的干摩擦以及各种等式约束的统一处理。</p>
+
+    <h3 id="feat-tendon">腱几何</h3>
+    <p>MuJoCo 可以建模肌腱的 3D 几何形状——这些是服从包裹和经过点约束的最小路径长度字符串。该机制类似于 OpenSim 中的机制，但实现了一组更受限的、封闭形式的包裹选项以加快计算速度。它还提供了机器人特有的结构，如滑轮和耦合自由度。肌腱可用于驱动以及施加肌腱长度上的不等式或等式约束。</p>
+
+    <h3 id="feat-actuator">通用驱动模型</h3>
+    <p>在设计足够丰富的驱动模型的同时使用模型无关的 API 是具有挑战性的。MuJoCo 通过采用<strong>抽象驱动模型</strong>来实现这一目标，该模型可以具有不同类型的传动、力生成和内部动力学（即，使整体动力学成为三阶的状态变量）。这些组件可以被实例化，以统一的方式建模电机、气动和液压缸、PD 控制器、生物肌肉和许多其他驱动器。</p>
+
+    <h3 id="feat-pipeline">可重构计算管线</h3>
+    <p>MuJoCo 有一个顶层步进函数 <code>mj_step</code>，它运行整个前向动力学并推进模拟状态。然而，在模拟之外的许多应用中，能够运行计算管道的选定部分是有益的。为此，MuJoCo 提供了大量标志（flags），可以以任意组合设置，允许用户根据需要重新配置管道。此外，许多低级函数可以直接调用。用户定义的回调可以实现自定义力场、驱动器、碰撞例程和反馈控制器。</p>
+
+    <h3 id="feat-compilation">模型编译</h3>
+    <p>如上所述，用户在称为 MJCF 的 XML 文件格式中定义 MuJoCo 模型。然后该模型由内置编译器编译到低级数据结构 <code>mjModel</code> 中，该结构经过交叉索引并针对运行时计算进行了优化。编译后的模型也可以保存在二进制 MJB 文件中。</p>
+
+    <h3 id="feat-separation">模型与数据分离</h3>
+    <p>MuJoCo 在运行时将模拟参数分离为两个数据结构（C structs）：</p>
+    <ul>
+      <li><code>mjModel</code> 包含模型描述，预计保持不变。其中嵌入的其他结构包含模拟和可视化选项，这些选项偶尔需要更改，但这由用户完成。</li>
+      <li><code>mjData</code> 包含所有动态变量和中间结果。它用作草稿本，所有函数在其中读取输入并写入输出——然后这些输出成为模拟管道中后续阶段的输入。它还包含一个预分配和内部管理的栈，因此运行时模块在模型初始化后不需要调用内存分配函数。</li>
+    </ul>
+    <p><code>mjModel</code> 由编译器构造。<code>mjData</code> 在运行时根据 <code>mjModel</code> 构造。这种分离使得很容易模拟多个模型以及每个模型的多个状态和控制，从而促进多线程用于采样和有限差分计算。顶层 API 函数反映了这种基本分离，并具有以下格式：</p>
+    <pre><code>void mj_step(const mjModel* m, mjData* d);</code></pre>
+
+    <h3 id="feat-performance">性能</h3>
+    <p>MuJoCo 的运行时在初始化后执行零内存分配——所有工作内存都在 <code>mjData</code> 中预分配。单个模拟步骤默认是单线程的，但约束岛（constraint islands）启用了步骤内的每岛并行性。大规模数据并行采样是通过创建共享相同 <code>mjModel</code> 的多个 <code>mjData</code> 实例并在不同线程上运行它们来实现的。</p>
+
+    <h3 id="feat-interactive">交互仿真与可视化</h3>
+    <p>原生 3D 可视化器提供网格和几何图元的渲染、纹理、反射、阴影、雾、透明度、线框、天空盒、立体可视化（在支持四缓冲 OpenGL 的视频卡上）。此功能用于生成 3D 渲染，帮助用户深入了解物理模拟，包括视觉辅助工具，如自动生成的模型骨架、等效惯性盒、接触位置和法线、可分离为法向和切向分量的接触力、外部扰动力、局部帧、关节和驱动器轴以及文本标签。</p>
+    <p>可视化器期望一个带有 OpenGL 渲染上下文的通用窗口，从而允许用户采用他们选择的 GUI 库。一个相关的可用性特征是能够"伸手进入"模拟，推物体并观察物理如何响应。用户选择将施加外部力和扭矩的物体，并看到扰动的实时渲染及其动态后果。这可用于可视化调试模型、测试反馈控制器的响应或将模型配置到所需姿势。</p>
+
+    <h3 id="feat-mjcf">强大直观的建模语言</h3>
+    <p>MuJoCo 有自己的建模语言，称为 MJCF。MJCF 的目标是提供对 MuJoCo 所有计算能力的访问，同时使用户能够快速开发新模型并进行实验。这个目标在很大程度上是通过类似于 HTML 中内联的层叠样式表 (CSS) 的广泛默认设置机制实现的。虽然 MJCF 有许多元素和属性，但在任何给定模型中用户需要设置的数量惊人地少。这使得 MJCF 文件比许多其他格式更短、更易读。</p>
+
+    <h3 id="feat-flex">自动生成复合柔性物体</h3>
+    <p>MuJoCo 的软约束可用于建模绳索、布料和可变形 3D 对象。这需要大量常规物体、关节、肌腱和约束协同工作。建模语言具有高级宏，模型编译器自动将其扩展为标准模型元素的必要集合。重要的是，这些产生的柔性对象能够与模拟的其余部分完全交互。</p>
+
+    <h3 id="feat-islands">约束岛与休眠</h3>
+    <p>约束求解器自动发现独立的约束岛——由约束耦合的物体组，可以独立求解。这实现了每岛并行性并避免了过度求解：每个岛以它需要的迭代次数收敛，不受约束的自由度完全跳过。此外，岛休眠（island sleeping）可以冻结静止的岛，当场景部分处于静止状态时大大减少计算量。</p>
+
+    <h3 id="feat-plugins">插件系统</h3>
+    <p>MuJoCo 支持引擎插件（engine plugins），用自定义元素扩展物理引擎：传感器、驱动器和被动力。插件是动态加载的共享库，它们向引擎注册自己并按模型元素实例化。这允许在不修改核心引擎的情况下扩展 MuJoCo。</p>
+
+    <h3 id="feat-gpu">GPU 加速后端</h3>
+    <p>除了 C 引擎之外，MuJoCo 还有用于大规模并行模拟的 GPU 加速后端：<strong>MJX</strong>（JAX）和 <strong>MuJoCo Warp</strong>（NVIDIA Warp）。两个后端都使用相同的 <code>mjModel</code> 和 <code>mjData</code> 结构，允许在 CPU 和 GPU 之间无缝传输。一流的 Python bindings 提供对完整 C API 的访问。</p>
+    <hr>
+
+    <!-- 模型实例 -->
+    <h2 id="model-instances">模型实例</h2>
+    <p>MuJoCo 中有几个称为"模型"的实体。用户在用 MJCF 或 URDF 编写的 XML 文件中定义模型。然后软件可以在不同媒体（文件或内存）和不同描述级别（高级或低级）中创建同一模型的多个实例。所有组合都是可能的，如下表所示：</p>
+    <table>
+      <thead><tr><th></th><th>高级</th><th>低级</th></tr></thead>
+      <tbody>
+        <tr><td><strong>文件</strong></td><td>MJCF/URDF (XML)</td><td>MJB (二进制)</td></tr>
+        <tr><td><strong>内存</strong></td><td>mjSpec (C struct)</td><td>mjModel (C struct)</td></tr>
+      </tbody>
+    </table>
+    <p>所有运行时计算都使用 <code>mjModel</code> 执行，它太复杂而无法手动创建。这就是我们有两个建模级别的原因。高级别是为了用户方便而存在的：其唯一目的是被编译到可以进行计算的低级别模型上。产生的 <code>mjModel</code> 可以加载并保存到二进制文件 (MJB) 中，但这些是版本特定的且无法反编译，因此模型应始终维护为 XML 文件。</p>
+    <p><code>mjSpec</code> C struct 与 MJCF 文件格式一一对应。XML 加载器解释 MJCF 或 URDF 文件，创建相应的 <code>mjSpec</code> 并将其编译为 <code>mjModel</code>。用户可以编程方式创建 <code>mjSpec</code> 然后将其保存为 MJCF 或编译它。</p>
+    <p>以下路径显示了获取 <code>mjModel</code> 的不同方式：</p>
+    <ul>
+      <li>(文本编辑器) → MJCF/URDF 文件 → (MuJoCo 解析器 → mjSpec → 编译器) → mjModel</li>
+      <li>(用户代码) → mjSpec → (MuJoCo 编译器) → mjModel</li>
+      <li>MJB 文件 → (模型加载器) → mjModel</li>
+    </ul>
+    <hr>
+
+    <!-- 示例 -->
+    <h2 id="examples">示例</h2>
+    <p>这是 MuJoCo MJCF 格式中的一个简单模型。它定义了一个固定在世界上的平面、一个更好地照亮物体并投射阴影的光源，以及一个具有 6 个自由度的浮动盒子（这就是"free"关节的作用）。</p>
+    <p><strong>hello.xml</strong>:</p>
+    <pre><code>&lt;mujoco&gt;
+  &lt;worldbody&gt;
+    &lt;light diffuse=".5 .5 .5" pos="0 0 3" dir="0 0 -1"/&gt;
+    &lt;geom type="plane" size="1 1 0.1" rgba=".9 0 0 1"/&gt;
+    &lt;body pos="0 0 1"&gt;
+      &lt;joint type="free"/&gt;
+      &lt;geom type="box" size=".1 .2 .3" rgba="0 .9 0 1"/&gt;
+    &lt;/body&gt;
+  &lt;/worldbody&gt;
+&lt;/mujoco&gt;</code></pre>
+
+    <p>如果模拟此模型，盒子将落在地面上。以下是无渲染的被动动力学基本模拟代码：</p>
+    <pre><code>#include "mujoco.h"
+#include "stdio.h"
+
+char error[1000];
+mjModel* m;
+mjData* d;
+
+int main(void) {
+  // 从文件加载模型并检查错误
+  m = mj_loadXML("hello.xml", NULL, error, 1000);
+  if (!m) {
+    printf("%s\n", error);
+    return 1;
+  }
+
+  // 创建对应模型的数据
+  d = mj_makeData(m);
+
+  // 运行模拟10秒
+  while (d->time < 10)
+    mj_step(m, d);
+
+  // 释放模型和数据
+  mj_deleteData(d);
+  mj_deleteModel(m);
+
+  return 0;
+}</code></pre>
+
+    <p>这在技术上是 C 文件，但它也是合法的 C++ 文件。确实，MuJoCo API 与 C 和 C++ 都兼容。通常用户代码会用 C++ 编写，因为它增加了便利性，并且不会牺牲效率，因为计算瓶颈在于已经高度优化的模拟器中。</p>
+    <p>函数 <code>mj_step</code> 是推进模拟状态一个时间步的顶层函数。这个例子当然只是一个被动动力学系统。当用户指定控制或施加力并开始与系统交互时，事情变得更加有趣。</p>
+
+    <p>接下来我们提供一个更详细的示例，说明 MJCF 的几个功能。考虑以下 <strong>example.xml</strong>:</p>
+    <pre><code>&lt;mujoco model="example"&gt;
+  &lt;default&gt;
+    &lt;geom rgba=".8 .6 .4 1"/&gt;
+  &lt;/default&gt;
+
+  &lt;asset&gt;
+    &lt;texture type="skybox" builtin="gradient" rgb1="1 1 1" rgb2=".6 .8 1" width="256" height="256"/&gt;
+  &lt;/asset&gt;
+
+  &lt;worldbody&gt;
+    &lt;light pos="0 1 1" dir="0 -1 -1" diffuse="1 1 1"/&gt;
+    &lt;body pos="0 0 1"&gt;
+      &lt;joint type="ball"/&gt;
+      &lt;geom type="capsule" size="0.06" fromto="0 0 0  0 0 -.4"/&gt;
+      &lt;body pos="0 0 -0.4"&gt;
+        &lt;joint axis="0 1 0"/&gt;
+        &lt;joint axis="1 0 0"/&gt;
+        &lt;geom type="capsule" size="0.04" fromto="0 0 0  .3 0 0"/&gt;
+        &lt;body pos=".3 0 0"&gt;
+          &lt;joint axis="0 1 0"/&gt;
+          &lt;joint axis="0 0 1"/&gt;
+          &lt;geom pos=".1 0 0" size="0.1 0.08 0.02" type="ellipsoid"/&gt;
+          &lt;site name="end1" pos="0.2 0 0" size="0.01"/&gt;
+        &lt;/body&gt;
+      &lt;/body&gt;
+    &lt;/body&gt;
+
+    &lt;body pos="0.3 0 0.1"&gt;
+      &lt;joint type="free"/&gt;
+      &lt;geom size="0.07 0.1" type="cylinder"/&gt;
+      &lt;site name="end2" pos="0 0 0.1" size="0.01"/&gt;
+    &lt;/body&gt;
+  &lt;/worldbody&gt;
+
+  &lt;tendon&gt;
+    &lt;spatial limited="true" range="0 0.6" width="0.005"&gt;
+      &lt;site site="end1"/&gt;
+      &lt;site site="end2"/&gt;
+    &lt;/spatial&gt;
+  &lt;/tendon&gt;
+&lt;/mujoco&gt;</code></pre>
+
+    <p>这个模型是一个 7 自由度手臂"握着"一根绳子，另一端连接着一个圆柱体。绳子实现为带有长度限制的肌腱。肩部有球关节，肘部和腕部有成对的铰链关节。圆柱体内的盒子表示一个"free"关节。XML 中的外部 body 元素是必需的 worldbody。注意，在两个物体之间使用多个关节不需要创建虚拟物体。</p>
+    <p>MJCF 文件包含指定模型所需的最少信息。胶囊由空间中的线段定义——在这种情况下只需要胶囊的半径。物体帧的位置和方向从属于它们的 geom 推断出来。惯性属性在均匀密度假设下从 geom 形状推断。两个 site 被命名是因为肌腱定义需要引用它们，但其他东西都没有命名。关节轴仅为铰链关节定义，而不是球关节。碰撞规则自动定义。摩擦属性、重力、模拟时间步等设置为它们的默认值。顶部指定的默认 geom 颜色适用于所有 geom。</p>
+    <hr>
+
+    <!-- 模型元素 -->
+    <h2 id="model-elements">模型元素</h2>
+    <p>本节简要描述了可以包含在 MuJoCo 模型中的所有元素。稍后我们将更详细地解释底层计算、元素在 MJCF 中指定的方式以及它们在 <code>mjModel</code> 中的表示。</p>
+
+    <h3 id="options">选项</h3>
+    <p>每个模型有三组选项，如下所列。它们总是被包含的。如果它们的值没有在 XML 文件中指定，则使用默认值。选项的设计使得用户可以在每个模拟时间步之前更改它们的值。然而，在一个时间步内，不应更改任何选项。</p>
+
+    <h4>mjOption</h4>
+    <p>此结构包含影响物理模拟的所有选项。它用于选择算法并设置其参数、启用和禁用模拟管道的不同部分，以及调整系统级物理属性如重力。</p>
+
+    <h4>mjVisual</h4>
+    <p>此结构包含所有可视化选项。还有额外的 OpenGL 渲染选项，但这些是依赖于会话的，不属于模型的一部分。</p>
+
+    <h4>mjStatistic</h4>
+    <p>此结构包含编译器计算的关于模型的统计信息：平均物体质量、模型的空间范围等。它包含用于信息目的，也因为可视化器使用它进行自动缩放。</p>
+
+    <h3 id="assets">资产</h3>
+    <p>资产（Assets）本身不是模型元素。模型元素可以引用它们，在这种情况下，资产以某种方式改变引用元素的属性。一个资产可以被多个模型元素引用。由于包含资产的唯一目的是引用它，而引用只能通过名称完成，所以每个资产都有一个名称（在适用时可以从文件名推断）。相比之下，常规元素的名称可以留为未定义。</p>
+
+    <h4>Mesh（网格）</h4>
+    <p>MuJoCo 可以从 OBJ 文件和二进制 STL 加载三角化网格。可以使用 MeshLab 等软件从其他格式转换。虽然任何三角形集合都可以加载并可视化为网格，但碰撞检测器使用凸包工作。有编译时选项用于缩放网格以及将原始几何形状拟合到它。网格还可以用于自动推断惯性属性——通过将其视为三角锥的联合并组合它们的质量和惯性。注意，网格没有颜色，相反，网格使用引用 geom 的材质属性进行着色。相比之下，所有空间属性由网格数据确定。MuJoCo 支持 OBJ 和自定义二进制文件格式用于法线和纹理坐标。网格也可以直接嵌入 XML 中。</p>
+
+    <h4>Skin（皮肤）</h4>
+    <p>蒙皮网格（或称 skins）是在运行时可以变形的网格。它们的顶点附着到刚体（在此上下文中称为骨骼），每个顶点可以属于多个骨骼，从而产生皮肤的平滑变形。皮肤纯粹是可视化对象，不影响物理，但它们可以显著增强视觉真实感。皮肤可以从自定义二进制文件加载，或直接嵌入 XML 中，类似于网格。当自动生成复合柔性对象时，模型编译器也会为这些对象生成皮肤。</p>
+
+    <h4>Height field（高度场）</h4>
+    <p>高度场可以从 PNG 文件（内部转换为灰度）或从自定义二进制格式的文件中加载。高度场是高程数据的矩形网格。编译器将数据归一化到范围 [0-1]。高度场的实际空间范围然后由引用 geom 的 size 参数确定。高度场只能从附着到世界体的 geom 引用。为了渲染和碰撞检测的目的，网格矩形被自动三角化，因此高度场被视为三角棱柱的联合。与这种复合对象的碰撞检测原则上可以为单个 geom 对生成大量接触点。如果发生这种情况，只保留前 64 个接触点。</p>
+
+    <h4>Texture（纹理）</h4>
+    <p>纹理可以从 PNG 文件加载或由编译器基于用户定义的程序参数合成。还有一个选项是在模型创建时将纹理留空并在运行时稍后更改——以便在 MuJoCo 模拟中渲染视频或创建其他动态效果。可视化器支持两种类型的纹理映射：2D 和 cube。2D 映射适用于平面和高度场。Cube 映射适用于"收缩包裹"纹理围绕 3D 对象而无需指定纹理坐标。它还用于创建天空盒。与所有其他直接从模型元素引用的资产不同，纹理只能从另一个资产（即材质）引用，然后该资产从模型元素引用。</p>
+
+    <h4>Material（材质）</h4>
+    <p>材质用于控制 geom、site 和肌腱的外观。这是通过从相应的模型元素引用材质来完成的。外观包括纹理映射以及与 OpenGL 光线交互的其他属性：RGBA、specularity、shininess、emission。材质还可以用于使对象反射。目前反射仅在平面和盒子的 Z+ 面上渲染。注意，模型元素也可以有它们自己的局部 RGBA 参数用于设置颜色。如果同时指定了材质和局部 RGBA，则局部定义具有优先权。</p>
+
+    <h3 id="kinematic-tree">运动学树</h3>
+    <p>MuJoCo 模拟通常受约束运动的刚体集合的动力学。系统状态在关节坐标中表示，物体显式组织成运动学树。树结构由 <code>mjModel.body_parentid</code> 给出，这是一个长度为 <code>nbody >= 1</code> 的整数数组。顶层"世界"物体始终存在（id 为 0）并且是其自身的父体。</p>
+    <p>运动学循环是不允许的；如果需要循环关节，应该用等式约束建模。因此 MuJoCo 模型的骨干是由嵌套物体定义形成的一个或多个运动学树；孤立的浮动体也算作一棵树。下面列出的其他几个元素在物体内部定义并属于该物体。</p>
+
+    <h4>Body（物体）</h4>
+    <p>物体具有质量和惯性属性，但没有任何几何属性。相反，几何形状（或 geom）附着到物体上。每个物体有两个坐标帧：用于定义它以及定位相对于它的其他元素的帧，以及一个以物体质心为中心并与其惯性主轴对齐的惯性帧。物体惯性矩阵因此在该帧中是对角的。在每个时间步，MuJoCo 递归地计算前向运动学，产生全局笛卡尔坐标中所有物体的位置和方向。物体数量由 <code>mjModel.nbody</code> 给出。</p>
+
+    <h4>Joint（关节）</h4>
+    <p>关节在物体内部定义。它们在物体与其父体之间创建运动自由度 (DOF)。在没有关节的情况下，物体被焊接到其父体上。这与使用过度完备笛卡尔坐标的游戏引擎相反，在那里关节移除自由度而不是添加它们。有四种类型的关节：ball、slide、hinge 和"free joint"，后者创建浮动体。单个物体可以有多个关节。这样复合关节被自动创建，无需定义虚拟物体。ball 和 free 关节的方向分量表示为单位四元数。关节数量由 <code>mjModel.njnt</code> 给出。</p>
+
+    <h4>Joint reference（关节参考）</h4>
+    <p>参考姿势是存储在 <code>mjModel.qpos0</code> 中的关节位置向量。它对应于模型处于初始配置时关节的数值。我们可以使用 joint 的 ref 属性覆盖默认行为并指定初始配置。所有关节的参考值被组装到向量 <code>mjModel.qpos0</code> 中。每当模拟重置时，关节配置 <code>mjData.qpos</code> 被设置为 <code>mjModel.qpos0</code>。在运行时，关节位置向量被解释为相对于参考姿势。</p>
+
+    <h4>Spring reference（弹簧参考）</h4>
+    <p>这是所有关节和肌腱弹簧达到其静止长度的姿势。当关节配置偏离弹簧参考姿势时产生弹簧力，且力与偏离量成线性关系。弹簧参考姿势保存在 <code>mjModel.qpos_spring</code> 中。</p>
+
+    <h4>DOF（自由度）</h4>
+    <p>自由度与关节密切相关，但不一一对应，因为球关节和自由关节有多个自由度。将关节视为指定位置信息，将自由度视为指定速度和力信息。更正式地说，关节位置是系统配置 manifold 上的坐标，而关节速度是在当前位置处该 manifold 的切空间上的坐标。自由度具有与速度相关的属性，如摩擦损失、阻尼、电枢惯性。自由度不是由用户直接指定的，而是由编译器根据关节创建。自由度数量由 <code>mjModel.nv</code> 给出。</p>
+
+    <h4 id="elemtree">Tree（树）</h4>
+    <p>运动物体被组织成运动学树。运动学树或"树"是一个可移动物体及其所有后代。因此世界和其他静态物体在全局树结构中但不与任何树关联。因为全局树结构使用深度优先组织，属于单棵树的所有物体、关节和自由度始终是连续的。约束岛发现和岛休眠都在树的级别上操作。树的数量由 <code>mjModel.ntree</code> 给出。</p>
+
+    <h4>Geom（几何图元）</h4>
+    <p>Geom 是刚性附着到物体的 3D 形状。多个 geom 可以附着到同一个物体。这特别有用，鉴于 MuJoCo 只支持凸 geom-geom 碰撞，创建非凸对象的唯一方法是将它们表示为凸 geom 的联合。除了碰撞检测和随后接触力的计算之外，geom 还用于渲染以及当后者被省略时自动推断物体质量和惯性。MuJoCo 支持几种原始几何形状：plane、sphere、capsule、ellipsoid、cylinder、box。Geom 数量由 <code>mjModel.ngeom</code> 给出。</p>
+
+    <h4>Site（站点）</h4>
+    <p>Site 本质上是轻量级 geom。它们表示物体帧内的感兴趣位置。Site 不参与碰撞检测或惯性属性的自动计算，但它们可用于指定其他对象的空间属性，如传感器、肌腱路由和滑块曲柄端点。Site 数量由 <code>mjModel.nsite</code> 给出。</p>
+
+    <h4>Camera（相机）</h4>
+    <p>可以在模型中定义多个相机。始终有一个默认相机，用户可以在交互式可视化器中用鼠标自由移动。然而，定义额外的相机通常很方便，它们要么固定在世界中，要么附着到其中一个物体并随其移动。除了相机位置和方向之外，用户还可以调整立体渲染的垂直视野和瞳孔间距。相机数量由 <code>mjModel.ncam</code> 给出。</p>
+
+    <h4>Light（光源）</h4>
+    <p>光源可以固定在世界体上或附着到运动物体上。可视化器提供对 OpenGL 中完整照明模型的访问，包括环境光、漫反射和镜面反射分量、衰减和截止、位置和方向照明、雾。光源也可以投射阴影。光源数量由 <code>mjModel.nlight</code> 给出。</p>
+
+    <h3 id="stand-alone">独立元素</h3>
+    <p>这里我们描述不属于单个物体的模型元素，因此描述在运动学树之外。</p>
+
+    <h4>Tendon（肌腱）</h4>
+    <p>肌腱是标量长度元素，可用于驱动、施加限制和等式约束，或创建弹簧-阻尼器和摩擦损失。有两种类型的肌腱：fixed 和 spatial。Fixed 肌腱是（标量）关节位置的线性组合，适用于建模机械耦合。Spatial 肌腱被定义为通过一系列指定 site（或经过点）或包裹指定 geom 的最短路径。</p>
+
+    <h4>Actuator（驱动器）</h4>
+    <p>MuJoCo 提供灵活的驱动器模型，具有三个可以独立指定的组件：传动、激活动力学和力生成。传动指定驱动器如何连接到系统的其余部分；可用类型为 joint、tendon、slider-crank、site 和 body。激活动力学可用于建模气动或液压缸以及生物肌肉的内部激活状态。力生成机制确定标量控制信号如何映射到标量力，该力随后通过从传动推断的力臂映射到广义力。</p>
+
+    <h4>Sensor（传感器）</h4>
+    <p>MuJoCo 可以生成模拟传感器数据，保存在全局数组 <code>mjData.sensordata</code> 中。结果不用于任何内部计算，而是提供给用户。可用的传感器类型包括触摸传感器、惯性测量单元 (IMU)、力-扭矩传感器、关节和肌腱位置与速度传感器、驱动器传感器、物体帧传感器、测距仪和许多其他类型。还有一个用户传感器类型，允许用户代码将任何其他感兴趣的量插入传感器数据数组。</p>
+
+    <h4>Equality（等式约束）</h4>
+    <p>等式约束可以施加超出运动学树结构和其中定义的关节/自由度已经施加的约束的额外约束。它们可用于创建循环关节，或一般建模机械耦合。可用的等式约束类型有：在一点连接两个物体；将两个物体焊接在一起；固定关节或肌腱的位置；通过三次多项式耦合两个关节或两个肌腱的位置；约束 flex 的边到其初始长度。</p>
+
+    <h4>Flex（柔性体）</h4>
+    <p>Flex 表示可以是 1、2 或 3 维（因此它们的元素是胶囊、三角形或四面体）的可变形网格。与刚性附着到单个物体的静态形状 geom 不同，flex 的元素是可变形的：它们通过连接多个物体来构造。这些可变形元素支持碰撞和接触力，以及产生被动力和约束力，柔软地保持可变形实体的形状。</p>
+
+    <h4>Contact pair（接触对）</h4>
+    <p>MuJoCo 中的接触生成是一个复杂的过程。检查接触的 geom 对可以来自两个来源：自动接近测试和其他过滤器统称为"动态"，以及模型中提供的 geom 对的显式列表。后者是一种单独的模型元素类型。因为接触涉及两个 geom 的组合，显式指定允许用户以动态机制无法做到的方式定义接触参数。</p>
+
+    <h4>Contact exclude（接触排除）</h4>
+    <p>这与接触对相反：它指定应从候选接触对生成中排除的物体（而非 geom）对。它对于禁用几何形状导致不理想永久接触的物体之间的接触很有用。注意，MuJoCo 有其他机制来处理这种情况（特别是属于同一物体或父子物体的 geom 不能碰撞），但有时这些自动化机制不够充分，显式排除变得必要。</p>
+
+    <h4>Custom numeric（自定义数值）</h4>
+    <p>有三种方法在 MuJoCo 模拟中输入自定义数字。首先，全局数字字段可以在 XML 中定义。其次，某些模型元素的定义可以用元素特定的自定义数组扩展。第三，有数组 <code>mjData.userdata</code>，它不被任何 MuJoCo 计算使用，用户可以将自定义计算的结果存储在那里。</p>
+
+    <h4>Custom text（自定义文本）</h4>
+    <p>自定义文本字段可以保存在模型中。它们可用于自定义计算——要么指定关键字命令，要么提供一些其他文本信息。但不要用它们来写注释；在编译模型中保存注释没有好处。XML 有自己的注释机制（被 MuJoCo 的解析器和编译器忽略），这更合适。</p>
+
+    <h4>Custom tuple（自定义元组）</h4>
+    <p>自定义元组是 MuJoCo 模型元素的列表，可能包括其他元组。它们不被模拟器使用，但可用于指定用户代码所需的元素组。</p>
+
+    <h4>Keyframe（关键帧）</h4>
+    <p>关键帧是模拟状态变量的快照。它包含关节位置、关节速度、驱动器激活、控制、mocap 物体姿势和模拟时间。模型可以包含关键帧库。它们对于将系统状态重置到感兴趣的点很有用。注意，关键帧不旨在用于在模型中存储轨迹数据；此目的应使用外部文件。</p>
+    <hr>
+
+    <!-- 澄清 -->
+    <h2 id="clarifications">澄清</h2>
+    <p>读者可能有使用其他物理模拟器和相关约定的经验，以及与 MuJoCo 不对齐的一般编程实践。这有可能造成混淆。本节的目标是预防性地澄清最可能令人混淆的方面。</p>
+
+    <h3 id="clar-divergence">仿真发散</h3>
+    <p>模拟的发散发生在状态元素迅速趋向于无穷大时。在 MuJoCo 中，这通常表现为 <code>mjWARN_BADQACC</code> 警告。发散是所有物理模拟的固有特征，不一定表示坏模型或模拟器中的 bug，而是提示对于给定积分器选择，时间步太大。</p>
+    <p>在物理模拟中，速度（大时间步）和稳定性（小时间步）之间始终存在张力。一个为速度而调优的模型具有不会发散的最大可能时间步，这通常意味着在极端条件下它可以被使发散。从这个意义上说，罕见的发散情况实际上可以表明一个调优良好的模型。在所有情况下，应该可以通过减小时间步和/或切换到更稳定的积分器来防止发散。</p>
+
+    <h3 id="clar-units">单位未指定</h3>
+    <p>MuJoCo 不指定基本物理单位。用户可以选择解释单位系统，只要它是一致的。为了理解这一点，考虑一个例子：1 米重 1 千克并有 1 牛顿推进器的飞船的动力学，与 1 厘米重 1 克并有 1 达因推进器的飞船的动力学相同。这是因为 MKS 和 CGS 都是一致的单位系统。此属性允许用户按他们选择的方式缩放模型。</p>
+    <p>也就是说，鼓励用户使用 MKS，因为 MuJoCo 在两个地方使用类似 MKS 的默认值：</p>
+    <ul>
+      <li>重力的默认值为 (0, 0, -9.81)，对应于 MKS 中的地球表面重力。</li>
+      <li>geom 密度的默认值（用于推断物体质量和惯性）为 1000，对应于 MKS 中水的密度。</li>
+    </ul>
+    <p>一旦选择了一致的基本单位系统（长度、质量、时间），所有导出单位都对应于该系统。例如，如果我们的模型被解释为 MKS，那么力和扭矩的单位分别是牛顿和牛顿-米。</p>
+    <p><strong>角度：</strong>虽然在 MJCF 中可以使用度指定角度（且度确实是默认），但 <code>mjModel</code> 和 <code>mjData</code> 中的所有角量都以弧度表示。</p>
+
+    <h3 id="clar-collision">意外碰撞</h3>
+    <p>MuJoCo 默认排除属于具有直接父子关系的物体对的 geom 之间的碰撞。例如，考虑上面的手臂模型：即使在"肘部"胶囊 geom 穿透的情况下也没有碰撞，因为前臂是上臂的直接子体。</p>
+    <p>然而，此排除<strong>如果父体是静态物体则不应用</strong>，即世界体，或相对于世界体没有任何自由度的物体。此行为防止对象穿过地板或穿过墙壁。然而，此行为经常导致以下情况：</p>
+    <p>用户注释掉浮动基模型的根关节，也许是为了防止它掉落；现在基物体被计为静态，出现了以前没有的新碰撞，用户感到困惑。有两种简单的方法可以避免这个问题：</p>
+    <ol>
+      <li>不要移除根关节。也许禁用重力并可能添加一些流体粘度以防止模型移动太多就足够了。</li>
+      <li>使用碰撞过滤显式禁用不需要的碰撞，要么通过设置相关的 contype 和 conaffinity 属性，要么使用 contact exclude 指令。</li>
+    </ol>
+
+    <h3 id="clar-datadesign">数据导向设计</h3>
+    <p>MuJoCo 使用面向数据的架构而非面向对象的架构。此处的自然语义实体是整个物理模拟器，而不是具有私有状态和方法的单个对象。代替对象，我们有少量数据结构和大量操作它们的函数。</p>
+    <p>我们将模型 (<code>mjModel</code>) 与数据 (<code>mjData</code>) 分离。这些都是数据结构。模型包含描述被建模物理系统常量属性所需的一切，而数据包含时变状态和内部计算的可重用中间结果。所有顶层函数期望指向 <code>mjModel</code> 和 <code>mjData</code> 的指针作为参数。这种设计避免了全局变量并自然支持多线程：每个线程简单地操作自己的 <code>mjData</code> 实例。</p>
+
+    <h3 id="clar-softness">柔性与滑动</h3>
+    <p>MuJoCo 基于接触和其他约束物理学的数学模型。此模型本质上是软的，意味着更用力地推约束将总是导致更大的加速度，因此逆动力学可以被唯一定义。这是可取的，因为它产生凸优化问题并启用依赖逆动力学的分析。然而，一旦我们允许软约束，我们实际上创建了一种新类型的动力学——即变形动力学——现在我们必须指定这些动力学如何行为。</p>
+    <p>这种软模型的一个经常令人混淆的方面是<strong>逐渐的接触滑动无法避免</strong>。类似地，摩擦性关节在重力下会逐渐屈服。这不是因为求解器无法防止滑动，而是因为它一开始就没有试图防止滑动。如果滑动要被完全抑制，这个关键属性将不得不被违反。因此，如果您在模拟中看到逐渐滑动，直观的解释可能是摩擦不足，但在 MuJoCo 中这很少是情况。相反，需要调整 <code>solref</code> 和 <code>solimp</code> 参数向量以减少此效果。</p>
+    <p>对于希望完全抑制滑动的情况，有一个 NoSlip 后处理求解器在主求解器之后运行。然而，当使用此选项时，MuJoCo 不再求解它设计来求解的凸优化问题，模拟可能变得不那么鲁棒。因此使用牛顿求解器配合椭圆摩擦锥和大的 <code>impratio</code> 值是减少滑动的推荐方式。</p>
+
+    <h3 id="clar-types">类型、名称、ID</h3>
+    <p>MuJoCo 支持大量模型元素。每种元素类型在 <code>mjModel</code> 中有相应的部分列出其各种属性。例如，关节限制数据在数组中：</p>
+    <pre><code>mjtNum* jnt_range;             // 关节限制       (njnt x 2)</code></pre>
+    <p>每个数组的大小（在这种情况下为 <code>njnt</code>）也在 <code>mjModel</code> 中给出。第一个关节的限制排在前面，接着是第二个关节的限制等。此排序反映了 MuJoCo 中所有矩阵具有行优先格式的事实。</p>
+    <p>可用的元素类型在 <code>mjtype.h</code> 中定义，在 enum 类型 <code>mjtObj</code> 中。这些 enum 主要用于内部。一个例外是 MuJoCo API 中的函数 <code>mj_name2id</code> 和 <code>mj_id2name</code>，它们将元素名称映射到整数 id，反之亦然。</p>
+    <p>在 XML 中命名模型元素是可选的。相同类型的两个元素（例如两个关节）不能有相同的名称。命名仅在给定元素需要在模型的其他地方被引用时才需要。一旦模型被编译，名称仍然存储在 <code>mjModel</code> 中为了用户方便，尽管它们对模拟没有进一步影响。</p>
+    <p>元素的整数 id 对于索引 MuJoCo 数据数组至关重要。id 是 0-based 的，遵循 C 约定。假设我们已经有了 <code>mjModel* m</code>。要打印名为"elbow"的关节的范围：</p>
+    <pre><code>int jntid = mj_name2id(m, mjOBJ_JOINT, "elbow");
+if (jntid >= 0)
+   printf("(%f, %f)\n", m->jnt_range[2*jntid], m->jnt_range[2*jntid+1]);</code></pre>
+    <p>如果名称未找到，函数返回 -1，这就是为什么应该始终检查 id >= 0。</p>
+
+    <h3 id="clar-bgs">物体、Geom、Site</h3>
+    <p>物体、geom 和 site 是 MuJoCo 元素，大致对应于物理世界中的刚体。那为什么它们是分开的？出于语义和计算原因。</p>
+    <p>首先是相似之处。物体、geom 和 site 都有附着到它们的空间帧。这些帧的位置和方向在每个时间步从 <code>mjData.qpos</code> 通过前向运动学计算。</p>
+    <p>现在是区别。<strong>物体</strong>用于构造运动学树，是其他元素（包括 geom 和 site）的容器。物体有空间帧、惯性属性，但没有与外观或碰撞几何相关的属性。</p>
+    <p><strong>Geom</strong>（几何图元的简称）用于指定外观和碰撞几何。每个 geom 属于一个物体并刚性附着到该物体。多个 geom 可以附着到同一个物体。这特别有用，鉴于 MuJoCo 的碰撞检测器假设所有 geom 都是凸的。因此，如果您想建模非凸形状，您必须将其分解为凸 geom 的联合并将所有它们附着到同一个物体。</p>
+    <p>Geom 还可以在 XML 中指定密度或质量值，模型编译器使用这些来计算父物体的质量和惯性。</p>
+    <p><strong>Site</strong> 是轻量级 geom。它们有相同的外观属性，但不能参与碰撞，也不能用于推断物体质量。另一方面，site 可以做 geom 不能做的事情：它们可以指定触摸传感器的体积、IMU 传感器的附着、空间肌腱的路由、滑块曲柄驱动器的端点。</p>
+
+    <h3 id="clar-jointcoord">关节坐标</h3>
+    <p>MuJoCo 和游戏引擎之间的关键区别之一是 MuJoCo 在广义或关节坐标中操作，而大多数游戏引擎在笛卡尔坐标中操作。这两种方法之间的差异可以总结如下：</p>
+    <table>
+      <thead><tr><th>关节坐标</th><th>笛卡尔坐标</th></tr></thead>
+      <tbody>
+        <tr><td>最适合复杂的运动学结构，如机器人</td><td>最适合彼此弹开的许多物体，如分子动力学和箱体堆叠</td></tr>
+        <tr><td>关节在默认焊接在一起的物体之间<strong>添加</strong>自由度</td><td>关节在默认自由浮动的物体之间<strong>移除</strong>自由度</td></tr>
+        <tr><td>关节约束隐含在表示中，不能被违反</td><td>关节约束被数值强制执行，可以被违反</td></tr>
+        <tr><td>位置和方向通过前向运动学从广义坐标获得，不能直接操纵</td><td>位置和方向被显式表示，可以直接操纵</td></tr>
+      </tbody>
+    </table>
+
+    <h3 id="clar-floating">浮动物体</h3>
+    <p>在关节坐标中工作时，您不能简单地将任意物体的位置和方向设置为您想要的任何值。要达到该效果，您将不得不实现某种形式的逆运动学。</p>
+    <p>对于浮动体，即通过自由关节连接到世界的物体，情况不同。此类物体的位置和方向以及线性和角速度在 <code>mjData.qpos</code> 和 <code>mjData.qvel</code> 中显式表示，因此可以直接操纵。</p>
+    <p>自由关节的语义如下。位置数据是 7 个数字（3D 位置后跟单位四元数），而速度数据是 6 个数字（3D 线速度后跟 3D 角速度）。自由关节的线性位置在全局帧中，线速度也是如此。自由关节的方向（四元数）也在全局帧中。然而，自由关节的旋转速度在局部物体帧中。这不太像设计决策，而是正确使用四元数的拓扑。</p>
+    <p>自由关节总是在物体帧中定义，但在计算上有利于将此帧与物体的惯性对齐。</p>
+
+    <div class="footer">
+      中文翻译版 · 原文: <a href="https://mujoco.readthedocs.io/en/stable/overview.html" style="color:#3b82f6;">https://mujoco.readthedocs.io/en/stable/overview.html</a><br>
+      MuJoCo 由 Google DeepMind 开源 · 翻译仅供学习参考
+    </div>
+
+  </div>
+
+  <!-- 侧边栏点击高亮 -->
+  <script>
+    const sidebarLinks = document.querySelectorAll('.sidebar a');
+    sidebarLinks.forEach(link => {
+      link.addEventListener('click', function() {
+        sidebarLinks.forEach(l => l.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+    window.addEventListener('scroll', function() {
+      const sections = document.querySelectorAll('.main-content h2, .main-content h3');
+      let currentId = '';
+      sections.forEach(s => {
+        if (s.getBoundingClientRect().top < 120) {
+          currentId = s.id;
+        }
+      });
+      sidebarLinks.forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === '#' + currentId) {
+          link.classList.add('active');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

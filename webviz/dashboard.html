@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.2.0</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.3.0</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -233,7 +233,11 @@
       </div>
     </div>
     <div class="flex items-center gap-4">
-      <span class="text-sm font-medium text-slate-400">v0.2.0</span>
+      <a href="/user_manual.html" target="_blank" 
+         class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors">📖 用户手册</a>
+      <a href="/mujoco_docs_cn.html" target="_blank" 
+         class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors">📘 MuJoCo中文文档</a>
+      <span class="text-sm font-medium text-slate-400">v0.3.0</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm">Idle</span>
@@ -1033,7 +1037,7 @@
       connectWebSocket();
       // Poll status every 2 seconds as fallback
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.2.0');
+      addLog('Dashboard initialized v0.3.0');
     });
   </script>
 
