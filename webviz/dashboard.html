@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuJoCo-Bench-IDO Dashboard v0.2.0</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* Custom overrides for dark theme */
+    body {
+      background-color: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* Card styling */
+    .card {
+      background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+      border: 1px solid #475569;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-header {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    /* Status indicator */
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .status-dot.running { background: #22c55e; animation: pulse 1.5s infinite; }
+    .status-dot.idle { background: #64748b; }
+    .status-dot.error { background: #ef4444; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Toggle switch */
+    .toggle-switch {
+      position: relative;
+      width: 48px;
+      height: 24px;
+      background: #475569;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .toggle-switch.active { background: #3b82f6; }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 10px;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
+    }
+    .toggle-switch.active::after { transform: translateX(24px); }
+
+    /* Progress bar */
+    .progress-bar-bg {
+      background: #1e293b;
+      border-radius: 6px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      transition: width 0.3s ease;
+    }
+
+    /* Log scroll area */
+    .log-area {
+      max-height: 120px;
+      overflow-y: auto;
+      font-size: 0.7rem;
+      line-height: 1.4;
+    }
+    .log-area::-webkit-scrollbar { width: 4px; }
+    .log-area::-webkit-scrollbar-track { background: #1e293b; }
+    .log-area::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
+
+    /* Button styles */
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+      width: 100%;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+      width: 100%;
+    }
+    .btn-danger:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); }
+    .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .btn-secondary {
+      background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+      width: 100%;
+    }
+    .btn-secondary:hover { transform: translateY(-1px); }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* SIP-Bench table */
+    .sip-table td, .sip-table th {
+      padding: 6px 12px;
+      text-align: center;
+    }
+    .sip-table th {
+      color: #94a3b8;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    /* Value highlight */
+    .value-lg {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .value-md {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .value-sm {
+      font-size: 0.85rem;
+      color: #cbd5e1;
+    }
+    .label-sm {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    /* Custom select/input styles */
+    select, input[type="number"] {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 6px 10px;
+      width: 100%;
+      font-size: 0.85rem;
+    }
+    select:focus, input[type="number"]:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+
+    /* Slider */
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      background: #475569;
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: #3b82f6;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    /* Chart containers */
+    .chart-container {
+      position: relative;
+      height: 220px;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col">
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- TOP NAVIGATION BAR                                        -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <nav class="flex items-center justify-between px-6 py-3 border-b border-slate-700"
+       style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">IDO</div>
+      <div>
+        <h1 class="text-lg font-bold text-white tracking-tight">MuJoCo-Bench-IDO</h1>
+        <span class="label-sm">IDO/TOMAS Continuous Physics Benchmark</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <span class="text-sm font-medium text-slate-400">v0.2.0</span>
+      <div class="flex items-center gap-2">
+        <span id="statusDot" class="status-dot idle"></span>
+        <span id="statusText" class="label-sm">Idle</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- MAIN CONTENT AREA                                          -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- ─── LEFT CONTROL PANEL ─── -->
+    <aside class="w-64 border-r border-slate-700 p-4 flex flex-col gap-4 overflow-y-auto"
+           style="background: #1e293b;">
+
+      <!-- Task Selection -->
+      <div>
+        <label class="label-sm mb-1 block">Task Selection</label>
+        <select id="taskSelect">
+          <option value="humanoid-stand">humanoid-stand</option>
+          <option value="hopper-stand">hopper-stand</option>
+          <option value="walker-run">walker-run</option>
+          <option value="reacher-easy">reacher-easy</option>
+        </select>
+      </div>
+
+      <!-- Episodes Slider -->
+      <div>
+        <label class="label-sm mb-1 block">Episodes</label>
+        <div class="flex items-center gap-2">
+          <input type="range" id="episodesSlider" min="1" max="20" value="5">
+          <span id="episodesValue" class="value-sm font-mono">5</span>
+        </div>
+      </div>
+
+      <!-- Max Steps -->
+      <div>
+        <label class="label-sm mb-1 block">Max Steps</label>
+        <input type="number" id="maxStepsInput" value="1000" min="100" max="5000" step="100">
+      </div>
+
+      <!-- SIP-Bench Toggle -->
+      <div>
+        <label class="label-sm mb-1 block">SIP-Bench Mode</label>
+        <div class="flex items-center gap-3">
+          <div id="sipToggle" class="toggle-switch" onclick="toggleSIP()"></div>
+          <span id="sipLabel" class="value-sm">Standard</span>
+        </div>
+      </div>
+
+      <!-- Evolution Rounds (SIP-Bench only) -->
+      <div id="evolutionRoundsSection" style="display:none;">
+        <label class="label-sm mb-1 block">Evolution Rounds</label>
+        <input type="number" id="evolutionRoundsInput" value="3" min="1" max="10">
+      </div>
+
+      <!-- Kappa Threshold -->
+      <div>
+        <label class="label-sm mb-1 block">κ-Snap Threshold (δ_K)</label>
+        <input type="number" id="kappaThreshInput" value="0.05" min="0.001" max="1.0" step="0.01">
+      </div>
+
+      <!-- mjviser 3D Viewer Button -->
+      <div>
+        <label class="label-sm mb-1 block">3D Visualization</label>
+        <button id="viewerBtn" class="btn-secondary" onclick="startViewer()">
+          🎮 Open mjviser (8081)
+        </button>
+        <span id="viewerStatus" class="label-sm mt-1 block"></span>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-slate-600 my-2"></div>
+
+      <!-- Start / Stop Buttons -->
+      <button id="startBtn" class="btn-primary" onclick="startRun()">
+        ▶ Start Run
+      </button>
+      <button id="stopBtn" class="btn-danger" onclick="stopRun()" disabled>
+        ⏹ Stop Run
+      </button>
+
+      <!-- Quick Status -->
+      <div class="card mt-2">
+        <div class="card-header">Run Status</div>
+        <div id="quickStatus" class="value-sm">No active run</div>
+        <div class="flex items-center gap-2 mt-2">
+          <span class="label-sm">Episode:</span>
+          <span id="currentEpisode" class="value-sm font-mono">0 / 0</span>
+        </div>
+        <div class="flex items-center gap-2 mt-1">
+          <span class="label-sm">Step:</span>
+          <span id="currentStep" class="value-sm font-mono">0</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ─── RIGHT MAIN DASHBOARD ─── -->
+    <main class="flex-1 p-4 overflow-y-auto grid grid-cols-2 gap-4"
+           style="background: #0f172a;">
+
+      <!-- ═══ η Trajectory Real-time Line Chart ═══ -->
+      <div class="card col-span-2">
+        <div class="card-header flex items-center justify-between">
+          <span>η (GaussEx Residual) Trajectory</span>
+          <span id="etaLatest" class="value-md font-mono text-blue-400">—</span>
+        </div>
+        <div class="chart-container" style="height: 280px;">
+          <canvas id="etaChart"></canvas>
+        </div>
+      </div>
+
+      <!-- ═══ Noether Violations Counter ═══ -->
+      <div class="card">
+        <div class="card-header">Noether Violations</div>
+        <div class="flex items-center gap-3 mb-3">
+          <span id="noetherCount" class="value-lg font-mono" style="color: #f87171;">0</span>
+          <div class="flex flex-col">
+            <span class="label-sm">Energy Gate (E)</span>
+            <span class="label-sm">Force Gate (F)</span>
+            <span class="label-sm">Collision Gate (C)</span>
+          </div>
+        </div>
+        <div class="progress-bar-bg">
+          <div id="noetherProgressBar" class="progress-bar-fill" style="width: 0%; background: #ef4444;"></div>
+        </div>
+        <span id="noetherPctLabel" class="label-sm mt-1 block">0% of max steps</span>
+      </div>
+
+      <!-- ═══ κ-Snap Threshold Status Card ═══ -->
+      <div class="card">
+        <div class="card-header">κ-Snap Threshold Status</div>
+        <div class="grid grid-cols-2 gap-3 mt-2">
+          <div>
+            <span class="label-sm">Current δ_K</span>
+            <span id="deltaKValue" class="value-md font-mono text-cyan-400">0.050</span>
+          </div>
+          <div>
+            <span class="label-sm">Snap Triggered</span>
+            <span id="snapStatus" class="value-md font-mono" style="color: #94a3b8;">No</span>
+          </div>
+        </div>
+        <div class="mt-3 flex items-center gap-2">
+          <span class="label-sm">η vs δ_K:</span>
+          <span id="etaVsDeltaK" class="value-sm font-mono">η > δ_K (far from goal)</span>
+        </div>
+      </div>
+
+      <!-- ═══ ψ-Anchor Evolution Panel ═══ -->
+      <div class="card">
+        <div class="card-header">ψ-Anchor Evolution Panel</div>
+        <div class="grid grid-cols-2 gap-3 mt-2">
+          <div>
+            <span class="label-sm">Policy</span>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="psiPolicy" class="value-md font-bold" style="color: #818cf8;">light</span>
+              <span id="psiPolicyBadge" class="text-xs px-2 py-0.5 rounded-full"
+                    style="background: #312e81; color: #818cf8;">evolving</span>
+            </div>
+          </div>
+          <div>
+            <span class="label-sm">Epiplexity</span>
+            <span id="epiplexityValue" class="value-md font-mono text-yellow-400">0.00</span>
+          </div>
+        </div>
+        <div class="mt-3">
+          <span class="label-sm">η Trend</span>
+          <span id="etaTrend" class="value-sm font-mono ml-2">unknown</span>
+        </div>
+      </div>
+
+      <!-- ═══ Motor Primitives IC-Value Bar Chart ═══ -->
+      <div class="card">
+        <div class="card-header">Motor Primitives IC-Value Ranking</div>
+        <div class="chart-container" style="height: 180px;">
+          <canvas id="motorChart"></canvas>
+        </div>
+      </div>
+
+      <!-- ═══ SIP-Bench Results Panel ═══ -->
+      <div class="card col-span-2" id="sipPanel" style="display: none;">
+        <div class="card-header flex items-center justify-between">
+          <span>SIP-Bench Longitudinal Results</span>
+          <span id="sipPhaseIndicator" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #1e293b; color: #94a3b8;">Waiting</span>
+        </div>
+        <div class="overflow-x-auto mt-2">
+          <table class="sip-table w-full">
+            <thead>
+              <tr style="border-bottom: 1px solid #475569;">
+                <th>Phase</th>
+                <th>Avg η</th>
+                <th>Avg Steps</th>
+                <th>Noether Violations</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="value-sm font-bold">T0 (Initial)</td>
+                <td id="sipT0Eta" class="value-sm font-mono">—</td>
+                <td id="sipT0Steps" class="value-sm font-mono">—</td>
+                <td id="sipT0NV" class="value-sm font-mono">—</td>
+              </tr>
+              <tr style="background: rgba(99, 102, 241, 0.1);">
+                <td class="value-sm font-bold" style="color: #818cf8;">T1 (Iterated)</td>
+                <td id="sipT1Eta" class="value-sm font-mono">—</td>
+                <td id="sipT1Steps" class="value-sm font-mono">—</td>
+                <td id="sipT1NV" class="value-sm font-mono">—</td>
+              </tr>
+              <tr>
+                <td class="value-sm font-bold">T2 (Retention)</td>
+                <td id="sipT2Eta" class="value-sm font-mono">—</td>
+                <td id="sipT2Steps" class="value-sm font-mono">—</td>
+                <td id="sipT2NV" class="value-sm font-mono">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">Retention Gain</span>
+            <span id="retentionGain" class="value-md font-mono text-emerald-400">—</span>
+            <span class="label-sm">(&gt;1 = improvement persisted)</span>
+          </div>
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">Stability Index</span>
+            <span id="stabilityIndex" class="value-md font-mono text-sky-400">—</span>
+            <span class="label-sm">(&lt;1 = more stable)</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- BOTTOM STATUS BAR                                          -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <footer class="border-t border-slate-700 px-6 py-3 flex items-center justify-between"
+          style="background: #1e293b;">
+    <div class="flex items-center gap-4">
+      <span class="label-sm">Episode Progress:</span>
+      <div class="progress-bar-bg" style="width: 200px;">
+        <div id="episodeProgressBar" class="progress-bar-fill" style="width: 0%; background: #22c55e;"></div>
+      </div>
+      <span id="episodeProgressLabel" class="label-sm font-mono">0%</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="label-sm">WebSocket:</span>
+      <span id="wsStatus" class="label-sm font-mono" style="color: #64748b;">Disconnected</span>
+    </div>
+    <div class="log-area" id="logArea" style="width: 400px;">
+      <div class="label-sm text-slate-500">Waiting for messages...</div>
+    </div>
+  </footer>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- JAVASCRIPT                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <script>
+    // ── Global State ──
+    let ws = null;
+    let isRunning = false;
+    let sipMode = false;
+    let currentRunTask = '';
+    let totalEpisodes = 0;
+    let maxStepsForRun = 1000;
+
+    // ── Chart Data ──
+    // Each episode has its own dataset on the η chart
+    let etaDatasets = {};
+    let etaStepCounter = {};
+    let motorICValues = [0.70, 0.65, 0.65, 0.50, 0.40];
+    let motorLabels = ['step_forward', 'step_left', 'step_right', 'squat', 'torque_explore'];
+
+    // ── Chart Instances ──
+    let etaChart = null;
+    let motorChart = null;
+
+    // ── Chart Colors for Episodes ──
+    const episodeColors = [
+      '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6',
+      '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1',
+      '#84cc16', '#a855f7', '#0ea5e9', '#d946ef', '#10b981',
+      '#fb923c', '#818cf8', '#34d399', '#f472b6', '#38bdf8',
+    ];
+
+    // ── Initialize Charts ──
+    function initCharts() {
+      // η Trajectory Chart
+      const etaCtx = document.getElementById('etaChart').getContext('2d');
+      etaChart = new Chart(etaCtx, {
+        type: 'line',
+        data: { datasets: [] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 0 },
+          scales: {
+            x: {
+              type: 'linear',
+              title: { display: true, text: 'Step', color: '#94a3b8' },
+              grid: { color: 'rgba(71, 85, 105, 0.3)' },
+              ticks: { color: '#94a3b8' },
+            },
+            y: {
+              title: { display: true, text: 'η (GaussEx Residual)', color: '#94a3b8' },
+              grid: { color: 'rgba(71, 85, 105, 0.3)' },
+              ticks: { color: '#94a3b8' },
+              suggestedMin: 0,
+            },
+          },
+          plugins: {
+            legend: {
+              labels: { color: '#94a3b8', font: { size: 11 } },
+            },
+          },
+        },
+      });
+
+      // Motor IC-Value Bar Chart
+      const motorCtx = document.getElementById('motorChart').getContext('2d');
+      motorChart = new Chart(motorCtx, {
+        type: 'bar',
+        data: {
+          labels: motorLabels,
+          datasets: [{
+            label: 'IC-Value',
+            data: motorICValues,
+            backgroundColor: [
+              '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6',
+            ],
+            borderColor: [
+              '#60a5fa', '#4ade80', '#fbbf24', '#f87171', '#a78bfa',
+            ],
+            borderWidth: 1,
+            borderRadius: 4,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 200 },
+          scales: {
+            x: {
+              grid: { color: 'rgba(71, 85, 105, 0.3)' },
+              ticks: { color: '#94a3b8' },
+            },
+            y: {
+              min: 0,
+              max: 1,
+              grid: { color: 'rgba(71, 85, 105, 0.3)' },
+              ticks: { color: '#94a3b8' },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+          },
+        },
+      });
+    }
+
+    // ── WebSocket Connection ──
+    function connectWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.hostname}:8080/ws/stream`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = function() {
+        document.getElementById('wsStatus').textContent = 'Connected';
+        document.getElementById('wsStatus').style.color = '#22c55e';
+        addLog('WebSocket connected to /ws/stream');
+      };
+
+      ws.onclose = function() {
+        document.getElementById('wsStatus').textContent = 'Disconnected';
+        document.getElementById('wsStatus').style.color = '#64748b';
+        addLog('WebSocket disconnected');
+        // Reconnect after 3 seconds
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      ws.onerror = function(err) {
+        addLog('WebSocket error');
+      };
+
+      ws.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        handleWebSocketMessage(data);
+      };
+    }
+
+    // ── Handle Incoming WebSocket Messages ──
+    function handleWebSocketMessage(data) {
+      switch (data.type) {
+        case 'connected':
+          addLog(`Connected to server v${data.version}`);
+          if (data.mjviser_available) {
+            document.getElementById('viewerStatus').textContent = 'mjviser available';
+            document.getElementById('viewerBtn').disabled = false;
+          } else {
+            document.getElementById('viewerStatus').textContent = 'mjviser not installed';
+            document.getElementById('viewerBtn').disabled = true;
+          }
+          break;
+
+        case 'run_start':
+          isRunning = true;
+          currentRunTask = data.task;
+          totalEpisodes = data.episodes;
+          maxStepsForRun = data.max_steps;
+          updateRunningUI(true);
+          addLog(`Run started: ${data.task}, ${data.episodes} episodes, max_steps=${data.max_steps}, mode=${data.eval_mode}`);
+          // Clear previous chart data
+          clearChartData();
+          // Show SIP panel if SIP mode
+          if (data.eval_mode === 'sip') {
+            document.getElementById('sipPanel').style.display = '';
+          }
+          break;
+
+        // Per-step metrics (the main streaming data)
+        default:
+          // If the message has 'step' and 'episode' keys, it's a step update
+          if (data.step !== undefined && data.episode !== undefined) {
+            updateStepMetrics(data);
+          }
+          break;
+
+        case 'episode_complete':
+          addLog(`Episode ${data.episode} complete: steps=${data.metrics.steps_to_goal}, η=${data.metrics.final_eta.toFixed(6)}, NV=${data.metrics.noether_violations}`);
+          break;
+
+        case 'run_stopped':
+          isRunning = false;
+          updateRunningUI(false);
+          addLog('Run stopped by user');
+          break;
+
+        case 'run_complete':
+          isRunning = false;
+          updateRunningUI(false);
+          addLog(`Run complete! Avg steps=${data.summary.avg_steps.toFixed(1)}, Avg η=${data.summary.avg_final_eta.toFixed(6)}`);
+          break;
+
+        case 'sip_phase_start':
+          document.getElementById('sipPhaseIndicator').textContent = `Phase ${data.phase}`;
+          addLog(`SIP-Bench phase ${data.phase} started`);
+          break;
+
+        case 'sip_phase_step':
+          // This is an episode-aggregated summary, not per-step data
+          // Per-step streaming data is received separately via the default case
+          addLog(`SIP ${data.phase} episode ${data.episode} complete: steps=${data.metrics.steps_to_goal}, η=${data.metrics.final_eta.toFixed(4)}`);
+          break;
+
+        case 'sip_evolution':
+          addLog(`ψ-Anchor evolution round ${data.evolution_round}: policy=${data.policy}, trend=${data.trend}, δ_K=${data.delta_k.toFixed(4)}`);
+          break;
+
+        case 'sip_bench_complete':
+          isRunning = false;
+          updateRunningUI(false);
+          updateSIPResults(data.sip_result);
+          addLog('SIP-Bench complete!');
+          break;
+
+        case 'error':
+          isRunning = false;
+          updateRunningUI(false);
+          addLog(`Error: ${data.message}`);
+          break;
+      }
+    }
+
+    // ── Update Step Metrics (per-step WebSocket data) ──
+    function updateStepMetrics(data) {
+      const episode = data.episode;
+      const step = data.step;
+      const eta = data.eta;
+
+      // ── η Chart: add data point to the current episode's dataset ──
+      if (!etaDatasets[episode]) {
+        const colorIdx = (episode - 1) % episodeColors.length;
+        etaDatasets[episode] = {
+          label: `Episode ${episode}`,
+          data: [],
+          borderColor: episodeColors[colorIdx],
+          backgroundColor: episodeColors[colorIdx] + '20',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.1,
+        };
+        etaChart.data.datasets.push(etaDatasets[episode]);
+      }
+      etaDatasets[episode].data.push({ x: step, y: eta });
+      etaChart.update('none');
+
+      // ── Update η latest value ──
+      document.getElementById('etaLatest').textContent = eta.toFixed(4);
+
+      // ── Noether Violations ──
+      const nv = data.noether_violations;
+      document.getElementById('noetherCount').textContent = nv;
+      const nvPct = Math.min(100, (nv / maxStepsForRun) * 100);
+      document.getElementById('noetherProgressBar').style.width = nvPct + '%';
+      document.getElementById('noetherPctLabel').textContent = nvPct.toFixed(1) + '% of max steps';
+      if (nv > 0) {
+        document.getElementById('noetherCount').style.color = '#f87171';
+      } else {
+        document.getElementById('noetherCount').style.color = '#22c55e';
+      }
+
+      // ── κ-Snap Status ──
+      document.getElementById('deltaKValue').textContent = data.delta_k.toFixed(4);
+      const snapTriggered = data.kappa_snap_triggered;
+      const snapEl = document.getElementById('snapStatus');
+      if (snapTriggered) {
+        snapEl.textContent = 'Yes';
+        snapEl.style.color = '#22c55e';
+      } else {
+        snapEl.textContent = 'No';
+        snapEl.style.color = '#94a3b8';
+      }
+
+      // η vs δ_K comparison
+      if (eta < data.delta_k) {
+        document.getElementById('etaVsDeltaK').textContent = `η < δ_K (near goal — PD stabilize)`;
+        document.getElementById('etaVsDeltaK').style.color = '#22c55e';
+      } else {
+        document.getElementById('etaVsDeltaK').textContent = `η > δ_K (far from goal — NARLA primitive)`;
+        document.getElementById('etaVsDeltaK').style.color = '#f87171';
+      }
+
+      // ── ψ-Anchor Panel ──
+      const policy = data.psi_anchor_policy;
+      document.getElementById('psiPolicy').textContent = policy;
+      if (policy === 'freeze') {
+        document.getElementById('psiPolicy').style.color = '#f87171';
+        document.getElementById('psiPolicyBadge').textContent = 'frozen';
+        document.getElementById('psiPolicyBadge').style.background = '#7f1d1d';
+        document.getElementById('psiPolicyBadge').style.color = '#f87171';
+      } else if (policy === 'light') {
+        document.getElementById('psiPolicy').style.color = '#818cf8';
+        document.getElementById('psiPolicyBadge').textContent = 'evolving';
+        document.getElementById('psiPolicyBadge').style.background = '#312e81';
+        document.getElementById('psiPolicyBadge').style.color = '#818cf8';
+      } else {
+        document.getElementById('psiPolicy').style.color = '#94a3b8';
+        document.getElementById('psiPolicyBadge').textContent = 'none';
+        document.getElementById('psiPolicyBadge').style.background = '#1e293b';
+        document.getElementById('psiPolicyBadge').style.color = '#94a3b8';
+      }
+
+      document.getElementById('epiplexityValue').textContent = data.epiplexity.toFixed(2);
+
+      // ── Motor IC-Values Bar Chart ──
+      if (data.motor_ic_values && data.motor_ic_values.length > 0) {
+        motorICValues = data.motor_ic_values;
+        motorChart.data.datasets[0].data = motorICValues;
+        // Update labels if count changed
+        if (motorICValues.length !== motorChart.data.labels.length) {
+          motorLabels = [];
+          for (let i = 0; i < motorICValues.length; i++) {
+            motorLabels.push(`macro_${i + 1}`);
+          }
+          motorChart.data.labels = motorLabels;
+        }
+        motorChart.update('none');
+      }
+
+      // ── Update status indicators ──
+      document.getElementById('currentEpisode').textContent = `${episode} / ${totalEpisodes}`;
+      document.getElementById('currentStep').textContent = step;
+
+      // Episode progress bar
+      const epProgress = (episode / totalEpisodes) * 100;
+      document.getElementById('episodeProgressBar').style.width = epProgress + '%';
+      document.getElementById('episodeProgressLabel').textContent = epProgress.toFixed(0) + '%';
+    }
+
+    // ── Update SIP-Bench Results ──
+    function updateSIPResults(sipResult) {
+      if (!sipResult) return;
+
+      document.getElementById('sipT0Eta').textContent = sipResult.T0.avg_eta.toFixed(4);
+      document.getElementById('sipT0Steps').textContent = sipResult.T0.avg_steps.toFixed(1);
+      document.getElementById('sipT0NV').textContent = sipResult.T0.noether_violations;
+
+      document.getElementById('sipT1Eta').textContent = sipResult.T1.avg_eta.toFixed(4);
+      document.getElementById('sipT1Steps').textContent = sipResult.T1.avg_steps.toFixed(1);
+      document.getElementById('sipT1NV').textContent = sipResult.T1.noether_violations;
+
+      document.getElementById('sipT2Eta').textContent = sipResult.T2.avg_eta.toFixed(4);
+      document.getElementById('sipT2Steps').textContent = sipResult.T2.avg_steps.toFixed(1);
+      document.getElementById('sipT2NV').textContent = sipResult.T2.noether_violations;
+
+      document.getElementById('retentionGain').textContent = sipResult.retention_gain.toFixed(3);
+      document.getElementById('stabilityIndex').textContent = sipResult.stability_index.toFixed(3);
+
+      document.getElementById('sipPhaseIndicator').textContent = 'Complete';
+      document.getElementById('sipPhaseIndicator').style.background = '#14532d';
+      document.getElementById('sipPhaseIndicator').style.color = '#22c55e';
+    }
+
+    // ── Clear Chart Data for New Run ──
+    function clearChartData() {
+      etaDatasets = {};
+      etaStepCounter = {};
+      etaChart.data.datasets = [];
+      etaChart.update('none');
+
+      // Reset dashboard values
+      document.getElementById('noetherCount').textContent = '0';
+      document.getElementById('noetherProgressBar').style.width = '0%';
+      document.getElementById('noetherPctLabel').textContent = '0% of max steps';
+      document.getElementById('deltaKValue').textContent = '0.050';
+      document.getElementById('snapStatus').textContent = 'No';
+      document.getElementById('etaLatest').textContent = '—';
+      document.getElementById('epiplexityValue').textContent = '0.00';
+      document.getElementById('psiPolicy').textContent = 'light';
+
+      // Reset SIP panel
+      ['sipT0Eta', 'sipT0Steps', 'sipT0NV',
+       'sipT1Eta', 'sipT1Steps', 'sipT1NV',
+       'sipT2Eta', 'sipT2Steps', 'sipT2NV',
+       'retentionGain', 'stabilityIndex'].forEach(id => {
+        document.getElementById(id).textContent = '—';
+      });
+    }
+
+    // ── UI Helpers ──
+    function updateRunningUI(running) {
+      const statusDot = document.getElementById('statusDot');
+      const statusText = document.getElementById('statusText');
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+
+      if (running) {
+        statusDot.className = 'status-dot running';
+        statusText.textContent = 'Running';
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } else {
+        statusDot.className = 'status-dot idle';
+        statusText.textContent = 'Idle';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    }
+
+    function addLog(msg) {
+      const logArea = document.getElementById('logArea');
+      const timeStr = new Date().toLocaleTimeString();
+      const line = document.createElement('div');
+      line.className = 'text-xs';
+      line.style.color = '#94a3b8';
+      line.textContent = `[${timeStr}] ${msg}`;
+      logArea.appendChild(line);
+      // Keep only last 50 log entries
+      while (logArea.children.length > 50) {
+        logArea.removeChild(logArea.firstChild);
+      }
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    // ── Control Actions ──
+    function startRun() {
+      const task = document.getElementById('taskSelect').value;
+      const episodes = parseInt(document.getElementById('episodesSlider').value);
+      const maxSteps = parseInt(document.getElementById('maxStepsInput').value);
+      const kappaThresh = parseFloat(document.getElementById('kappaThreshInput').value);
+      const evalMode = sipMode ? 'sip' : 'standard';
+      const evolutionRounds = parseInt(document.getElementById('evolutionRoundsInput').value);
+
+      const payload = {
+        task: task,
+        episodes: episodes,
+        max_steps: maxSteps,
+        kappa_thresh: kappaThresh,
+        eval_mode: evalMode,
+        evolution_rounds: evolutionRounds,
+      };
+
+      fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          addLog(`Error: ${data.error}`);
+          alert(data.error);
+        } else {
+          addLog(`Run request sent: ${data.task}, mode=${data.eval_mode}`);
+        }
+      })
+      .catch(err => {
+        addLog(`Request error: ${err.message}`);
+      });
+    }
+
+    function stopRun() {
+      fetch('/api/stop', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        addLog(`Stop signal sent: ${data.status}`);
+      })
+      .catch(err => {
+        addLog(`Stop request error: ${err.message}`);
+      });
+    }
+
+    function startViewer() {
+      fetch('/api/start_viewer', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          addLog(data.error);
+          document.getElementById('viewerStatus').textContent = data.error;
+        } else {
+          addLog(`mjviser starting at ${data.url}`);
+          document.getElementById('viewerStatus').textContent = `Opening ${data.url}...`;
+          // Open viewer in new tab
+          window.open(data.url, '_blank');
+        }
+      })
+      .catch(err => {
+        addLog(`Viewer request error: ${err.message}`);
+      });
+    }
+
+    function toggleSIP() {
+      sipMode = !sipMode;
+      const toggle = document.getElementById('sipToggle');
+      const label = document.getElementById('sipLabel');
+      const evoSection = document.getElementById('evolutionRoundsSection');
+      const sipPanel = document.getElementById('sipPanel');
+
+      if (sipMode) {
+        toggle.className = 'toggle-switch active';
+        label.textContent = 'SIP-Bench';
+        evoSection.style.display = '';
+        sipPanel.style.display = '';
+      } else {
+        toggle.className = 'toggle-switch';
+        label.textContent = 'Standard';
+        evoSection.style.display = 'none';
+        // Don't hide SIP panel if it has results
+        if (!document.getElementById('retentionGain').textContent ||
+            document.getElementById('retentionGain').textContent === '—') {
+          sipPanel.style.display = 'none';
+        }
+      }
+    }
+
+    // ── Episodes Slider Update ──
+    document.getElementById('episodesSlider').addEventListener('input', function() {
+      document.getElementById('episodesValue').textContent = this.value;
+    });
+
+    // ── Poll Status (fallback if WebSocket fails) ──
+    function pollStatus() {
+      fetch('/api/status')
+      .then(res => res.json())
+      .then(data => {
+        const wasRunning = isRunning;
+        isRunning = data.is_running;
+
+        if (isRunning && !wasRunning) {
+          updateRunningUI(true);
+        } else if (!isRunning && wasRunning) {
+          updateRunningUI(false);
+        }
+
+        document.getElementById('currentEpisode').textContent =
+          `${data.current_episode} / ${data.total_episodes}`;
+        document.getElementById('currentStep').textContent = data.current_step;
+
+        if (data.mjviser_available) {
+          document.getElementById('viewerBtn').disabled = false;
+          document.getElementById('viewerStatus').textContent = 'mjviser available';
+        } else {
+          document.getElementById('viewerBtn').disabled = true;
+          document.getElementById('viewerStatus').textContent = 'mjviser not installed';
+        }
+      })
+      .catch(() => {});
+    }
+
+    // ── Initialize ──
+    window.addEventListener('DOMContentLoaded', function() {
+      initCharts();
+      connectWebSocket();
+      // Poll status every 2 seconds as fallback
+      setInterval(pollStatus, 2000);
+      addLog('Dashboard initialized v0.2.0');
+    });
+  </script>
+
+</body>
+</html>

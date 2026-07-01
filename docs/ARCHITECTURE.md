@@ -450,5 +450,102 @@ graph TD
 
 ---
 
+### v0.3.0 新增模块（Baseline集成 + Web可视化）
+
+#### baselines/ 目录
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `baselines/__init__.py` | ★ 新 | 包初始化 |
+| `baselines/tdmpc2_adapter.py` | ★ 新 | TD-MPC2 v2 baseline adapter（model-based RL控制对比） |
+| `baselines/cosmos_predict_adapter.py` | ★ 新 | Cosmos-Predict世界模型adapter（η轨迹预测对比） |
+
+**TDMPC2Adapter**：
+- 统一接口：choose_action(obs), evaluate(n_episodes), reset()
+- 任务名映射：humanoid-stand → humanoid_stand, 等
+- 模型尺寸：1M/5M/19M/48M/317M参数
+- 注册为"tdmpc2_v2"在BASELINE_REGISTRY
+- 优雅降级：tdmpc2未安装时返回None
+
+**CosmosPredictAdapter**：
+- 世界模型baseline（非控制agent）——η轨迹预测对比
+- 模型变体：7B/14B video2world, 7B token2world
+- 注册为"cosmos-predict"在BASELINE_REGISTRY
+- 需GPU + CUDA（7B-14B参数模型）
+- 优雅降级：未安装时跳过
+
+#### webviz/ 目录
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `webviz/__init__.py` | ★ 新 | 包初始化 |
+| `webviz/server.py` | ★ 新(v0.3.0修复) | FastAPI REST API + WebSocket + mjviser服务 |
+| `webviz/dashboard.html` | ★ 新 | 实时监控仪表盘HTML（Chart.js + WebSocket） |
+| `webviz/run_webviz.py` | ★ 新 | uvicorn启动脚本 |
+
+**server.py v0.3.0 mjviser Bug修复**：
+- Bug A：Viewer.__init__不接受port参数 → 先创建ViserServer(port=8081)
+- Bug B：env.model不存在 → env.physics.model._model
+- Bug C：缺少data参数 → env.physics.data._data
+
+**评估模式**：
+
+| 模式 | CLI参数 | 对比内容 |
+|------|---------|----------|
+| control | --eval-mode control | IDO vs TD-MPC2/PPO/SAC（步数, NVR, SER） |
+| cosmos-predict | --eval-mode cosmos-predict | IDO FlowMatching η vs Cosmos-Predict η轨迹 |
+
+#### v0.3.0 模块关系图
+
+```mermaid
+graph TB
+    subgraph Core
+        GoalEML["GoalEML<br/>core/goal_eml_mj.py"]
+        KappaSnap["κ-Snap + FlowMatching<br/>core/kappa_snap_mj.py"]
+        Noether["Noether-Check<br/>core/noether_check_mj.py"]
+    end
+    
+    subgraph Agent
+        IDOAgent["IDOMuJoCoAgent<br/>agent/mujoco_ido_agent.py"]
+        PsiAnchor["ψ-Anchor<br/>agent/psi_anchor.py"]
+    end
+    
+    subgraph Baselines
+        TDMPC2["TDMPC2Adapter<br/>baselines/tdmpc2_adapter.py"]
+        Cosmos["CosmosPredictAdapter<br/>baselines/cosmos_predict_adapter.py"]
+    end
+    
+    subgraph Webviz
+        FastAPI["FastAPI Server<br/>webviz/server.py"]
+        Dashboard["Dashboard<br/>webviz/dashboard.html"]
+        Mjviser["mjviser Viewer<br/>webviz/server.py (launch_viewer)"]
+    end
+    
+    subgraph Benchmarks
+        RunBench["run_mujoco_bench.py"]
+        EvalVS["evaluate_vs_baseline.py"]
+    end
+    
+    IDOAgent --> GoalEML
+    IDOAgent --> KappaSnap
+    IDOAgent --> Noether
+    IDOAgent --> PsiAnchor
+    PsiAnchor --> KappaSnap
+    KappaSnap --> GoalEML
+    Noether --> GoalEML
+    
+    RunBench --> IDOAgent
+    EvalVS --> IDOAgent
+    EvalVS --> TDMPC2
+    EvalVS --> Cosmos
+    
+    FastAPI --> Dashboard
+    FastAPI --> RunBench
+    Mjviser --> FastAPI
+```
+
+---
+
 *Document by 高见远（Gao） — Architect*  
-*Date: 2025-07-01*
+*Date: 2025-07-01*  
+*v0.3.0 update: 2025-07-01*

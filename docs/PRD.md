@@ -52,9 +52,24 @@
 | R11 | Expert Demonstration Replay | Oracle Replay 的物理版本——已知轨迹回放作为 IDO 经验初始化 |
 | R12 | 论文 Appendix C | `papers/mujoco_bench_ido_validation.md`：完整实验结果与预言验证的论文级附录 |
 
+#### v0.3.0 — Baseline集成 + Web可视化（新增）
+
+| ID | Requirement | Description |
+|----|-------------|-------------|
+| R13 | TD-MPC2 Baseline Adapter | `baselines/tdmpc2_adapter.py`：TD-MPC2 v2 baseline adapter，统一choose_action/evaluate/reset接口，1M步训练预算，优雅降级 |
+| R14 | Cosmos-Predict Adapter | `baselines/cosmos_predict_adapter.py`：Cosmos-Predict世界模型adapter，η轨迹预测对比（7B/14B video2world），需GPU，优雅降级 |
+| R15 | Baseline评估框架扩展 | `benchmarks/evaluate_vs_baseline.py`支持--eval-mode control/cosmos-predict两种评估模式，BASELINE_REGISTRY扩展 |
+| R16 | Web可视化仪表盘 | `webviz/server.py` + `webviz/dashboard.html`：FastAPI REST API + WebSocket实时流 + Chart.js仪表盘，端口8080 |
+| R17 | mjviser 3D Viewer | `webviz/server.py` launch_viewer()：mjviser Viewer + ViserServer在端口8081启动3D可视化（v0.3.0修复3个bug） |
+| R18 | SIP-Bench Web支持 | Web仪表盘支持SIP-Bench toggle，实时显示T0/T1/T2阶段结果和Retention Gain/Stability Index |
+| R19 | 中文顶刊论文 | `papers/mujoco_bench_ido_中文论文.md`：面向国内顶级学术期刊的完整论文（8,000-12,000字），含VG-Pair≠GAN理论框架 |
+| R20 | 用户手册 | `docs/用户手册.md`：通俗易懂的中文用户手册，含快速开始、概念通俗解释、故障排查 |
+
 ### UI Design Draft
 
-本项目为纯 Python 库 + CLI 跑分工具，无 GUI。核心交互流程：
+v0.3.0 提供两种交互界面：
+
+#### CLI 交互（保留）
 
 ```
 run_mujoco_bench.py --task Humanoid-stand --agent ido --seed 42 --episodes 100
@@ -71,6 +86,25 @@ evaluate_vs_baseline.py --tasks Humanoid-stand,Reacher-easy --baselines ppo,sac,
   → 逐任务逐 agent 运行
   → 聚合结果表格 + Wilcoxon / t-test 统计检验
   → 输出 CSV + console summary
+
+# v0.3.0 新增
+evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosmos-predict
+  → IDO FlowMatching η vs Cosmos-Predict η轨迹对比
+  → 输出 trajectory RMSE + correlation
+
+evaluate_vs_baseline.py --task humanoid-stand --baseline tdmpc2_v2
+  → TD-MPC2 v2 baseline对比
+```
+
+#### Web 仪表盘交互（新增）
+
+```
+python webviz/run_webviz.py
+  → 打开 localhost:8080
+  → 左侧：任务选择、Episode配置、SIP-Bench toggle、mjviser按钮、Run/Stop
+  → 右侧：η轨迹图、Noether计数器、κ-Snap状态、ψ-Anchor面板、IC-Value柱状图、SIP-Bench结果
+  → 底部：状态栏
+  → mjviser 3D Viewer：点击按钮 → localhost:8081 → 3D交互操作
 ```
 
 ### Open Questions
@@ -80,8 +114,11 @@ evaluate_vs_baseline.py --tasks Humanoid-stand,Reacher-easy --baselines ppo,sac,
 3. **Noeter 能量校验的边界**：ΔE ≤ external work 的计算中，external work 是否应包含碰撞耗散？MuJoCo 的 contact 力如何纳入？
 4. **Baseline 训练资源**：PPO/SAC/TD-MPC2 baseline 的训练预算如何设定？是否使用 stable_baselines3 默认超参，还是需专门调优以保证公平对比？
 5. **Motor Primitive 与 Expert Replay 的依赖**：R10/R11 是否为 P0 IDO Agent 的必需组件？若缺失，Agent 的经验初始化与动作空间如何处理？
+6. **Cosmos-Predict 生命周期**：Cosmos-Predict1已被Cosmos 3取代，是否需要迁移到Cosmos 3？
+7. **mjviser 稳定性**：mjviser Viewer 在长时间运行中的稳定性如何？是否需要心跳检测？
 
 ---
 
-*Document by 许清楚（Xu） — Product Manager*
-*Date: 2025-07-01*
+*Document by 许清楚（Xu） — Product Manager*  
+*Date: 2025-07-01*  
+*v0.3.0 update: 2025-07-01*
