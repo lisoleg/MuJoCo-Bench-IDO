@@ -16,7 +16,7 @@ API Endpoints:
   GET  /user_manual.html — User manual HTML page
   GET  /mujoco_docs_cn.html — MuJoCo docs Chinese translation page
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.4.4
+Author: MuJoCo-Bench-IDO Webviz extension v0.4.5
 """
 
 import asyncio
@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.4.4"
+WEBVIZ_VERSION: str = "v0.4.5"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -868,7 +868,7 @@ async def start_viewer() -> JSONResponse:
 
             # ── Load scene based on mjviser_scene_type ──
             env_ref = None
-            target_height: float = 1.4  # Default for dm_control humanoid
+            target_height: float = 1.28  # dm_control humanoid natural standing height (not floating)
             scene_xml_path: Optional[str] = None
 
             if mjviser_scene_type == "plain":
@@ -877,7 +877,7 @@ async def start_viewer() -> JSONResponse:
                 env_ref.reset()  # Reset to get initial upright pose
                 mj_model = env_ref.physics.model._model
                 mj_data = env_ref.physics.data._data
-                target_height = 1.4  # dm_control humanoid standing height
+                target_height = 1.28  # dm_control humanoid natural standing height
             else:
                 # Custom scene: load XML from webviz/scenes/
                 scene_file_map: dict = {
@@ -893,7 +893,7 @@ async def start_viewer() -> JSONResponse:
                 mj_data = mj.MjData(mj_model)
                 mj.mj_resetData(mj_model, mj_data)
                 mj.mj_forward(mj_model, mj_data)
-                target_height = 1.0  # Stick-figure humanoid is shorter
+                target_height = 0.85  # Stick-figure humanoid natural standing height
 
             # ── Helper functions for walking controller ──
 
@@ -973,12 +973,12 @@ async def start_viewer() -> JSONResponse:
             KNEE_AMP: float = 0.15           # Knee bend amplitude during swing (rad)
             ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
             DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
-            MIN_HEIGHT: float = 0.5 * target_height  # Recovery threshold
+            MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
 
-            # Mass-proportional PD gains for root stabilization
-            KP_HEIGHT: float = humanoid_mass * 100.0   # Strong height spring
+            # Mass-proportional PD gains for root stabilization (v0.4.5: reduced levitation)
+            KP_HEIGHT_GENTLE: float = humanoid_mass * 15.0   # Gentle height assist (NOT strong levitation spring)
             KD_HEIGHT: float = humanoid_mass * 10.0    # Height damping
-            KP_MOVE: float = humanoid_mass * 5.0       # Horizontal velocity PD
+            KP_MOVE: float = humanoid_mass * 1.5       # Horizontal velocity PD (gentle — gait-driven, not push)
             KP_TILT: float = humanoid_mass * 7.5       # Orientation tilt PD
             KD_TILT: float = humanoid_mass * 2.5       # Tilt damping
             KP_YAW: float = humanoid_mass * 2.0        # Yaw steering PD
@@ -987,6 +987,9 @@ async def start_viewer() -> JSONResponse:
             # Joint PD gains (not mass-proportional — joint inertia is small)
             KP_JOINT: float = 50.0
             KD_JOINT: float = 15.0
+            # Leg joint PD gains (v0.4.5: stronger for ground support)
+            KP_LEG_JOINT: float = 100.0   # Hip/Knee PD — stronger for ground contact support
+            KD_LEG_JOINT: float = 25.0    # Hip/Knee damping
 
             # Safety clipping limits
             MAX_ROOT_FORCE: float = humanoid_mass * 120.0
@@ -1008,19 +1011,21 @@ async def start_viewer() -> JSONResponse:
                 'initial_qpos': mj_data.qpos.copy(),
             }
 
-            # ── Unified walking step function (v0.4.3) ──
-            # Replaces hard-lock root standing controller with random walking
-            # controller + waypoint navigation. The robot now moves around the
-            # arena instead of being pinned in place.
+            # ── Unified walking step function (v0.4.5) ──
+            # v0.4.5: Floating bug fix — root vertical force no longer fully cancels
+            # gravity. Instead, mild 30% assist + gentle height PD. Robot stands via
+            # leg joint ground contact, not root levitation. Horizontal movement
+            # is gait-driven (reduced push force). Support phase boosts leg
+            # extension when feet are near ground; reduces when floating too high.
             #
-            # Multi-layer control architecture:
-            #   L1: Root height — gravity compensation + PD spring
-            #   L2: Root horizontal — velocity PD toward waypoint
+            # Multi-layer control architecture (v0.4.5):
+            #   L1: Root height — mild gravity assist (30%) + gentle PD (NOT full cancel)
+            #   L2: Root horizontal — gentle velocity PD (gait-driven, not push)
             #   L3: Root orientation — tilt PD (keep torso upright)
             #   L4: Root yaw — heading PD toward waypoint
-            #   L5: Walking gait — sinusoidal hip/knee oscillation
+            #   L5: Walking gait — sinusoidal hip/knee + support phase modulation
             #   L6: Joint stabilization — PD hold for non-walking joints
-            #   L7: Safety — recovery force if height drops too low
+            #   L7: Safety — mild recovery force if height drops too low
 
             def step_fn(model: mj.MjModel, data: mj.MjData) -> None:
                 """Random walking controller with waypoint navigation.
@@ -1056,9 +1061,11 @@ async def start_viewer() -> JSONResponse:
                 root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. Root height: gravity compensation + PD ──
-                gravity_comp: float = humanoid_mass * 9.81
-                height_force: float = gravity_comp + KP_HEIGHT * (target_height - root_z) - KD_HEIGHT * root_vz
+                # ── 3. Root height: mild gravity assist + gentle PD (v0.4.5 fix) ──
+                # Only 30% gravity compensation — let legs + ground reaction support the body.
+                # Gentle PD guides toward target_height without strong levitation spring.
+                gravity_assist: float = 0.3 * humanoid_mass * 9.81
+                height_force: float = gravity_assist + KP_HEIGHT_GENTLE * (target_height - root_z) - KD_HEIGHT * root_vz
                 data.qfrc_applied[2] = float(np.clip(height_force, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
 
                 # ── 4. Root horizontal movement toward waypoint ──
@@ -1112,8 +1119,24 @@ async def start_viewer() -> JSONResponse:
                 yaw_torque: float = KP_YAW * heading_err - KD_YAW * float(data.qvel[5])
                 data.qfrc_applied[5] = float(np.clip(yaw_torque, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
 
-                # ── 7. Walking gait: sinusoidal joint oscillation ──
+                # ── 7. Walking gait: sinusoidal joint oscillation + support phase (v0.4.5) ──
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
+
+                # ── Support phase modulation (v0.4.5 floating fix) ──
+                # When feet near ground: boost leg extension for ground support
+                # When floating too high: reduce leg extension to discourage levitation
+                if root_z < target_height + 0.05:
+                    support_mult: float = 1.5   # Strong leg extension (push feet into ground)
+                    hip_amp_mult: float = 0.7   # Reduced swing — more standing, less stepping
+                    knee_amp_mult: float = 0.5  # Less knee bend — more leg extension
+                elif root_z > target_height + 0.1:
+                    support_mult: float = 0.5   # Reduce leg force when floating
+                    hip_amp_mult: float = 0.3   # Minimal swing when too high
+                    knee_amp_mult: float = 1.5  # More knee bend (reduce extension)
+                else:
+                    support_mult: float = 1.0   # Normal walking
+                    hip_amp_mult: float = 1.0
+                    knee_amp_mult: float = 1.0
 
                 # Leg joints: alternate between left (phase+π) and right (phase)
                 for side_tag, leg_phase_offset in [('right', 0.0), ('left', np.pi)]:
@@ -1133,10 +1156,10 @@ async def start_viewer() -> JSONResponse:
                         if jinfo['type'] == 3:  # hinge joint (1 DOF)
                             qa: int = jinfo['qpos_adr']
                             da: int = jinfo['dof_adr']
-                            target_val: float = float(initial_qpos[qa]) + HIP_AMP * float(np.sin(phase + leg_phase_offset))
+                            target_val: float = float(initial_qpos[qa]) + HIP_AMP * hip_amp_mult * float(np.sin(phase + leg_phase_offset))
                             error: float = target_val - float(data.qpos[qa])
                             vel: float = float(data.qvel[da])
-                            torque: float = KP_JOINT * error - KD_JOINT * vel
+                            torque: float = KP_LEG_JOINT * support_mult * error - KD_LEG_JOINT * support_mult * vel
                             data.qfrc_applied[da] = float(np.clip(torque, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
                         elif jinfo['type'] == 1:  # ball joint (3 DOF)
                             # Compute relative rotation from initial pose
@@ -1147,15 +1170,15 @@ async def start_viewer() -> JSONResponse:
                             theta_x: float = 2.0 * quat_rel[1]
                             theta_y: float = 2.0 * quat_rel[2]
                             theta_z: float = 2.0 * quat_rel[3]
-                            # Target: oscillate on y-axis (flexion), stabilize x and z
-                            target_ty: float = HIP_AMP * float(np.sin(phase + leg_phase_offset))
+                            # Target: oscillate on y-axis (flexion) with support modulation
+                            target_ty: float = HIP_AMP * hip_amp_mult * float(np.sin(phase + leg_phase_offset))
                             for ax_i, (tgt, cur) in enumerate([
                                 (0.0, theta_x), (target_ty, theta_y), (0.0, theta_z)
                             ]):
                                 dof_i: int = jinfo['dof_adr'] + ax_i
                                 err_i: float = tgt - cur
                                 vel_i: float = float(data.qvel[dof_i])
-                                tau_i: float = KP_JOINT * err_i - KD_JOINT * vel_i
+                                tau_i: float = KP_LEG_JOINT * support_mult * err_i - KD_LEG_JOINT * support_mult * vel_i
                                 data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
 
                     # ── Knee ──
@@ -1165,11 +1188,12 @@ async def start_viewer() -> JSONResponse:
                         qa = jinfo['qpos_adr']
                         da = jinfo['dof_adr']
                         # Knee bends during swing phase (when hip is forward)
+                        # v0.4.5: knee amplitude modulated by support phase
                         swing: float = float(np.sin(phase + leg_phase_offset))
-                        target_k: float = float(initial_qpos[qa]) - KNEE_AMP * max(0.0, swing)
+                        target_k: float = float(initial_qpos[qa]) - KNEE_AMP * knee_amp_mult * max(0.0, swing)
                         error_k: float = target_k - float(data.qpos[qa])
                         vel_k: float = float(data.qvel[da])
-                        torque_k: float = KP_JOINT * error_k - KD_JOINT * vel_k
+                        torque_k: float = KP_LEG_JOINT * support_mult * error_k - KD_LEG_JOINT * support_mult * vel_k
                         data.qfrc_applied[da] = float(np.clip(torque_k, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
 
                     # ── Ankle (obstacle scene: ankle_r / ankle_l hinge) ──
@@ -1290,9 +1314,9 @@ async def start_viewer() -> JSONResponse:
                     torque_r: float = KP_JOINT * 0.5 * error_r - KD_JOINT * 0.5 * vel_r
                     data.qfrc_applied[da] = float(np.clip(torque_r, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
 
-                # ── 11. Safety: recovery if robot height drops too low ──
+                # ── 11. Safety: mild recovery if robot height drops too low (v0.4.5) ──
                 if root_z < MIN_HEIGHT:
-                    data.qfrc_applied[2] += float(humanoid_mass * 50.0)  # Strong upward push
+                    data.qfrc_applied[2] += float(humanoid_mass * 20.0)  # Mild upward push (not strong catapult)
 
                 # ── 12. Step physics ──
                 mj.mj_step(model, data)
