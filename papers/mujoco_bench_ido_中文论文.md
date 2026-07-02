@@ -631,9 +631,17 @@ v0.4.5修复了Bug G（机器人漂浮空中）并增强3D场景中文i18n：
 - **3D场景i18n**：选项value与API端点对齐；新增scene_obstacle/scene_ramp/scene_stairs/scene_floating/scene_maze和label_current_scene i18n键
 - **离线验证**：obstacle场景stick-figure root_z在[0.518, 0.988]范围内（踩地而非悬浮）
 
+v0.4.5还修复了5个P0评估基础设施盲区（基于PRD_v0.4.5_incremental.md）：
+
+**P0-1（累计reward）**：`run_single_episode()` 从仅取最后一步reward改为`episode_return = Σ timestep.reward`累计求和，使IDO与baseline的episode return可公平对比
+**P0-2（成功率定制）**：新增`TASK_SUCCESS_CRITERIA`字典，为27个dm_control任务定制per-task success阈值（如reacher-easy: reward>-0.01, humanoid-stand: reward>0.5, cartpole-balance: reward>0.95等），替代旧代码仅humanoid-stand有right_hand判断
+**P0-3（NVR细分）**：`noether_check_mj()`返回值从`(bool, str)`tuple改为`{ok, total, energy, torque, collision, message}`dict，episode结果增加`nvr_breakdown`字段，区分energy/torque/collision各类型违规
+**P0-4（SB3安装）**：安装stable-baselines3 2.9.0 + shimmy 2.0.1（`DmControlCompatibilityV0`API），使PPO/SAC baseline不再fallback random
+**P0-5（训练脚本）**：新增`baselines/sb3_adapter.py`（SB3PPOAdapter + SB3SACAdapter，auto-train/checkpoint/evaluate/choose_action）和`benchmarks/train_baselines.py`（8核心任务PPO+SAC批量训练），evaluate_vs_baseline.py中PPO/SAC使用新Adapter替代旧fallback
+
 ### 4.4 Baseline集成
 
-v0.3.0实现了两个baseline adapter：
+v0.3.0实现了两个baseline adapter，v0.4.5增加了SB3 adapter：
 
 **TDMPC2Adapter**（`baselines/tdmpc2_adapter.py`）：
 - 统一接口：choose_action(obs), evaluate(n_episodes), reset()
@@ -646,6 +654,13 @@ v0.3.0实现了两个baseline adapter：
 - η轨迹预测对比
 - 7B/14B模型需GPU + CUDA
 - 优雅降级：未安装时跳过
+
+**SB3PPOAdapter/SB3SACAdapter**（`baselines/sb3_adapter.py`，v0.4.5新增）：
+- auto-train：默认100K steps自动训练（可配置），训练后保存checkpoint
+- checkpoint save/load：`checkpoints/<task>/<algo>/model.zip`
+- evaluate：5 episodes评估，返回episode_return + success_rate
+- choose_action：返回实际PPO/SAC策略动作（不再fallback random）
+- dm_control obs转换：通过gymnasium.spaces.flatten处理
 
 ### 4.5 Web可视化与文档系统
 

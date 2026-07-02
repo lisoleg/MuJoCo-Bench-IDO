@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO User Manual v0.4.4</title>
+  <title>MuJoCo-Bench-IDO User Manual v0.4.5</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
@@ -42,7 +42,7 @@
 
 <!-- LEFT SIDEBAR -->
 <nav class="sidebar">
-  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.4.4</div>
+  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.4.5</div>
   <a href="#sec1" data-i18n="nav_sec1">1. 项目简介</a>
   <a href="#sec2" data-i18n="nav_sec2">2. 环境要求</a>
   <a href="#sec3" data-i18n="nav_sec3">3. 快速开始</a>
@@ -52,6 +52,7 @@
   <a href="#sec7" data-i18n="nav_sec7">7. 核心概念通俗解释</a>
   <a href="#sec8" data-i18n="nav_sec8">8. Benchmark任务详解</a>
   <a href="#sec9" data-i18n="nav_sec9">9. Baseline对比使用</a>
+  <a href="#sec12" data-i18n="nav_sec12">12. v0.4.5评估改进</a>
   <a href="#sec10" data-i18n="nav_sec10">10. 物理/数学速查表</a>
   <a href="#sec11" data-i18n="nav_sec11">11. 常见问题与故障排查</a>
 </nav>
@@ -62,7 +63,7 @@
 <!-- HEADER -->
 <div class="section-card" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: none; margin-bottom: 32px;">
   <h1 style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-bottom: 8px;" data-i18n="header_title">MuJoCo-Bench-IDO 用户手册</h1>
-  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.4.4 · 最后更新 2025-07-02 · IDO/TOMAS 连续物理基准验证平台</p>
+  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.4.5 · 最后更新 2026-07-02 · IDO/TOMAS 连续物理基准验证平台</p>
 </div>
 
 <!-- ═══ Section 1: 项目简介 ═══ -->
@@ -141,18 +142,20 @@ pip install nvidia-cosmos-predict1         # 需 CUDA + 7B+ 模型</code></pre>
 python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 3</code></pre>
 
   <p data-i18n="sec3_output_example">输出示例：</p>
-  <pre><code>=== MuJoCo-Bench-IDO v0.4.4 ===
+  <pre><code>=== MuJoCo-Bench-IDO v0.4.5 ===
 Task: reacher-easy | Episodes: 3 | Max steps: 1000
-Episode 1: steps=1000, final_eta=2.45, NV=0, time=3.2s
-Episode 2: steps=1000, final_eta=3.10, NV=0, time=3.1s
-Episode 3: steps=1000, final_eta=2.80, NV=0, time=3.3s
+Episode 1: steps=1000, episode_return=0.85, success=True, eta=2.45, NV=0, nvr_breakdown={energy:0,torque:0,collision:0}
+Episode 2: steps=1000, episode_return=0.72, success=True, eta=3.10, NV=0, nvr_breakdown={energy:0,torque:0,collision:0}
+Episode 3: steps=1000, episode_return=0.91, success=True, eta=2.80, NV=0, nvr_breakdown={energy:0,torque:0,collision:0}
 === Summary ===
+avg_episode_return: 0.83
 avg_final_eta: 2.78
-avg_steps: 1000.0
-total_noether_violations: 0</code></pre>
+success_rate: 100%
+total_noether_violations: 0
+nvr_breakdown_totals: {energy:0, torque:0, collision:0}</code></pre>
 
   <h3 class="sub-title" data-i18n="sec3_available_tasks">所有可用任务</h3>
-  <p data-i18n="sec3_task_intro">v0.4.4 支持分组任务选择，涵盖 dm_control.suite 全部主流任务：</p>
+  <p data-i18n="sec3_task_intro">v0.4.5 支持分组任务选择，涵盖 dm_control.suite 全部主流任务：</p>
   <table>
     <thead><tr><th data-i18n="th_category">类别</th><th data-i18n="th_tasks">任务列表</th><th data-i18n="th_recommended">推荐入门</th></tr></thead>
     <tbody>
@@ -195,14 +198,14 @@ python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-st
   <h3 class="sub-title" data-i18n="sec4_top_nav">顶部导航栏</h3>
   <ul>
     <li data-i18n="sec4_nav_project"><strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz</li>
-    <li data-i18n="sec4_nav_version"><strong>版本号</strong>: v0.4.4</li>
+    <li data-i18n="sec4_nav_version"><strong>版本号</strong>: v0.4.5</li>
     <li data-i18n="sec4_nav_status"><strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行</li>
     <li data-i18n="sec4_nav_links"><strong>导航链接</strong>: 用户手册、MuJoCo文档（使用绝对URL http://localhost:8080/）</li>
     <li data-i18n="sec4_nav_lang"><strong>语言切换</strong>: 中/EN按钮切换界面语言</li>
   </ul>
 
   <h3 class="sub-title" data-i18n="sec4_left_panel">左侧控制面板</h3>
-  <p data-i18n="sec4_panel_intro">v0.4.4 控制面板包含分组任务选择、6种3D场景、解释性提示文字：</p>
+  <p data-i18n="sec4_panel_intro">v0.4.5 控制面板包含分组任务选择、6种3D场景、解释性提示文字：</p>
   <p data-i18n="sec4_task_select"><strong>任务选择下拉框</strong>：按类别分组选择 dm_control 任务（人形/行走者/跳跃者/猎豹/杆车/机械臂/手指/鱼/游泳者/球杯/机械手/杂技/摆），共 25+ 任务。每个类别有推荐入门标记。</p>
   <p data-i18n="sec4_task_hint"><small style="color:#64748b;" data-i18n="sec4_task_hint_text">💡 任务选择决定基准环境和 GoalEML 不变量类型</small></p>
   <p data-i18n="sec4_episode_config"><strong>Episode 配置</strong>：</p>
@@ -296,7 +299,7 @@ python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 10 --max-st
   <p data-i18n="sec5_waypoint">航点每 5 秒随机更换（半径 6m），机器人沿航点行走，路径自然、不僵硬。</p>
 
   <h3 class="sub-title" data-i18n="sec5_scenes">3D 场景类型</h3>
-  <p data-i18n="sec5_scene_desc">v0.4.4 扩展为 6 种场景：</p>
+  <p data-i18n="sec5_scene_desc">v0.4.5 扩展为 6 种场景：</p>
   <table>
     <thead><tr><th data-i18n="th_scene">场景</th><th data-i18n="th_key">选择键</th><th data-i18n="th_description">说明</th></tr></thead>
     <tbody>
@@ -529,8 +532,56 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
   <ul>
     <li data-i18n="sec9_graceful_tdmpc">TD-MPC2 未安装 → 使用 Random Agent 替代</li>
     <li data-i18n="sec9_graceful_cosmos">Cosmos-Predict 未安装 → 跳过该 baseline</li>
-    <li data-i18n="sec9_graceful_sb3">SB3 未安装 → 跳过 PPO/SAC</li>
+    <li data-i18n="sec9_graceful_sb3">SB3 未安装 → 跳过 PPO/SAC（v0.4.5 已安装 SB3 2.9.0 + shimmy 2.0.1）</li>
   </ul>
+
+  <h3 class="sub-title" data-i18n="sec9_ppo_sac">PPO/SAC Baseline (v0.4.5 新增)</h3>
+  <p data-i18n="sec9_ppo_sac_desc">v0.4.5 新增 SB3PPOAdapter 和 SB3SACAdapter，PPO/SAC baseline 现在返回实际策略动作（不再 fallback random）：</p>
+  <pre><code># 训练 PPO/SAC baseline（自动训练+保存checkpoint+评估）
+python benchmarks/train_baselines.py --tasks humanoid-stand walker-walk --algo ppo sac --steps 100000
+
+# 仅评估已有checkpoint（不训练）
+python benchmarks/train_baselines.py --tasks all --eval-only --eval-episodes 5
+
+# 强制重新训练
+python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 1000000 --force</code></pre>
+  <p data-i18n="sec9_ppo_sac_detail"><strong>SB3PPOAdapter/SB3SACAdapter 特性</strong>：</p>
+  <ul>
+    <li data-i18n="sec9_sb3_auto">auto-train：默认100K steps自动训练（可配置）</li>
+    <li data-i18n="sec9_sb3_checkpoint">checkpoint save/load：自动保存到 <code>checkpoints/&lt;task&gt;/&lt;algo&gt;/model.zip</code></li>
+    <li data-i18n="sec9_sb3_eval">evaluate：5 episodes评估，返回 episode_return + success_rate</li>
+    <li data-i18n="sec9_sb3_action">choose_action：返回实际PPO/SAC策略动作</li>
+  </ul>
+</div>
+
+<!-- ═══ Section 12: v0.4.5 评估基础设施改进 ═══ -->
+<div id="sec12" class="section-card">
+  <h2 class="section-title" data-i18n="sec12_title">12. v0.4.5 评估基础设施改进</h2>
+  <p data-i18n="sec12_intro">v0.4.5 修复了 5 个 P0 评估盲区，使 IDO vs Baseline 对比更加公平可信：</p>
+
+  <table>
+    <thead><tr><th data-i18n="th_p0">P0编号</th><th data-i18n="th_blind_spot">盲区</th><th data-i18n="th_fix">修复</th></tr></thead>
+    <tbody>
+      <tr><td>P0-1</td><td data-i18n="sec12_b1">累计reward仅取最后一步 → episode_return = Σ timestep.reward</td><td data-i18n="sec12_f1">改为累计求和，可公平对比baseline episode return</td></tr>
+      <tr><td>P0-2</td><td data-i18n="sec12_b2">成功率仅humanoid有判断 → TASK_SUCCESS_CRITERIA 27个per-task阈值</td><td data-i18n="sec12_f2">每个任务定制success标准（如reacher: reward>-0.01, cartpole: reward>0.95）</td></tr>
+      <tr><td>P0-3</td><td data-i18n="sec12_b3">NVR无类型细分 → noether_check返回dict{energy,torque,collision}</td><td data-i18n="sec12_f3">区分energy/torque/collision各类型违规，增加诊断价值</td></tr>
+      <tr><td>P0-4</td><td data-i18n="sec12_b4">baseline全退化为random → 安装SB3 2.9.0 + shimmy 2.0.1</td><td data-i18n="sec12_f4">PPO/SAC实际可运行，不再fallback random</td></tr>
+      <tr><td>P0-5</td><td data-i18n="sec12_b5">无训练脚本 → train_baselines.py + SB3PPOAdapter/SB3SACAdapter</td><td data-i18n="sec12_f5">批量训练8核心任务，auto-train + checkpoint + evaluate</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title" data-i18n="sec12_metrics_title">新增评估指标</h3>
+  <table>
+    <thead><tr><th data-i18n="th_metric">指标</th><th data-i18n="th_definition">定义</th><th data-i18n="th_significance">意义</th></tr></thead>
+    <tbody>
+      <tr><td data-i18n="sec12_episode_return">episode_return</td><td data-i18n="sec12_er_def">Σ timestep.reward（累计奖励）</td><td data-i18n="sec12_er_sig">与baseline的episode return可公平对比</td></tr>
+      <tr><td data-i18n="sec12_success_rate">success_rate</td><td data-i18n="sec12_sr_def">per-task定制goal-achieved判断</td><td data-i18n="sec12_sr_sig">每个任务有独立的成功标准</td></tr>
+      <tr><td data-i18n="sec12_nvr_breakdown">nvr_breakdown</td><td data-i18n="sec12_nb_def">{energy, torque, collision}各类型违规数</td><td data-i18n="sec12_nb_sig">诊断哪种守恒约束被违反</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title" data-i18n="sec12_floating_title">漂浮Bug修复</h3>
+  <p data-i18n="sec12_floating_desc">v0.4.5 还修复了机器人漂浮在空中的Bug——根因是step_fn使用100%重力补偿+强PD弹簧将机器人推至target_height，像气球悬浮。修复：自适应重力辅助（近地面50%/漂浮10%/过渡30%）+ 温和PD(KP=mass×15) + 腿部关节增强 + 支撑相位调制。</p>
 </div>
 
 <!-- ═══ Section 10: 物理/数学速查表 ═══ -->
@@ -625,8 +676,8 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
 
 <!-- FOOTER -->
 <div style="text-align: center; padding: 32px 0; color: #64748b; border-top: 1px solid #475569; margin-top: 40px;">
-  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.4.4 用户手册</p>
-  <p data-i18n="footer_line2">最后更新: 2025-07-02</p>
+  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.4.5 用户手册</p>
+  <p data-i18n="footer_line2">最后更新: 2026-07-02</p>
 </div>
 
 </div><!-- end main-content -->
@@ -638,14 +689,14 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
   const i18nDict = {
     zh: {
       lang_btn: "中/EN",
-      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.4.4",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.4.5",
       nav_sec1: "1. 项目简介", nav_sec2: "2. 环境要求", nav_sec3: "3. 快速开始",
       nav_sec4: "4. Web可视化仪表盘指南", nav_sec5: "5. mjviser 3D可视化指南",
       nav_sec6: "6. SIP-Bench模式", nav_sec7: "7. 核心概念通俗解释",
       nav_sec8: "8. Benchmark任务详解", nav_sec9: "9. Baseline对比使用",
       nav_sec10: "10. 物理/数学速查表", nav_sec11: "11. 常见问题与故障排查",
       header_title: "MuJoCo-Bench-IDO 用户手册",
-      header_subtitle: "版本 v0.4.4 · 最后更新 2025-07-02 · IDO/TOMAS 连续物理基准验证平台",
+      header_subtitle: "版本 v0.4.5 · 最后更新 2026-07-02 · IDO/TOMAS 连续物理基准验证平台",
       sec1_title: "1. 项目简介",
       sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。",
       sec1_what_is_ido: "什么是 IDO/TOMAS？",
@@ -679,7 +730,7 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec3_open_browser: "打开浏览器访问 <code>http://localhost:8080</code>，即可看到实时监控仪表盘。",
       sec4_title: "4. Web 可视化仪表盘指南", sec4_intro: "启动 Web 仪表盘后，浏览器将显示完整的监控界面。",
       sec4_top_nav: "顶部导航栏", sec4_nav_project: "<strong>项目名称</strong>: MuJoCo-Bench-IDO Webviz",
-      sec4_nav_version: "<strong>版本号</strong>: v0.4.4",
+      sec4_nav_version: "<strong>版本号</strong>: v0.4.5",
       sec4_nav_status: "<strong>运行状态指示器</strong>: 显示当前是否有 benchmark 正在运行",
       sec4_nav_links: "<strong>导航链接</strong>: 用户手册、MuJoCo文档（使用绝对URL http://localhost:8080/）",
       sec4_nav_lang: "<strong>语言切换</strong>: 中/EN按钮切换界面语言",
@@ -742,13 +793,13 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec5_stairs: "阶梯地形", sec5_stairs_desc: "多级台阶地形",
       sec5_floating: "浮台地形", sec5_floating_desc: "悬浮平台跳跃场景",
       sec5_maze: "迷宫场景", sec5_maze_desc: "通道迷宫导航",
-      sec3_task_intro: "v0.4.4 支持分组任务选择，涵盖 dm_control.suite 全部主流任务：",
+      sec3_task_intro: "v0.4.5 支持分组任务选择，涵盖 dm_control.suite 全部主流任务：",
       th_category: "类别", th_tasks: "任务列表",
       cat_humanoid: "人形机器人", cat_walker: "行走者", cat_hopper: "跳跃者", cat_cheetah: "猎豹",
       cat_cartpole: "杆车", cat_reacher: "机械臂", cat_finger: "手指", cat_fish: "鱼类",
       cat_swimmer: "游泳者", cat_ballcup: "球杯", cat_manipulator: "机械手", cat_acrobot: "杂技",
       cat_pendulum: "摆", sec3_medium2: "中等", sec3_easy: "简单",
-      sec4_panel_intro: "v0.4.4 控制面板包含分组任务选择、6种3D场景、解释性提示文字：",
+      sec4_panel_intro: "v0.4.5 控制面板包含分组任务选择、6种3D场景、解释性提示文字：",
       sec4_task_hint_text: "💡 任务选择决定基准环境和 GoalEML 不变量类型",
       sec4_ep_hint: "💡 每个 episode 是一次完整运行周期",
       sec4_steps_hint: "💡 步数越多，仿真时间越长",
@@ -850,7 +901,29 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec9_predict: "预测对比", sec9_predict_metrics: "η trajectory RMSE, η correlation",
       sec9_graceful: "优雅降级", sec9_graceful_desc: "如果 baseline 包未安装，系统会自动降级：",
       sec9_graceful_tdmpc: "TD-MPC2 未安装 → Random Agent", sec9_graceful_cosmos: "Cosmos-Predict 未安装 → 跳过",
-      sec9_graceful_sb3: "SB3 未安装 → 跳过 PPO/SAC",
+      sec9_graceful_sb3: "SB3 未安装 → 跳过 PPO/SAC（v0.4.5 已安装 SB3 2.9.0 + shimmy 2.0.1）",
+      sec9_ppo_sac: "PPO/SAC Baseline (v0.4.5 新增)",
+      sec9_ppo_sac_desc: "v0.4.5 新增 SB3PPOAdapter 和 SB3SACAdapter，PPO/SAC baseline 现在返回实际策略动作：",
+      sec9_sb3_auto: "auto-train：默认100K steps自动训练",
+      sec9_sb3_checkpoint: "checkpoint save/load：自动保存到 checkpoints/",
+      sec9_sb3_eval: "evaluate：5 episodes评估",
+      sec9_sb3_action: "choose_action：返回实际PPO/SAC策略动作",
+      nav_sec12: "12. v0.4.5评估改进",
+      sec12_title: "12. v0.4.5 评估基础设施改进",
+      sec12_intro: "v0.4.5 修复了 5 个 P0 评估盲区，使 IDO vs Baseline 对比更加公平可信：",
+      th_p0: "P0编号", th_blind_spot: "盲区", th_fix: "修复",
+      sec12_b1: "累计reward仅取最后一步", sec12_f1: "改为episode_return累计求和",
+      sec12_b2: "成功率仅humanoid有判断", sec12_f2: "27个per-task success阈值",
+      sec12_b3: "NVR无类型细分", sec12_f3: "区分energy/torque/collision",
+      sec12_b4: "baseline全退化为random", sec12_f4: "安装SB3 2.9.0 + shimmy 2.0.1",
+      sec12_b5: "无训练脚本", sec12_f5: "train_baselines.py + SB3 Adapter",
+      sec12_metrics_title: "新增评估指标",
+      th_metric: "指标", th_definition: "定义", th_significance: "意义",
+      sec12_episode_return: "episode_return", sec12_er_def: "Σ timestep.reward", sec12_er_sig: "公平对比baseline",
+      sec12_success_rate: "success_rate", sec12_sr_def: "per-task定制goal-achieved", sec12_sr_sig: "独立成功标准",
+      sec12_nvr_breakdown: "nvr_breakdown", sec12_nb_def: "{energy,torque,collision}", sec12_nb_sig: "诊断守恒约束类型",
+      sec12_floating_title: "漂浮Bug修复",
+      sec12_floating_desc: "v0.4.5 还修复了机器人漂浮Bug——自适应重力辅助+温和PD+腿部增强+支撑相位",
       sec10_title: "10. 大学物理/数学速查表", sec10_intro: "边跑 Benchmark 边学，以下是 EML 映射表：",
       th_course: "大学课程", th_concept: "核心概念", th_eml_map: "EML 映射", th_ido_layer: "IDO 层",
       sec10_mech: "经典力学", sec10_mech_concept: "牛顿-欧拉方程、能量守恒、Signorini 接触",
@@ -895,19 +968,19 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec11_nv_r2: "能量预算参数需调优",
       sec11_nv_r3: "仅 reacher-easy 实现 NV ≡ 0",
       sec11_nv_improve: "<strong>改善方向</strong>: SIP-Bench 演化优化",
-      footer_line1: "MuJoCo-Bench-IDO v0.4.4 用户手册",
-      footer_line2: "最后更新: 2025-07-02",
+      footer_line1: "MuJoCo-Bench-IDO v0.4.5 用户手册",
+      footer_line2: "最后更新: 2026-07-02",
     },
     en: {
       lang_btn: "中/EN",
-      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.4.4",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.4.5",
       nav_sec1: "1. Project Overview", nav_sec2: "2. Requirements", nav_sec3: "3. Quick Start",
       nav_sec4: "4. Dashboard Guide", nav_sec5: "5. mjviser 3D Guide",
       nav_sec6: "6. SIP-Bench Mode", nav_sec7: "7. Core Concepts Explained",
       nav_sec8: "8. Benchmark Tasks", nav_sec9: "9. Baseline Comparison",
       nav_sec10: "10. Physics/Math Cheat Sheet", nav_sec11: "11. FAQ & Troubleshooting",
       header_title: "MuJoCo-Bench-IDO User Manual",
-      header_subtitle: "Version v0.4.4 · Last updated 2025-07-02 · IDO/TOMAS Continuous Physics Benchmark",
+      header_subtitle: "Version v0.4.5 · Last updated 2026-07-02 · IDO/TOMAS Continuous Physics Benchmark",
       sec1_title: "1. Project Overview",
       sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> is a benchmark platform that migrates the IDO/TOMAS architecture from discrete symbolic domain (ARC puzzles) to continuous physics control domain (MuJoCo robots).",
       sec1_what_is_ido: "What is IDO/TOMAS?",
@@ -942,7 +1015,7 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec4_title: "4. Dashboard Guide", sec4_intro: "After launching the dashboard, the browser shows the full monitoring interface.",
       sec4_top_nav: "Top Navigation Bar",
       sec4_nav_project: "<strong>Project Name</strong>: MuJoCo-Bench-IDO Webviz",
-      sec4_nav_version: "<strong>Version</strong>: v0.4.4",
+      sec4_nav_version: "<strong>Version</strong>: v0.4.5",
       sec4_nav_status: "<strong>Status Indicator</strong>: Shows whether a benchmark is running",
       sec4_nav_links: "<strong>Navigation Links</strong>: User Manual, MuJoCo Docs (absolute URLs http://localhost:8080/)",
       sec4_nav_lang: "<strong>Language Toggle</strong>: 中/EN button switches UI language",
@@ -1001,13 +1074,13 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec5_stairs: "Stairs Arena", sec5_stairs_desc: "Multi-step staircase terrain",
       sec5_floating: "Floating Platforms", sec5_floating_desc: "Suspended platform jumping scene",
       sec5_maze: "Maze Arena", sec5_maze_desc: "Channel maze navigation",
-      sec3_task_intro: "v0.4.4 supports grouped task selection, covering all mainstream dm_control.suite tasks:",
+      sec3_task_intro: "v0.4.5 supports grouped task selection, covering all mainstream dm_control.suite tasks:",
       th_category: "Category", th_tasks: "Task List",
       cat_humanoid: "Humanoid", cat_walker: "Walker", cat_hopper: "Hopper", cat_cheetah: "Cheetah",
       cat_cartpole: "Cartpole", cat_reacher: "Reacher", cat_finger: "Finger", cat_fish: "Fish",
       cat_swimmer: "Swimmer", cat_ballcup: "Ball-in-Cup", cat_manipulator: "Manipulator", cat_acrobot: "Acrobot",
       cat_pendulum: "Pendulum", sec3_medium2: "Medium", sec3_easy: "Easy",
-      sec4_panel_intro: "v0.4.4 control panel: grouped task selector, 6 3D scenes, explanatory tooltips:",
+      sec4_panel_intro: "v0.4.5 control panel: grouped task selector, 6 3D scenes, explanatory tooltips:",
       sec4_task_hint: "💡 Task selection determines benchmark environment and GoalEML invariants",
       sec4_task_hint_text: "💡 Task determines benchmark environment and GoalEML invariants",
       sec4_ep_hint: "💡 Each episode is one complete run cycle",
@@ -1116,7 +1189,29 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec9_graceful_desc: "If baseline packages are not installed, the system degrades automatically:",
       sec9_graceful_tdmpc: "TD-MPC2 not installed → Random Agent",
       sec9_graceful_cosmos: "Cosmos-Predict not installed → Skip",
-      sec9_graceful_sb3: "SB3 not installed → Skip PPO/SAC",
+      sec9_graceful_sb3: "SB3 not installed → Skip PPO/SAC (v0.4.5 installed SB3 2.9.0 + shimmy 2.0.1)",
+      sec9_ppo_sac: "PPO/SAC Baseline (v0.4.5 New)",
+      sec9_ppo_sac_desc: "v0.4.5 adds SB3PPOAdapter and SB3SACAdapter — PPO/SAC returns actual policy actions (no random fallback):",
+      sec9_sb3_auto: "auto-train: default 100K steps auto-train",
+      sec9_sb3_checkpoint: "checkpoint save/load: auto-save to checkpoints/",
+      sec9_sb3_eval: "evaluate: 5 episodes evaluation",
+      sec9_sb3_action: "choose_action: returns actual PPO/SAC policy actions",
+      nav_sec12: "12. v0.4.5 Eval Improvements",
+      sec12_title: "12. v0.4.5 Evaluation Infrastructure Improvements",
+      sec12_intro: "v0.4.5 fixed 5 P0 evaluation blind spots, making IDO vs Baseline comparison fair and trustworthy:",
+      th_p0: "P0#", th_blind_spot: "Blind Spot", th_fix: "Fix",
+      sec12_b1: "Cumulative reward only took last step", sec12_f1: "Changed to episode_return = Σ reward",
+      sec12_b2: "Success rate only for humanoid", sec12_f2: "27 per-task success thresholds",
+      sec12_b3: "NVR no type breakdown", sec12_f3: "Separate energy/torque/collision",
+      sec12_b4: "Baselines all degenerate to random", sec12_f4: "Install SB3 2.9.0 + shimmy 2.0.1",
+      sec12_b5: "No training script", sec12_f5: "train_baselines.py + SB3 Adapter",
+      sec12_metrics_title: "New Evaluation Metrics",
+      th_metric: "Metric", th_definition: "Definition", th_significance: "Significance",
+      sec12_episode_return: "episode_return", sec12_er_def: "Σ timestep.reward", sec12_er_sig: "Fair baseline comparison",
+      sec12_success_rate: "success_rate", sec12_sr_def: "per-task goal-achieved", sec12_sr_sig: "Independent success criteria",
+      sec12_nvr_breakdown: "nvr_breakdown", sec12_nb_def: "{energy,torque,collision}", sec12_nb_sig: "Diagnose constraint type",
+      sec12_floating_title: "Floating Bug Fix",
+      sec12_floating_desc: "v0.4.5 also fixed robot floating in air — adaptive gravity assist + gentle PD + leg joint boost + support phase modulation",
       sec10_title: "10. Physics/Math Cheat Sheet", sec10_intro: "Learn while running benchmarks. EML mapping table:",
       th_course: "Course", th_concept: "Core Concept", th_eml_map: "EML Mapping", th_ido_layer: "IDO Layer",
       sec10_mech: "Classical Mechanics", sec10_mech_concept: "Newton-Euler equations, energy conservation, Signorini contact",
@@ -1159,8 +1254,8 @@ python benchmarks/evaluate_vs_baseline.py --task humanoid-stand --eval-mode cosm
       sec11_nv_r2: "Energy budget parameters need tuning",
       sec11_nv_r3: "Only reacher-easy achieved NV ≡ 0",
       sec11_nv_improve: "<strong>Fix</strong>: SIP-Bench evolution optimization",
-      footer_line1: "MuJoCo-Bench-IDO v0.4.4 User Manual",
-      footer_line2: "Last updated: 2025-07-02",
+      footer_line1: "MuJoCo-Bench-IDO v0.4.5 User Manual",
+      footer_line2: "Last updated: 2026-07-02",
     }
   };
 

@@ -689,6 +689,61 @@ graph TB
 5. **安全恢复温和化**：恢复力从mass×50降至mass×20，MIN_HEIGHT从0.5×target降至0.3×target
 6. **target_height修正**：dm_control humanoid 1.28（自然站立高度），stick-figure 0.85
 
+#### v0.4.5 P0 评估基础设施修复（PRD盲区修复）
+
+基于 PRD v0.4.5_incremental.md 识别的4大评估盲区（B1-B4），实施5个P0修复：
+
+**P0-1: 修复 dm_control 累计 reward 计算**
+
+| 修改文件 | 说明 |
+|---------|------|
+| `benchmarks/run_mujoco_bench.py` | `run_single_episode()` 中初始化 `episode_return=0.0`，每步累计 `episode_return += float(timestep.reward or 0.0)`，返回 `episode_return` 替代旧 `avg_return`（仅取最后一步） |
+| `benchmarks/evaluate_vs_baseline.py` | `_aggregate_metrics()` 中 `avg_return` 改为 mean episode_return |
+| `webviz/server.py` | 流式 episode endpoint 也累计 episode_return |
+
+根因：dm_control 的 `timestep.reward` 是单步奖励（float），而非 episode 累计。旧代码仅取最后一步 reward，无法与 baseline 做 episode return 对比。
+
+**P0-2: 修复成功率 per-task 定制判断**
+
+| 修改文件 | 说明 |
+|---------|------|
+| `benchmarks/run_mujoco_bench.py` | 新增 `TASK_SUCCESS_CRITERIA` 字典，为 27 个 dm_control 任务定制 success lambda（如 `reacher-easy: reward > -0.01`，`humanoid-stand: reward > 0.5`，`cartpole-balance: reward > 0.95` 等）；`run_single_episode()` 中每步判断 `success_fn(obs, step_reward)` 并记录 `success: bool` 字段 |
+
+根因：旧代码仅 humanoid-stand 有 right_hand 目标距离判断，其他 24 个任务缺失 goal-achieved 判断，成功率统计不可信。
+
+**P0-3: NVR 类型细分统计**
+
+| 修改文件 | 说明 |
+|---------|------|
+| `core/noether_check_mj.py` | `noether_check_mj()` 返回值从 `(bool, str)` tuple 改为 `{ok, total, energy, torque, collision, message}` dict；每个守恒门检查分别记录各类型违规数 |
+| `benchmarks/run_mujoco_bench.py` | 每步收集 NVR breakdown，episode 结果增加 `nvr_breakdown: {energy, torque, collision}` 字段 |
+| `benchmarks/evaluate_vs_baseline.py` | NVR 统计使用新 breakdown 数据 |
+
+根因：旧代码仅返回总违规数 `n_violations`，无法区分 energy/torque/collision 各类型的违规比例，NVR 指标缺乏诊断价值。
+
+**P0-4: 安装 SB3 + dm_control wrapper**
+
+| 修改项 | 说明 |
+|--------|------|
+| stable-baselines3 | 安装 v2.9.0 到 managed venv |
+| shimmy[gymnasium] | 安装 v2.0.1（`DmControlCompatibilityV0` API） |
+
+根因：旧代码中 PPO/SAC baseline 因未安装 SB3 而退化为 random fallback，评估退化为 IDO vs Random。
+
+**P0-5: SB3PPOAdapter/SB3SACAdapter + train_baselines.py**
+
+| 新增文件 | 说明 |
+|---------|------|
+| `baselines/sb3_adapter.py` | SB3PPOAdapter + SB3SACAdapter：auto-train（默认100K steps可配置）、checkpoint save/load、5 episodes evaluate、`choose_action()` 返回实际策略动作（不再fallback random）；dm_control obs 通过 gymnasium.spaces.flatten 转换 |
+| `benchmarks/train_baselines.py` | 批量训练脚本：支持8个核心任务（humanoid-stand/walker-walk/cheetah-run/hopper-stand/reacher-easy/cartpole-balance/finger-turn_easy/fish-swim），PPO+SAC，checkpoint 保存到 `checkpoints/<task>/<algo>/`，自动评估5 episodes，JSON结果输出 |
+| `baselines/__init__.py` | 导出 SB3PPOAdapter/SB3SACAdapter + factory 函数 |
+
+| 修改文件 | 说明 |
+|---------|------|
+| `benchmarks/evaluate_vs_baseline.py` | PPO/SAC baseline 使用 SB3PPOAdapter/SB3SACAdapter 替代旧 PPO.load()（旧代码因 SB3 未安装而 fallback random） |
+
+根因：旧 evaluate_vs_baseline.py 中 PPO/SAC 实际不可运行，退化为 random baseline。
+
 #### v0.3.1 模块关系图更新
 
 ```mermaid
