@@ -18,6 +18,12 @@ v0.2.0 Upgrade: FlowMatchingEtaPredictor
   - Detects hesitation (η plateau) and retry (η fallback)
   - Provides Hesitation-RMSE and Retry-VOC metrics
 
+v0.3.0 Upgrade: MerkleChain Integration
+  - η computation results can be recorded to MerkleChain via prev_snap_id
+  - snap_id = prev_snap_id + sha256(prev_snap_id + str(η) + str(decision))[:16]
+  - Agent passes prev_snap_id through internal state for chain linkage
+  - Provides compute_merkle_snap_id() helper for agent integration
+
 Inspired by:
   - ReinFlow (NeurIPS 2025): online RL fine-tuning of flow matching policy
   - FPO: on-policy flow matching training
@@ -26,10 +32,11 @@ Inspired by:
 
 Author: tomas-arc3-solver project · IDO-MuJoCo-Bench extension
 """
+import hashlib
 import numpy as np
 from typing import Optional
 
-IDO_KAPPA_SNAP_MJ_VERSION: str = "v0.2.1"
+IDO_KAPPA_SNAP_MJ_VERSION: str = "v0.3.0"
 
 
 class FlowMatchingEtaPredictor:
@@ -362,3 +369,29 @@ def gauss_ex_residual(z_i: dict,
         eta = eta + alpha * (predicted_eta - eta)
 
     return float(eta)
+
+
+def compute_merkle_snap_id(prev_snap_id: str,
+                            eta: float,
+                            decision: str = "") -> str:
+    """Compute a MerkleChain snap_id for κ-Snap audit trail.
+
+    v0.3.0: Provides a helper function for computing MerkleChain
+    snap IDs from η values and decision strings. This enables
+    agents to create Merkle-linked audit entries for each step.
+
+    Hash rule: snap_id = prev_snap_id + sha256(prev_snap_id + str(η) + str(decision))[:16]
+
+    Args:
+        prev_snap_id: Previous snap_id from the MerkleChain.
+                      Use "genesis" for the first entry in a new chain.
+        eta: Current κ-Snap residual η value.
+        decision: Decision string for this step (e.g., 'EXPLOIT', 'SAFE').
+
+    Returns:
+        Computed snap_id string linking to prev_snap_id via SHA-256 hash.
+    """
+    hash_input: str = prev_snap_id + str(eta) + str(decision)
+    hash_hex: str = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+    snap_id: str = prev_snap_id + hash_hex[:16]
+    return snap_id

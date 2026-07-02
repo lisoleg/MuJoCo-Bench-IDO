@@ -1,0 +1,70 @@
+sequenceDiagram
+    participant Agent as HybridSB3IDOAgent
+    participant EML as EML Extraction
+    participant KSnap as κ-Snap (gauss_ex_residual)
+    participant Merkle as MerkleChain
+    participant Logger as KappaSnapLogger
+    participant PsiA as PsiAnchor
+    participant Noether as NoetherCheckMJ (4-gate)
+    participant PG as PGGate
+    participant Fuse as SafeFuse
+    participant CQ as ConscienceQuotient
+    participant SB3 as SB3 Adapter
+    participant PD as TaskPDController
+
+    Agent->>EML: _extract_eml_obs(physics, timestep)
+    EML-->>Agent: z_i dict (ee_pos, qpos, E_total, ee_vel)
+
+    Agent->>SB3: choose_action(timestep)
+    SB3-->>Agent: base_action (np.ndarray)
+
+    Agent->>KSnap: gauss_ex_residual(z_i, goal, flow_predictor, step_index, epiplexity)
+    KSnap-->>Agent: η (float residual)
+
+    Agent->>PsiA: update_eta_history(η)
+    Agent->>PsiA: adjust_delta_K(kappa_thresh)
+    PsiA-->>Agent: adjusted δ_K
+
+    Agent->>PsiA: decide_evolution_policy()
+    PsiA-->>Agent: evo_policy ('light'/'freeze')
+
+    Note over Agent: Mode selection (EXPLOIT/EXPLORE/SAFE)
+
+    Agent->>Noether: noether_check_mj(prev_data, cur_data, goal)
+    Note over Noether: 4 gates: Energy + Torque + Collision + FrictionCone
+    Noether-->>Agent: {ok, total, energy, torque, collision, friction_cone, message}
+
+    alt Noether violation detected
+        Agent->>Logger: log(REJECT_FRICTION_CONE / REJECT_ENERGY_VIOLATION, L1, η, ...)
+        Agent->>Fuse: check(η, δ_K, noether_result, psi_state)
+        Fuse-->>Agent: (fuse_level, fuse_action)
+    end
+
+    Agent->>PsiA: check_sentient_finger_limit(action, physics)
+    alt τ > τ_sentient_max (0.05 N·m)
+        PsiA-->>Agent: {ok=False, clamped_action}
+        Agent->>Logger: log(FINGER_TORQUE_CLAMPED, L2, η, ...)
+        Agent->>Agent: action = clamped_action
+    end
+
+    Agent->>PG: gate(action, physics, logger)
+    Note over PG: 1. AST analysis (is action targeting sentient?)<br/>2. Physical clamp ||action|| ≤ τ_safe
+    alt PG-Gate REJECT
+        PG->>Logger: log(REJECT_PG_GATE, L3, η, ...)
+        PG-->>Agent: clamped_action (safe thresholds)
+    else PG-Gate PASS
+        PG->>Logger: log(ACTION_ACCEPT, L0, η, ...)
+        PG-->>Agent: action (unchanged)
+    end
+
+    Agent->>Fuse: apply_fuse(action, fuse_level, safe_action)
+    Fuse-->>Agent: fused_action
+
+    Agent->>Merkle: append(η, decision, event_type, level)
+    Merkle-->>Agent: snap_id (prev_snap_id + sha256[:16])
+
+    Agent->>CQ: record_step(noether_ok, pgate_ok, sentient_ok)
+    CQ-->>Agent: compliance flags
+
+    Agent->>Agent: phys.data.ctrl[:] = fused_action
+    Agent-->>Agent: return fused_action

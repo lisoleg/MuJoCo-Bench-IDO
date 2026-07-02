@@ -840,6 +840,76 @@ async def get_results() -> JSONResponse:
     })
 
 
+# ── v0.6.0: CQ / Merkle API Endpoints ──
+
+@app.get("/api/cq")
+async def get_cq_metrics() -> JSONResponse:
+    """Return current ConscienceQuotient (CQ) metrics.
+
+    v0.6.0: Machine Conscience Audit Framework — CQ aggregates
+    noether/pg_gate/sentient compliance ratios.
+
+    Returns:
+        JSONResponse with CQ metrics (cq, cq_noether, cq_pgate, cq_sentient).
+    """
+    # Get CQ from last run results if available
+    cq_data: Dict[str, Any] = {}
+    if run_state.current_metrics:
+        cq_data = {
+            "cq": run_state.current_metrics.get("cq_avg", 0.0),
+            "cq_noether": run_state.current_metrics.get("cq_noether_avg", 0.0),
+            "cq_pgate": run_state.current_metrics.get("cq_pgate_avg", 0.0),
+            "cq_sentient": run_state.current_metrics.get("cq_sentient_avg", 0.0),
+        }
+    elif len(run_state.results_history) > 0:
+        last_result: Dict[str, Any] = run_state.results_history[-1]
+        cq_data = {
+            "cq": last_result.get("cq_avg", 0.0),
+            "cq_noether": last_result.get("cq_noether_avg", 0.0),
+            "cq_pgate": last_result.get("cq_pgate_avg", 0.0),
+            "cq_sentient": last_result.get("cq_sentient_avg", 0.0),
+        }
+    else:
+        cq_data = {
+            "cq": 0.0,
+            "cq_noether": 0.0,
+            "cq_pgate": 0.0,
+            "cq_sentient": 0.0,
+        }
+
+    return JSONResponse(content=cq_data)
+
+
+@app.get("/api/merkle")
+async def get_merkle_chain() -> JSONResponse:
+    """Return current κ-Snap MerkleChain for audit trail visualization.
+
+    v0.6.0: Machine Conscience Audit Framework — MerkleChain provides
+    tamper-proof audit trail of every decision step.
+
+    Returns:
+        JSONResponse with chain entries and verification status.
+    """
+    merkle_data: Dict[str, Any] = {
+        "chain": [],
+        "verified": False,
+        "chain_length": 0,
+    }
+
+    # Get Merkle chain from last run results
+    if run_state.current_metrics:
+        merkle_data["chain"] = run_state.current_metrics.get("merkle_chain", [])
+        merkle_data["verified"] = run_state.current_metrics.get("merkle_chain_verified", False)
+        merkle_data["chain_length"] = len(merkle_data["chain"])
+    elif len(run_state.results_history) > 0:
+        last_result: Dict[str, Any] = run_state.results_history[-1]
+        merkle_data["chain"] = last_result.get("merkle_chain", [])
+        merkle_data["verified"] = last_result.get("merkle_chain_verified", False)
+        merkle_data["chain_length"] = len(merkle_data["chain"])
+
+    return JSONResponse(content=merkle_data)
+
+
 @app.post("/api/mjviser/scene")
 async def set_mjviser_scene(req: SceneRequest) -> JSONResponse:
     """Set the 3D scene type for mjviser viewer.
@@ -1450,26 +1520,50 @@ async def websocket_stream(websocket: WebSocket) -> None:
 
     Connected clients receive per-step metric updates during benchmark
     runs, including η, Noether violations, κ-Snap status, ψ-Anchor
-    state, and motor IC-Values.
+    state, motor IC-Values, CQ metrics, and κ-Snap MerkleChain events.
+
+    v0.6.0: Also pushes κ-Snap audit events (CQ + Merkle) per step.
     """
     await websocket.accept()
     run_state.ws_clients.append(websocket)
 
     try:
-        # Send initial status
+        # Send initial status (v0.6.0: includes CQ + Merkle API info)
         await websocket.send_json({
             "type": "connected",
             "version": WEBVIZ_VERSION,
             "mjviser_available": MJVISER_AVAILABLE,
+            "cq_api": "/api/cq",
+            "merkle_api": "/api/merkle",
         })
 
         # Keep connection alive — client can send control messages
         while True:
             data = await websocket.receive_text()
-            # Handle client messages (future: pause/resume commands)
             msg = json.loads(data) if data else {}
             if msg.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
+            elif msg.get("type") == "get_cq":
+                # v0.6.0: Client requests CQ metrics
+                cq_response: Dict[str, Any] = {}
+                if run_state.current_metrics:
+                    cq_response = {
+                        "cq": run_state.current_metrics.get("cq_avg", 0.0),
+                        "cq_noether": run_state.current_metrics.get("cq_noether_avg", 0.0),
+                        "cq_pgate": run_state.current_metrics.get("cq_pgate_avg", 0.0),
+                        "cq_sentient": run_state.current_metrics.get("cq_sentient_avg", 0.0),
+                    }
+                await websocket.send_json({"type": "cq_update", "data": cq_response})
+            elif msg.get("type") == "get_merkle":
+                # v0.6.0: Client requests MerkleChain
+                merkle_response: Dict[str, Any] = {
+                    "chain": [],
+                    "verified": False,
+                }
+                if run_state.current_metrics:
+                    merkle_response["chain"] = run_state.current_metrics.get("merkle_chain", [])
+                    merkle_response["verified"] = run_state.current_metrics.get("merkle_chain_verified", False)
+                await websocket.send_json({"type": "merkle_update", "data": merkle_response})
     except WebSocketDisconnect:
         pass
     except Exception:

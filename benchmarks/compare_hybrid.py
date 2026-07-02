@@ -53,6 +53,8 @@ from benchmarks.run_mujoco_bench import (
 from core.goal_eml_mj import GoalEML, make_generic_eml
 from core.noether_check_mj import noether_check_mj
 from core.kappa_snap_mj import FlowMatchingEtaPredictor
+from core.kappa_snap_logger import KappaSnapLogger
+from core.cq import ConscienceQuotient
 from agent.psi_anchor import PsiAnchor
 from agent.hybrid_sb3_ido_agent import HybridSB3IDOAgent, AgentMode
 from baselines.sb3_adapter import (
@@ -321,6 +323,45 @@ def compute_agent_metrics(log: List[dict], agent_type: str = 'generic') -> dict:
         metrics['eta_trajectory_min'] = 0.0
         metrics['eta_trajectory_len'] = 0
 
+    # v0.6.0: CQ (Conscience Quotient) metrics
+    # Aggregate CQ from per-episode CQ reports
+    all_cq_values: List[float] = []
+    all_cq_noether: List[float] = []
+    all_cq_pgate: List[float] = []
+    all_cq_sentient: List[float] = []
+    for l in log:
+        cq_report: dict = l.get('cq_report', {})
+        if cq_report:
+            all_cq_values.append(cq_report.get('cq', 0.0))
+            all_cq_noether.append(cq_report.get('cq_noether', 0.0))
+            all_cq_pgate.append(cq_report.get('cq_pgate', 0.0))
+            all_cq_sentient.append(cq_report.get('cq_sentient', 0.0))
+    if len(all_cq_values) > 0:
+        metrics['cq_avg'] = float(np.mean(all_cq_values))
+        metrics['cq_std'] = float(np.std(all_cq_values))
+        metrics['cq_min'] = float(np.min(all_cq_values))
+        metrics['cq_noether_avg'] = float(np.mean(all_cq_noether))
+        metrics['cq_pgate_avg'] = float(np.mean(all_cq_pgate))
+        metrics['cq_sentient_avg'] = float(np.mean(all_cq_sentient))
+    else:
+        metrics['cq_avg'] = 0.0
+        metrics['cq_std'] = 0.0
+        metrics['cq_min'] = 0.0
+        metrics['cq_noether_avg'] = 0.0
+        metrics['cq_pgate_avg'] = 0.0
+        metrics['cq_sentient_avg'] = 0.0
+
+    # v0.6.0: κ-Snap Merkle chain output
+    # Include Merkle chain from last episode if available
+    last_merkle_chain: List[dict] = []
+    for l in log:
+        mc: List[dict] = l.get('merkle_chain', [])
+        if mc:
+            last_merkle_chain = mc
+    metrics['merkle_chain'] = last_merkle_chain
+    metrics['merkle_chain_verified'] = any(
+        l.get('merkle_chain_verified', False) for l in log)
+
     # Mode distribution (Hybrid agents only)
     if agent_type.startswith('Hybrid'):
         mode_counts: Dict[str, int] = {'EXPLOIT': 0, 'EXPLORE': 0, 'SAFE': 0}
@@ -500,6 +541,25 @@ def run_agent_episode(env, agent, max_steps: int = 1000,
 
     if is_hybrid:
         result['mode_counts'] = mode_counts
+
+    # v0.6.0: Collect CQ report and MerkleChain from agent
+    cq_report: dict = {}
+    merkle_chain: List[dict] = []
+    merkle_verified: bool = False
+
+    if hasattr(agent, 'get_cq_report'):
+        cq_report = agent.get_cq_report()
+    if hasattr(agent, 'get_merkle_chain'):
+        merkle_chain = agent.get_merkle_chain()
+    if hasattr(agent, 'verify_merkle_chain'):
+        try:
+            merkle_verified = agent.verify_merkle_chain()
+        except Exception:
+            merkle_verified = False
+
+    result['cq_report'] = cq_report
+    result['merkle_chain'] = merkle_chain
+    result['merkle_chain_verified'] = merkle_verified
 
     return result
 
@@ -704,6 +764,13 @@ def run_comparison(task: str = 'humanoid-stand',
         print(f"    avg_final_eta={metrics['avg_final_eta']:.6f}")
         if 'eta_trajectory_avg' in metrics:
             print(f"    eta_trajectory_avg={metrics['eta_trajectory_avg']:.6f}")
+        if 'cq_avg' in metrics and metrics['cq_avg'] > 0:
+            print(f"    CQ={metrics['cq_avg']:.4f} "
+                  f"(noether={metrics['cq_noether_avg']:.4f}, "
+                  f"pgate={metrics['cq_pgate_avg']:.4f}, "
+                  f"sentient={metrics['cq_sentient_avg']:.4f})")
+        if 'merkle_chain_verified' in metrics:
+            print(f"    merkle_chain_verified={metrics['merkle_chain_verified']}")
 
         # Print mode distribution for Hybrid agents
         if 'mode_distribution' in metrics:
@@ -752,7 +819,8 @@ def run_comparison(task: str = 'humanoid-stand',
             'agent', 'task', 'condition', 'avg_return', 'std_return',
             'avg_steps', 'std_steps', 'nvr', 'success_rate',
             'avg_final_eta', 'eta_trajectory_avg',
-            'total_noether_v',
+            'total_noether_v', 'cq_avg', 'cq_noether_avg',
+            'cq_pgate_avg', 'cq_sentient_avg', 'merkle_chain_verified',
         ]
         all_rows: List[dict] = []
         for agent_name, m in all_results.items():
@@ -769,6 +837,11 @@ def run_comparison(task: str = 'humanoid-stand',
                 'avg_final_eta': m.get('avg_final_eta', 0.0),
                 'eta_trajectory_avg': m.get('eta_trajectory_avg', 0.0),
                 'total_noether_v': m.get('total_noether_v', 0),
+                'cq_avg': m.get('cq_avg', 0.0),
+                'cq_noether_avg': m.get('cq_noether_avg', 0.0),
+                'cq_pgate_avg': m.get('cq_pgate_avg', 0.0),
+                'cq_sentient_avg': m.get('cq_sentient_avg', 0.0),
+                'merkle_chain_verified': m.get('merkle_chain_verified', False),
             }
             all_rows.append(row)
 

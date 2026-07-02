@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 
 from core.goal_eml_mj import GoalEML
 
-IDO_PSI_ANCHOR_VERSION: str = "v0.2.1"
+IDO_PSI_ANCHOR_VERSION: str = "v0.3.0"
 
 # Default configuration constants
 ETA_HISTORY_MAX_LEN: int = 100
@@ -34,6 +34,9 @@ ETA_TREND_WINDOW: int = 10
 PLATEAU_THRESHOLD: float = 0.001
 EPIPLEXITY_EVOLUTION_THRESH: float = 2.0
 PLATEAU_EVOLUTION_MIN_STEPS: int = 5
+
+# v0.3.0: Sentient finger safety threshold
+TAU_SENTIENT_MAX: float = 0.05  # N·m — biological safety torque upper limit
 
 
 @dataclass
@@ -438,3 +441,90 @@ class PsiAnchor:
         updated_macros[worst_idx] = (worst_fn, max(worst_score - 0.05, 0.1))
 
         return updated_macros
+
+    def check_sentient_finger_limit(self, action: np.ndarray,
+                                      physics: Optional[object] = None) -> dict:
+        """Check if action applies excessive torque to sentient finger actuators.
+
+        v0.3.0: Implements τ_sentient_max = 0.05 N·m biological safety torque
+        upper limit. If any actuator connected to a "sentient" body part
+        (finger, hand, thumb) receives torque exceeding TAU_SENTIENT_MAX,
+        the action is clamped and a FINGER_TORQUE_CLAMPED κ-Snap event
+        should be triggered.
+
+        This check ensures that the agent never applies harmful force to
+        biological tissue during manipulation tasks (e.g., "捏飘叶").
+
+        Args:
+            action: Control action array from agent decision loop.
+            physics: MuJoCo physics data (for actuator name extraction).
+                     If None, checks all actions against TAU_SENTIENT_MAX.
+
+        Returns:
+            Dict with keys:
+            - ok: bool — True if no sentient actuator exceeds τ_sentient_max.
+            - clamped_action: np.ndarray — action with sentient components clamped.
+            - violated_indices: List[int] — indices of actuators that were clamped.
+            - original_torques: Dict[int, float] — original torque values at violated indices.
+            - clamped_torques: Dict[int, float] — clamped torque values at violated indices.
+        """
+        clamped_action: np.ndarray = action.copy()
+        violated_indices: List[int] = []
+        original_torques: Dict[int, float] = {}
+        clamped_torques: Dict[int, float] = {}
+
+        # Identify sentient actuator indices
+        sentient_indices: List[int] = []
+
+        if physics is not None and hasattr(physics, 'model'):
+            model = physics.model
+            # Try to get actuator names
+            actuator_names: Optional[List[str]] = None
+            if hasattr(model, 'actuator_names'):
+                actuator_names = list(model.actuator_names)
+            elif hasattr(model, 'actuator_name'):
+                try:
+                    actuator_names = [
+                        model.actuator_name(i).decode('utf-8')
+                        if isinstance(model.actuator_name(i), bytes)
+                        else str(model.actuator_name(i))
+                        for i in range(model.nu)
+                    ]
+                except (AttributeError, TypeError):
+                    actuator_names = None
+
+            if actuator_names is not None:
+                sentient_keywords: List[str] = [
+                    "finger", "hand", "thumb", "grip", "palm", "fingertip",
+                ]
+                for idx, name in enumerate(actuator_names):
+                    name_lower: str = name.lower()
+                    for keyword in sentient_keywords:
+                        if keyword in name_lower:
+                            sentient_indices.append(idx)
+                            break
+
+        if len(sentient_indices) == 0:
+            # No identifiable sentient actuators — check ALL actuators for safety
+            sentient_indices = list(range(len(action)))
+
+        # Check each sentient actuator for torque violation
+        for idx in sentient_indices:
+            if idx < len(clamped_action):
+                torque: float = abs(float(action[idx]))
+                if torque > TAU_SENTIENT_MAX:
+                    violated_indices.append(idx)
+                    original_torques[idx] = float(action[idx])
+                    clamped_action[idx] = np.clip(
+                        action[idx], -TAU_SENTIENT_MAX, TAU_SENTIENT_MAX)
+                    clamped_torques[idx] = float(clamped_action[idx])
+
+        ok: bool = len(violated_indices) == 0
+
+        return {
+            "ok": ok,
+            "clamped_action": clamped_action,
+            "violated_indices": violated_indices,
+            "original_torques": original_torques,
+            "clamped_torques": clamped_torques,
+        }

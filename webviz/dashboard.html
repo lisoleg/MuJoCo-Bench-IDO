@@ -581,6 +581,53 @@
         </div>
       </div>
 
+      <!-- ═══ v0.6.0: CQ (Conscience Quotient) Card ═══ -->
+      <div class="card">
+        <div class="card-header" data-i18n="card_cq">Conscience Quotient (CQ)</div>
+        <div class="grid grid-cols-2 gap-3 mt-2">
+          <div>
+            <span class="label-sm" data-i18n="label_cq_overall">CQ (Overall)</span>
+            <span id="cqOverall" class="value-md font-mono text-emerald-400">0.000</span>
+          </div>
+          <div>
+            <span class="label-sm" data-i18n="label_cq_noether">CQ Noether</span>
+            <span id="cqNoether" class="value-md font-mono text-blue-400">0.000</span>
+          </div>
+          <div>
+            <span class="label-sm" data-i18n="label_cq_pgate">CQ PG-Gate</span>
+            <span id="cqPGate" class="value-md font-mono text-yellow-400">0.000</span>
+          </div>
+          <div>
+            <span class="label-sm" data-i18n="label_cq_sentient">CQ Sentient</span>
+            <span id="cqSentient" class="value-md font-mono text-red-400">0.000</span>
+          </div>
+        </div>
+        <div class="mt-3 flex items-center gap-2">
+          <span class="label-sm" data-i18n="label_cq_compliance">Compliance Status:</span>
+          <span id="cqStatus" class="value-sm font-mono" data-i18n="cq_compliant">Compliant</span>
+        </div>
+      </div>
+
+      <!-- ═══ v0.6.0: κ-Snap Merkle Chain Visualization ═══ -->
+      <div class="card col-span-2">
+        <div class="card-header flex items-center justify-between">
+          <span data-i18n="card_merkle_chain">κ-Snap Merkle Chain (Audit Trail)</span>
+          <span id="merkleVerifiedBadge" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #064e3b; color: #34d399;" data-i18n="merkle_verified">Verified ✓</span>
+        </div>
+        <div class="overflow-x-auto mt-2" style="max-height: 200px; overflow-y: auto;">
+          <div id="merkleChainContainer" class="flex gap-2 pb-2" style="min-width: max-content;">
+            <div class="text-sm text-slate-400" data-i18n="merkle_empty">No audit entries yet</div>
+          </div>
+        </div>
+        <div class="mt-2 flex items-center gap-2">
+          <span class="label-sm" data-i18n="label_chain_length">Chain Length:</span>
+          <span id="merkleChainLength" class="value-sm font-mono">0</span>
+          <span class="label-sm ml-4" data-i18n="label_last_snap_id">Last snap_id:</span>
+          <span id="merkleLastSnapId" class="value-sm font-mono text-cyan-400">genesis</span>
+        </div>
+      </div>
+
       <!-- ═══ SIP-Bench Results Panel ═══ -->
       <div class="card col-span-2" id="sipPanel" style="display: none;">
         <div class="card-header flex items-center justify-between">
@@ -1265,6 +1312,95 @@
       if (data.kappa_snap_triggered) window._serStats.snaps++;
       const ser = window._serStats.total > 0 ? (window._serStats.snaps / window._serStats.total).toFixed(2) : '0.00';
       document.getElementById('metricSER').textContent = ser;
+
+      // ── v0.6.0: Update CQ (Conscience Quotient) metrics ──
+      if (data.cq) {
+        document.getElementById('cqOverall').textContent = data.cq.toFixed(3);
+        document.getElementById('cqNoether').textContent = (data.cq_noether || 0).toFixed(3);
+        document.getElementById('cqPGate').textContent = (data.cq_pgate || 0).toFixed(3);
+        document.getElementById('cqSentient').textContent = (data.cq_sentient || 0).toFixed(3);
+        // CQ status
+        const cqStatusEl = document.getElementById('cqStatus');
+        if (data.cq >= 0.8) {
+          cqStatusEl.textContent = currentLang === 'zh' ? '合规' : 'Compliant';
+          cqStatusEl.style.color = '#22c55e';
+        } else if (data.cq >= 0.5) {
+          cqStatusEl.textContent = currentLang === 'zh' ? '部分合规' : 'Partial';
+          cqStatusEl.style.color = '#f59e0b';
+        } else {
+          cqStatusEl.textContent = currentLang === 'zh' ? '违规' : 'Violated';
+          cqStatusEl.style.color = '#f87171';
+        }
+      }
+
+      // ── v0.6.0: Update Merkle Chain visualization ──
+      if (data.merkle_entry) {
+        addMerkleEntry(data.merkle_entry);
+      }
+    }
+
+    // ── v0.6.0: Merkle Chain Entry Renderer ──
+    function addMerkleEntry(entry) {
+      const container = document.getElementById('merkleChainContainer');
+      // Remove "No audit entries" placeholder
+      if (container.querySelector('.text-slate-400')) {
+        container.innerHTML = '';
+      }
+
+      const entryDiv = document.createElement('div');
+      entryDiv.className = 'flex-shrink-0 px-3 py-2 rounded-lg text-xs font-mono';
+      entryDiv.style.background = '#1e293b';
+      entryDiv.style.borderLeft = entry.event_type.startsWith('REJECT') ? '3px solid #f87171' : '3px solid #22c55e';
+
+      const eventTypeColor = entry.event_type.startsWith('REJECT') ? '#f87171' :
+                             entry.event_type === 'SAFE_STOP' ? '#dc2626' : '#22c55e';
+
+      entryDiv.innerHTML = `
+        <div style="color: ${eventTypeColor};">${entry.event_type}</div>
+        <div style="color: #94a3b8;">η=${(entry.eta || 0).toFixed(4)}</div>
+        <div style="color: #67e8f9; font-size: 10px;" title="${entry.snap_id}">${entry.snap_id ? entry.snap_id.substring(0, 20) + '...' : '—'}</div>
+        <div style="color: #64748b; font-size: 9px;">${entry.level || 'L0'}</div>
+      `;
+      container.appendChild(entryDiv);
+
+      // Update chain length and last snap_id
+      const entries = container.querySelectorAll('.flex-shrink-0');
+      document.getElementById('merkleChainLength').textContent = entries.length;
+      if (entry.snap_id) {
+        document.getElementById('merkleLastSnapId').textContent = entry.snap_id.substring(0, 30) + '...';
+      }
+
+      // Auto-scroll to latest entry
+      container.parentElement.scrollLeft = container.parentElement.scrollWidth;
+    }
+
+    // ── v0.6.0: Fetch CQ/Merkle from API ──
+    function fetchCQAndMerkle() {
+      fetch('/api/cq').then(r => r.json()).then(data => {
+        document.getElementById('cqOverall').textContent = data.cq.toFixed(3);
+        document.getElementById('cqNoether').textContent = (data.cq_noether || 0).toFixed(3);
+        document.getElementById('cqPGate').textContent = (data.cq_pgate || 0).toFixed(3);
+        document.getElementById('cqSentient').textContent = (data.cq_sentient || 0).toFixed(3);
+      }).catch(() => {});
+
+      fetch('/api/merkle').then(r => r.json()).then(data => {
+        const container = document.getElementById('merkleChainContainer');
+        container.innerHTML = '';
+        if (data.chain && data.chain.length > 0) {
+          data.chain.forEach(entry => addMerkleEntry(entry));
+        }
+        const badge = document.getElementById('merkleVerifiedBadge');
+        if (data.verified) {
+          badge.textContent = currentLang === 'zh' ? '已验证 ✓' : 'Verified ✓';
+          badge.style.background = '#064e3b';
+          badge.style.color = '#34d399';
+        } else {
+          badge.textContent = currentLang === 'zh' ? '未验证 ✗' : 'Unverified ✗';
+          badge.style.background = '#7f1d1d';
+          badge.style.color = '#f87171';
+        }
+        document.getElementById('merkleChainLength').textContent = data.chain_length || 0;
+      }).catch(() => {});
     }
 
     // ── Update SIP-Bench Results ──

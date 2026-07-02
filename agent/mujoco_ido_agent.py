@@ -34,6 +34,8 @@ import traceback
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj, NoetherViolation
 from core.goal_eml_mj import GoalEML
+from core.pg_gate import PGGate
+from core.kappa_snap_logger import KappaSnapLogger
 from agent.psi_anchor import PsiAnchor
 from agent.task_pd_controllers import (
     TaskPDController, GenericPDController, get_controller_for_task,
@@ -279,6 +281,10 @@ class IDOMuJoCoAgent:
         # was None in standard runs, causing decay_epi_ratio = 0 → η never decayed.
         self.psi_anchor: PsiAnchor = psi_anchor if psi_anchor is not None else PsiAnchor(goal_eml)
         self.flow_predictor: FlowMatchingEtaPredictor = flow_predictor if flow_predictor is not None else FlowMatchingEtaPredictor()
+
+        # v0.6.0: PG-Gate + KappaSnapLogger for Machine Conscience Audit
+        self._pg_gate: PGGate = PGGate()
+        self._logger: KappaSnapLogger = KappaSnapLogger()
 
     # ── v0.5.2: Main body name map for locomotion ee_pos extraction ──
     # For walker/cheetah/hopper tasks without 'to_target' observation,
@@ -612,6 +618,28 @@ class IDOMuJoCoAgent:
                 self._probe_perturbation *= 0.3
 
         phys.data.ctrl[:] = ctrl
+
+        # ── v0.6.0: PG-Gate hard anchor clamp ──
+        # PG-Gate runs after action modulation, before ctrl assignment
+        pgate_result: np.ndarray = self._pg_gate.gate(ctrl, phys, self._logger)
+        phys.data.ctrl[:] = pgate_result
+
+        # ── v0.6.0: ψ-Anchor sentient finger limit check ──
+        sentient_result: dict = self.psi_anchor.check_sentient_finger_limit(pgate_result, phys)
+        if not sentient_result["ok"]:
+            phys.data.ctrl[:] = sentient_result["clamped_action"]
+            self._logger.log(
+                "FINGER_TORQUE_CLAMPED", "L2", eta, "sentient_clamp",
+                details={
+                    "joint_name": str(sentient_result.get("violated_indices", [])),
+                    "original_torque": str(sentient_result.get("original_torques", {})),
+                    "clamped_torque": str(sentient_result.get("clamped_torques", {})),
+                },
+            )
+
+        # ── v0.6.0: MerkleChain audit recording ──
+        final_action = phys.data.ctrl[:].copy()
+        self._logger.log("ACTION_ACCEPT", "L0", eta, primary_mode if hasattr(self, '_last_primary_mode') else "IDO")
 
         # ── Critique: Stall Detection ──
         if self.enable_critique and self._last_eta is not None:

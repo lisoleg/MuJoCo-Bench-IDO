@@ -12,8 +12,15 @@ operation:
 
 η-aware decision loop:
   inflow → SB3 base_action → κ-Snap η → ψ-Anchor monitoring →
-  FlowMatching η prediction → mode selection → action modulation →
-  Noether post-check
+  FlowMatching η prediction → mode selection → Noether 4-gate →
+  SafeFuse L1-L4 → ψ-sentient → PG-Gate → Merkle → CQ → ctrl赋值
+
+v0.6.0 Upgrade (Machine Conscience Audit Framework):
+  - PG-Gate hard anchor clamp (AST + physical dual mechanism)
+  - SafeFuse L1-L4 safety degradation
+  - KappaSnapLogger audit event logging
+  - ConscienceQuotient (CQ) compliance metric
+  - MerkleChain integration for tamper-proof audit trail
 
 Design rationale ("IDO brain + SB3 body"):
   SB3 provides high-performance motor primitives; IDO provides
@@ -35,7 +42,11 @@ from typing import Dict, List, Optional, Tuple
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.goal_eml_mj import GoalEML
+from core.pg_gate import PGGate
+from core.kappa_snap_logger import KappaSnapLogger
+from core.cq import ConscienceQuotient
 from agent.psi_anchor import PsiAnchor
+from agent.safe_fuse import SafeFuse
 from agent.task_pd_controllers import (
     TaskPDController, get_controller_for_task,
 )
@@ -129,6 +140,12 @@ class HybridSB3IDOAgent:
         self._eta_history: List[float] = []
         self._mode: AgentMode = AgentMode.EXPLOIT
         self._stall_count: int = 0
+
+        # ── v0.6.0: Machine Conscience Audit Framework ──
+        self._pg_gate: PGGate = PGGate()
+        self._logger: KappaSnapLogger = KappaSnapLogger()
+        self._cq: ConscienceQuotient = ConscienceQuotient()
+        self._safe_fuse: SafeFuse = SafeFuse()
 
         # ── Creative-Probe state ──
         self._probe_type: str = 'none'  # 'noise', 'phase_offset', 'gain_multiplier', or 'none'
@@ -602,18 +619,21 @@ class HybridSB3IDOAgent:
     def choose_action(self, timestep, physics=None) -> np.ndarray:
         """Select control action via hybrid IDO+SB3 decision loop.
 
-        η-aware decision loop:
-          1. Extract EML observation from physics/timestep
-          2. Get SB3 base action from adapter (motor layer)
-          3. Compute η via κ-Snap (cognitive layer)
-          4. Update ψ-Anchor with η (meta-management)
-          5. Push η to FlowMatching predictor (forward-looking)
-          6. Detect η stagnation → decide primary mode
-          7. Predictive Noether check → may override to SAFE
-          8. ψ-Anchor inject conservation anchor
-          9. Modulate action based on mode
-         10. Evaluate Creative-Probe effectiveness (κ-Snap gate)
-         11. Post-check: update state variables
+        v0.6.0 η-aware decision loop:
+          1. Extract EML observation → compute η via κ-Snap
+          2. Get SB3 base action (motor layer)
+          3. Update ψ-Anchor with η (meta-management)
+          4. Detect η stagnation → decide primary mode
+          5. Noether 4-gate check → may override to SAFE
+          6. ψ-Anchor inject conservation anchor
+          7. SafeFuse check (L1-L4 degradation)
+          8. ψ-Anchor sentient finger limit check
+          9. PG-Gate hard anchor clamp
+         10. MerkleChain audit recording
+         11. CQ compliance recording
+         12. Post-check: update state variables
+
+        Priority: PG-Gate > SafeFuse > Creative-Probe
 
         Interface compatibility: choose_action(timestep, physics) → np.ndarray
           matches IDOMuJoCoAgent.choose_action() signature.
@@ -638,10 +658,8 @@ class HybridSB3IDOAgent:
         eta: float = self._compute_eta(phys, timestep)
 
         # ── Step 3: Get SB3 base action (motor layer) ──
-        # SB3 adapter accepts dm_control timestep directly
         base_action: np.ndarray = self.sb3_adapter.choose_action(timestep)
         if base_action is None:
-            # Fallback: random action if SB3 adapter fails
             base_action = np.random.uniform(-1, 1, size=phys.model.nu)
 
         # ── Step 4: Update ψ-Anchor with η ──
@@ -659,38 +677,27 @@ class HybridSB3IDOAgent:
 
         # ── Step 6: Detect η stagnation → decide primary mode ──
         self._eta_history.append(eta)
-        # Keep rolling window bounded
         max_window: int = max(self.max_stall * 2, 200)
         if len(self._eta_history) > max_window:
             self._eta_history = self._eta_history[-max_window:]
 
         stagnation_detected: bool = self._detect_eta_stagnation(self._eta_history)
 
-        # Mode selection logic:
-        # - η < kappa_thresh → EXPLOIT (near goal, SB3 deterministic is best)
-        # - stagnation detected → EXPLORE (need Creative-Probe)
-        # - η improving (descending trend) → EXPLOIT
-        # - η plateau/ascending → EXPLORE
         if eta < self.kappa_thresh:
-            # Near goal → EXPLOIT (SB3 deterministic is sufficient)
             primary_mode: str = "EXPLOIT"
             self._stall_count = 0
         elif stagnation_detected:
-            # η stagnation → EXPLORE (Creative-Probe perturbation needed)
             primary_mode = "EXPLORE"
         else:
-            # Check η trend via ψ-Anchor
             if self.psi_anchor is not None:
                 trend: str = self.psi_anchor.analyze_eta_trend()
                 if trend in ('descending', 'unknown'):
                     primary_mode = "EXPLOIT"
                 else:
-                    # plateau or ascending → EXPLORE
                     primary_mode = "EXPLORE"
             else:
                 primary_mode = "EXPLOIT"
 
-            # Stall detection for mode fallback
             if self._last_eta is not None and abs(eta - self._last_eta) < 1e-6:
                 self._stall_count += 1
             else:
@@ -699,39 +706,101 @@ class HybridSB3IDOAgent:
             if self._stall_count >= self.max_stall:
                 primary_mode = "EXPLORE"
 
-        # ── Step 7: Predictive Noether check → may override to SAFE ──
+        # ── Step 7: Noether 4-gate check → may override to SAFE ──
         n_ok: bool = True
         n_msg: str = ""
+        noether_result: dict = {"ok": True, "total": 0}
         noether_mode_override: str = ""
         if self.prev_data is not None:
             n_ok, n_msg, noether_mode_override = self._noether_predictive_check(
                 self.prev_data, phys.data)
+            # Also get full Noether result dict for SafeFuse
+            noether_result = noether_check_mj(
+                self.prev_data, phys.data, self.goal,
+                collide_thresh=self.goal.collide_thresh,
+            )
 
         if not n_ok:
-            # Noether violation overrides primary mode → SAFE
             primary_mode = noether_mode_override
 
         # ── Step 8: ψ-Anchor inject conservation anchor ──
         if self.psi_anchor is not None:
             self.psi_anchor.inject_conservation_anchor(n_ok, n_msg)
 
-        # ── Step 9: Store current mode ──
-        self._mode = AgentMode(primary_mode.split('_')[0])  # EXPLOIT/EXPLORE/SAFE
+        # ── Step 9: SafeFuse check (L1-L4 degradation) ──
+        psi_state = self.psi_anchor.get_state() if self.psi_anchor is not None else None
+        fuse_level, _ = self._safe_fuse.check(
+            eta=eta,
+            delta_K=self.kappa_thresh,
+            noether_result=noether_result,
+            psi_anchor_state=psi_state,
+        )
 
-        # ── Step 10: Modulate action based on mode ──
-        # For SAFE_PD mode, we need timestep and physics to compute safe action
+        # ── Step 10: Mode selection + action modulation ──
+        self._mode = AgentMode(primary_mode.split('_')[0])
+
         if primary_mode == "SAFE_PD":
-            # Severe violation → PD safe_action fallback
             safe_action: np.ndarray = self.task_controller.compute_safe_action(timestep, phys)
             action: np.ndarray = np.clip(safe_action, -1.0, 1.0)
         else:
             action = self._modulate_action(base_action, primary_mode)
 
-        # ── Step 11: Evaluate Creative-Probe effectiveness (κ-Snap gate) ──
+        # Apply SafeFuse degradation
+        if fuse_level != "normal":
+            # Get safe_action for L3 Hard if needed
+            safe_action_for_fuse: Optional[np.ndarray] = None
+            if fuse_level == "L3_hard":
+                safe_action_for_fuse = self.task_controller.compute_safe_action(timestep, phys)
+            action = self._safe_fuse.apply_fuse(action, fuse_level, safe_action_for_fuse)
+
+            # Log fuse event
+            self._logger.log(
+                "SAFE_STOP" if fuse_level == "L4_fatal" else "CREATIVE_PROBE",
+                "L0" if fuse_level == "L4_fatal" else "L4",
+                eta, f"fuse_{fuse_level}",
+                details={"fuse_level": fuse_level, "trigger_reason": noether_result.get("message", "")},
+            )
+
+        # ── Step 11: ψ-Anchor sentient finger limit check ──
+        sentient_result: dict = self.psi_anchor.check_sentient_finger_limit(action, phys) if self.psi_anchor is not None else {"ok": True, "clamped_action": action}
+        if not sentient_result["ok"]:
+            action = sentient_result["clamped_action"]
+            # Log FINGER_TORQUE_CLAMPED event
+            self._logger.log(
+                "FINGER_TORQUE_CLAMPED", "L2", eta, "sentient_clamp",
+                details={
+                    "joint_name": str(sentient_result.get("violated_indices", [])),
+                    "original_torque": str(sentient_result.get("original_torques", {})),
+                    "clamped_torque": str(sentient_result.get("clamped_torques", {})),
+                },
+            )
+
+        # ── Step 12: PG-Gate hard anchor clamp ──
+        pgate_action: np.ndarray = self._pg_gate.gate(action, phys, self._logger)
+
+        # PG-Gate passed status for CQ recording
+        pgate_ok: bool = np.allclose(action, pgate_action, atol=1e-6)
+        action = pgate_action
+
+        # ── Step 13: MerkleChain audit recording ──
+        self._logger.log(
+            "ACTION_ACCEPT" if pgate_ok and n_ok and sentient_result["ok"] else "REJECT_PG_GATE",
+            "L0" if pgate_ok and n_ok and sentient_result["ok"] else "L3",
+            eta, primary_mode,
+        )
+
+        # ── Step 14: CQ compliance recording ──
+        self._cq.record_step(
+            noether_ok=n_ok,
+            pgate_ok=pgate_ok,
+            sentient_ok=sentient_result["ok"],
+        )
+
+        # ── Step 15: Evaluate Creative-Probe effectiveness ──
         if self._probe_type != 'none' and self._last_eta is not None:
             self._evaluate_probe(eta)
 
-        # ── Step 12: Post-check: update state variables ──
+        # ── Step 16: Post-check: update state variables ──
         self.prev_data = phys.data
         self._last_eta = eta
         phys.data.ctrl[:] = action
@@ -748,6 +817,7 @@ class HybridSB3IDOAgent:
         Clears all internal state variables: prev_data, step counter,
         η history, stall count, mode, Creative-Probe state, and
         cognitive layer buffers (ψ-Anchor, FlowMatching).
+        v0.6.0: Also resets SafeFuse, KappaSnapLogger, CQ.
         """
         self.prev_data = None
         self._step_counter = 0
@@ -758,6 +828,11 @@ class HybridSB3IDOAgent:
 
         # Reset Creative-Probe
         self._deactivate_probe()
+
+        # Reset v0.6.0: Machine Conscience Audit modules
+        self._safe_fuse.reset()
+        self._logger.reset()
+        self._cq.reset()
 
         # Reset cognitive layer
         if self.psi_anchor is not None:
@@ -770,3 +845,27 @@ class HybridSB3IDOAgent:
         # Reset SB3 adapter if it has reset
         if hasattr(self.sb3_adapter, 'reset'):
             self.sb3_adapter.reset()
+
+    def get_cq_report(self) -> Dict[str, object]:
+        """Get ConscienceQuotient report for current episode.
+
+        Returns:
+            Dict with CQ metrics (cq, cq_noether, cq_pgate, cq_sentient).
+        """
+        return self._cq.get_report()
+
+    def get_merkle_chain(self) -> List[Dict[str, object]]:
+        """Get the complete κ-Snap MerkleChain for current episode.
+
+        Returns:
+            List of all MerkleChain entries (tamper-proof audit trail).
+        """
+        return self._logger.get_merkle_chain()
+
+    def verify_merkle_chain(self) -> bool:
+        """Verify the integrity of the κ-Snap MerkleChain.
+
+        Returns:
+            True if the chain is intact (no tampering detected).
+        """
+        return self._logger.verify_chain()

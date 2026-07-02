@@ -32,3 +32,5 @@ mujoco_*.dll
 
 # Logs
 *.log
+.pip_deps/
+checkpoints/

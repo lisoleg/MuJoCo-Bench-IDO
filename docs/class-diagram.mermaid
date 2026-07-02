@@ -1,0 +1,139 @@
+classDiagram
+    direction TB
+
+    class PGGate {
+        +str VERSION : v1.0.0
+        +float TAU_SAFE : 0.05
+        +gate(action, physics, kappa_snap_logger) np.ndarray
+        +ast_analysis(action, physics) dict
+        +physical_clamp(action, tau_safe) np.ndarray
+        +check_sentient_finger(action, physics) dict
+    }
+
+    class MerkleChain {
+        +str VERSION : v0.3.0
+        -str _prev_snap_id : str
+        -list _chain : list
+        +append(eta, decision, event_type, level) str
+        +verify() bool
+        +get_chain() list
+        +get_last_snap_id() str
+        +reset() None
+        +_compute_hash(snap_id, eta, decision) str
+    }
+
+    class KappaSnapSchema {
+        +str VERSION : v0.1.0
+        +dict EVENT_TYPES : dict
+        +validate(event_dict) bool
+        +create_event(event_type, level, eta, decision, ...) dict
+        +get_schema() dict
+    }
+
+    class KappaSnapLogger {
+        +str VERSION : v0.1.0
+        +dict LEVELS : dict
+        -MerkleChain _merkle : MerkleChain
+        +log(event_type, level, eta, decision, physics, ...) dict
+        +get_merkle_chain() list
+        +verify_chain() bool
+        +reset() None
+        +_format_event(event_type, level, ...) dict
+    }
+
+    class NoetherCheckMJ {
+        +str VERSION : v1.2.0
+        +noether_check_mj(prev_data, cur_data, goal, ...) dict
+        +_friction_cone_check(cur_data, mu) dict
+        +_min_geom_distance(data) float
+    }
+
+    class PsiAnchor {
+        +str VERSION : v0.3.0
+        +float TAU_SENTIENT_MAX : 0.05
+        +update_eta_history(eta) None
+        +analyze_eta_trend() str
+        +adjust_delta_K(current) float
+        +decide_evolution_policy() str
+        +inject_conservation_anchor(ok, msg) dict
+        +check_sentient_finger_limit(action, physics) dict
+        +compute_epiplexity(goal) float
+        +get_state() PsiAnchorState
+    }
+
+    class ConscienceQuotient {
+        +str VERSION : v0.1.0
+        -int _total_steps : int
+        -int _noether_ok_steps : int
+        -int _pgate_ok_steps : int
+        -int _sentient_ok_steps : int
+        +record_step(noether_ok, pgate_ok, sentient_ok) None
+        +compute_cq() float
+        +compute_cq_noether() float
+        +compute_cq_pgate() float
+        +compute_cq_sentient() float
+        +get_report() dict
+        +reset() None
+    }
+
+    class BayesianIntent {
+        +str VERSION : v0.1.0
+        -dict _intent_posterior : dict
+        +update(observation, action, eta) dict
+        +get_intent_clarity() float
+        +get_most_likely_intent() str
+        +reset() None
+        +_bayesian_update(prior, likelihood) dict
+    }
+
+    class SafeFuse {
+        +str VERSION : v0.1.0
+        +dict FUSE_LEVELS : dict
+        +check(eta, delta_K, noether_result, psi_anchor_state) tuple
+        +apply_fuse(action, fuse_level, ...) np.ndarray
+        +_l1_soft(action, factor) np.ndarray
+        +_l2_medium(action) np.ndarray
+        +_l3_hard(action, safe_action) np.ndarray
+        +_l4_fatal() np.ndarray
+    }
+
+    class HybridSB3IDOAgent {
+        +str VERSION : v0.6.0
+        -PGGate _pg_gate : PGGate
+        -KappaSnapLogger _logger : KappaSnapLogger
+        -ConscienceQuotient _cq : ConscienceQuotient
+        -SafeFuse _safe_fuse : SafeFuse
+        +choose_action(timestep, physics) np.ndarray
+    }
+
+    class IDOMuJoCoAgent {
+        -PGGate _pg_gate : PGGate
+        -KappaSnapLogger _logger : KappaSnapLogger
+        +choose_action(timestep, physics) np.ndarray
+    }
+
+    class PinchLeafEnv {
+        +str VERSION : v0.1.0
+        -float WIND_BASE : 0.3
+        +__init__(random_seed) None
+        +reset() TimeStep
+        +step(action) TimeStep
+        +_apply_wind(physics) None
+        +_check_pinch(physics) bool
+        +get_observation(physics) dict
+    }
+
+    PGGate --> KappaSnapLogger : triggers REJECT_PG_GATE event
+    KappaSnapLogger --> MerkleChain : appends to chain
+    KappaSnapLogger --> KappaSnapSchema : validates event format
+    HybridSB3IDOAgent --> PGGate : calls gate() before ctrl assignment
+    HybridSB3IDOAgent --> SafeFuse : calls check() for fuse level
+    HybridSB3IDOAgent --> KappaSnapLogger : logs every decision step
+    HybridSB3IDOAgent --> ConscienceQuotient : records compliance per step
+    HybridSB3IDOAgent --> PsiAnchor : checks sentient finger limit
+    IDOMuJoCoAgent --> PGGate : calls gate() before ctrl assignment
+    IDOMuJoCoAgent --> KappaSnapLogger : logs every decision step
+    NoetherCheckMJ --> KappaSnapLogger : logs REJECT_FRICTION_CONE event
+    PsiAnchor --> KappaSnapLogger : logs FINGER_TORQUE_CLAMPED event
+    PinchLeafEnv --> PsiAnchor : provides observation for sentient check
+    BayesianIntent --> PsiAnchor : provides intent clarity signal
