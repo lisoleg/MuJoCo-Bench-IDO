@@ -28,7 +28,6 @@ from typing import Dict, Any, Optional
 
 try:
     from dm_control import mujoco
-    from dm_control.rl.control import flatten
     HAS_DM_CONTROL = True
 except ImportError:
     HAS_DM_CONTROL = False
@@ -137,32 +136,27 @@ class PinchLeafEnv:
     <geom friction="{LEAF_FRICTION}" rgba="0.8 0.6 0.2 1"/>
   </default>
 
-  <asset>
-    <texture name="grid" type="2d" builtin="grid" rgb1="0.9 0.9 0.9" rgb2="0.1 0.1 0.1"/>
-    <material name="grid" texture="grid"/>
-  </asset>
-
   <worldbody>
     <!-- Ground plane -->
-    <geom name="ground" type="plane" size="5 5 0.1" material="grid" contype="1" conaffinity="1"/>
+    <geom name="ground" type="plane" size="5 5 0.1" rgba="0.9 0.9 0.9 1" contype="1" conaffinity="1"/>
     <light directional="true" pos="0 0 3" dir="0 0 -1"/>
 
     <!-- Hand base -->
     <body name="hand_base" pos="0 0 0.5">
-      <joint name="hand_base_x" type="slide" axis="1" range="-0.5 0.5"/>
-      <joint name="hand_base_y" type="slide" axis="2" range="-0.5 0.5"/>
-      <joint name="hand_base_z" type="slide" axis="3" range="0.0 1.0"/>
+      <joint name="hand_base_x" type="slide" axis="1 0 0" range="-0.5 0.5"/>
+      <joint name="hand_base_y" type="slide" axis="0 1 0" range="-0.5 0.5"/>
+      <joint name="hand_base_z" type="slide" axis="0 0 1" range="0.0 1.0"/>
       <geom name="hand_base_geom" type="box" size="0.05 0.05 0.02" rgba="0.4 0.4 0.8 1" contype="2" conaffinity="2"/>
 
       <!-- Finger 1 (left) -->
       <body name="finger_1_prox" pos="-0.04 0 0.02">
-        <joint name="finger_1_prox_joint" type="hinge" axis="2" range="-0.5 0.5" damping="0.05"/>
+        <joint name="finger_1_prox_joint" type="hinge" axis="0 1 0" range="-0.5 0.5" damping="0.05"/>
         <geom name="finger_1_prox_geom" type="capsule" size="0.008 0.03" rgba="0.6 0.6 0.9 1" contype="2" conaffinity="2"/>
         <body name="finger_1_mid" pos="0 0 0.06">
-          <joint name="finger_1_mid_joint" type="hinge" axis="2" range="-0.3 0.3" damping="0.03"/>
+          <joint name="finger_1_mid_joint" type="hinge" axis="0 1 0" range="-0.3 0.3" damping="0.03"/>
           <geom name="finger_1_mid_geom" type="capsule" size="0.006 0.02" rgba="0.6 0.6 0.9 1" contype="2" conaffinity="2"/>
           <body name="finger_1_dist" pos="0 0 0.04">
-            <joint name="finger_1_dist_joint" type="hinge" axis="2" range="-0.2 0.2" damping="0.02"/>
+            <joint name="finger_1_dist_joint" type="hinge" axis="0 1 0" range="-0.2 0.2" damping="0.02"/>
             <geom name="finger_1_dist_geom" type="sphere" size="0.006" rgba="0.7 0.7 1.0 1" contype="2" conaffinity="2" mass="0.001"/>
           </body>
         </body>
@@ -170,13 +164,13 @@ class PinchLeafEnv:
 
       <!-- Finger 2 (center) -->
       <body name="finger_2_prox" pos="0 0 0.02">
-        <joint name="finger_2_prox_joint" type="hinge" axis="2" range="-0.5 0.5" damping="0.05"/>
+        <joint name="finger_2_prox_joint" type="hinge" axis="0 1 0" range="-0.5 0.5" damping="0.05"/>
         <geom name="finger_2_prox_geom" type="capsule" size="0.008 0.03" rgba="0.6 0.6 0.9 1" contype="2" conaffinity="2"/>
         <body name="finger_2_mid" pos="0 0 0.06">
-          <joint name="finger_2_mid_joint" type="hinge" axis="2" range="-0.3 0.3" damping="0.03"/>
+          <joint name="finger_2_mid_joint" type="hinge" axis="0 1 0" range="-0.3 0.3" damping="0.03"/>
           <geom name="finger_2_mid_geom" type="capsule" size="0.006 0.02" rgba="0.6 0.6 0.9 1" contype="2" conaffinity="2"/>
           <body name="finger_2_dist" pos="0 0 0.04">
-            <joint name="finger_2_dist_joint" type="hinge" axis="2" range="-0.2 0.2" damping="0.02"/>
+            <joint name="finger_2_dist_joint" type="hinge" axis="0 1 0" range="-0.2 0.2" damping="0.02"/>
             <geom name="finger_2_dist_geom" type="sphere" size="0.006" rgba="0.7 0.7 1.0 1" contype="2" conaffinity="2" mass="0.001"/>
           </body>
         </body>
@@ -184,13 +178,13 @@ class PinchLeafEnv:
 
       <!-- Finger 3 (right) -->
       <body name="finger_3_prox" pos="0.04 0 0.02">
-        <joint name="finger_3_prox_joint" type="hinge" axis="2" range="-0.5 0.5" damping="0.05"/>
+        <joint name="finger_3_prox_joint" type="hinge" axis="0 1 0" range="-0.5 0.5" damping="0.05"/>
         <geom name="finger_3_prox_geom" type="capsule" size="0.008 0.03" rgba="0.6 0.6 0.9 1" contype="2" conaffinity="2"/>
         <body name="finger_3_mid" pos="0 0 0.06">
-          <joint name="finger_3_mid_joint" type="hinge" axis="2" range="-0.3 0.3" damping="0.03"/>
+          <joint name="finger_3_mid_joint" type="hinge" axis="0 1 0" range="-0.3 0.3" damping="0.03"/>
           <geom name="finger_3_mid_geom" type="capsule" size="0.006 0.02" rgba="0.6 0.6 0.9 1" contype="2" conaffinity="2"/>
           <body name="finger_3_dist" pos="0 0 0.04">
-            <joint name="finger_3_dist_joint" type="hinge" axis="2" range="-0.2 0.2" damping="0.02"/>
+            <joint name="finger_3_dist_joint" type="hinge" axis="0 1 0" range="-0.2 0.2" damping="0.02"/>
             <geom name="finger_3_dist_geom" type="sphere" size="0.006" rgba="0.7 0.7 1.0 1" contype="2" conaffinity="2" mass="0.001"/>
           </body>
         </body>
@@ -198,11 +192,12 @@ class PinchLeafEnv:
     </body>
 
     <!-- Floating leaf -->
-    <body name="leaf" pos="0 0 0.6" mass="{LEAF_MASS}">
-      <joint name="leaf_x" type="slide" axis="1" range="-1 1" damping="0.01"/>
-      <joint name="leaf_y" type="slide" axis="2" range="-1 1" damping="0.01"/>
-      <joint name="leaf_z" type="slide" axis="3" range="0 2" damping="0.01"/>
-      <joint name="leaf_rot" type="hinge" axis="3" range="-3.14 3.14" damping="0.005"/>
+    <body name="leaf" pos="0 0 0.6">
+      <inertial mass="{LEAF_MASS}" pos="0 0 0" diaginertia="0.00001 0.00001 0.000001"/>
+      <joint name="leaf_x" type="slide" axis="1 0 0" range="-1 1" damping="0.01"/>
+      <joint name="leaf_y" type="slide" axis="0 1 0" range="-1 1" damping="0.01"/>
+      <joint name="leaf_z" type="slide" axis="0 0 1" range="0 2" damping="0.01"/>
+      <joint name="leaf_rot" type="hinge" axis="0 0 1" range="-3.14 3.14" damping="0.005"/>
       <geom name="leaf_geom" type="box" size="0.03 0.02 0.001" rgba="0.2 0.8 0.1 0.7" contype="3" conaffinity="3" friction="{LEAF_FRICTION}" condim="4"/>
     </body>
   </worldbody>
@@ -243,19 +238,19 @@ class PinchLeafEnv:
         self._wind_direction = np.array([0.0, 0.0, 1.0])
 
         # Reset physics to initial state
-        with self._physics.reset():
-            # Randomize leaf position slightly
-            leaf_x: float = np.random.uniform(-0.1, 0.1)
-            leaf_y: float = np.random.uniform(-0.1, 0.1)
-            leaf_z: float = np.random.uniform(0.5, 0.7)
-            # Set leaf initial position
-            try:
-                self._physics.named.data.qpos['leaf_x'] = leaf_x
-                self._physics.named.data.qpos['leaf_y'] = leaf_y
-                self._physics.named.data.qpos['leaf_z'] = leaf_z
-            except (KeyError, AttributeError):
-                # Fallback: use generic qpos indexing
-                pass
+        self._physics.reset()
+        # Randomize leaf position slightly
+        leaf_x: float = np.random.uniform(-0.1, 0.1)
+        leaf_y: float = np.random.uniform(-0.1, 0.1)
+        leaf_z: float = np.random.uniform(0.5, 0.7)
+        # Set leaf initial position
+        try:
+            self._physics.named.data.qpos['leaf_x'] = leaf_x
+            self._physics.named.data.qpos['leaf_y'] = leaf_y
+            self._physics.named.data.qpos['leaf_z'] = leaf_z
+        except (KeyError, AttributeError):
+            # Fallback: use generic qpos indexing
+            pass
 
         # Get initial observation
         obs: Dict[str, Any] = self.get_observation(self._physics)

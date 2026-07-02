@@ -113,8 +113,14 @@ def _friction_cone_check(cur_data, mu: float = FRICTION_CONE_MU) -> dict:
             force_vector = np.asarray(c.force)
         elif hasattr(cur_data, 'contact_force'):
             try:
-                force_vector = np.asarray(cur_data.contact_force[c_idx])
-            except (IndexError, AttributeError):
+                # contact_force may be a method or array in different MuJoCo versions
+                cf = cur_data.contact_force
+                if callable(cf):
+                    force_array = cf()
+                else:
+                    force_array = np.asarray(cf)
+                force_vector = force_array[c_idx]
+            except (IndexError, AttributeError, TypeError):
                 pass
 
         if force_vector is None or len(force_vector) < 3:
