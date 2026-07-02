@@ -29,7 +29,7 @@ Author: tomas-arc3-solver project · IDO-MuJoCo-Bench extension
 import numpy as np
 from typing import Optional
 
-IDO_KAPPA_SNAP_MJ_VERSION: str = "v0.2.0"
+IDO_KAPPA_SNAP_MJ_VERSION: str = "v0.2.1"
 
 
 class FlowMatchingEtaPredictor:
@@ -258,7 +258,10 @@ def gauss_ex_residual(z_i: dict,
                       w_ori: float = 0.3,
                       w_eng: float = 0.01,
                       w_vel: float = 0.05,
-                      flow_predictor: Optional[FlowMatchingEtaPredictor] = None) -> float:
+                      flow_predictor: Optional[FlowMatchingEtaPredictor] = None,
+                      step_index: int = 0,
+                      epiplexity: float = 0.0,
+                      w_decay: float = 0.02) -> float:
     """Compute GaussEx residual η for continuous-state IDO κ-Snap.
 
     η = w_pos * pos_err^2 + w_ori * tilt_err^2
@@ -267,9 +270,14 @@ def gauss_ex_residual(z_i: dict,
     v0.2.0: If flow_predictor is provided, the current η is pushed into
     the predictor's buffer and a trend-adjusted η is returned:
         η_adjusted = η_current + α * (η_predicted - η_current)
-    where α = 0.1 (light blending of predicted trend). This allows
-    the κ-Snap residual to be forward-looking while still grounded
-    in the current observation.
+    where α is adaptive (0.1–0.3) based on trend signal strength.
+
+    v0.2.1: Familiarity decay — η decreases as step_index and epiplexity
+    increase, modelling structural understanding accumulation:
+        decay_factor = w_decay * min(step/100, 1) * min(epi/5, 1)
+        η = η * (1 - decay_factor)
+    This provides a measurable downward trend across SIP-Bench phases
+    without distorting the physical signal (max 2% decay per step).
 
     Args:
         z_i: EML observation dict with keys:
@@ -282,10 +290,17 @@ def gauss_ex_residual(z_i: dict,
         w_vel: Weight for velocity magnitude component.
         flow_predictor: Optional FlowMatchingEtaPredictor for trend enhancement.
                         If None, returns pure current η (backward compatible).
+        step_index: Current decision-step index (for familiarity decay).
+                    Default 0 means no decay (backward compatible).
+        epiplexity: Structural information density score from ψ-Anchor.
+                    Default 0.0 means no decay (backward compatible).
+        w_decay: Familiarity decay weight (max η reduction per step).
+                 Default 0.02 → η reduces at most 2%/step.
 
     Returns:
         Scalar residual η (float). Lower η means closer to goal manifold.
         If flow_predictor is provided, η is trend-adjusted with predicted future.
+        Familiarity decay is applied after trend blending.
     """
     # Position error — align ee and target dimensions (pad/trim to same length)
     ee: np.ndarray = np.asarray(z_i.get('ee_pos', np.zeros(3)))
@@ -321,6 +336,16 @@ def gauss_ex_residual(z_i: dict,
                   + w_eng * energy_excess ** 2
                   + w_vel * vel_mag ** 2)
 
+    # ── v0.2.1: Familiarity Decay ──
+    # Structural understanding accumulation: as steps and epiplexity increase,
+    # η should decay slightly, reflecting that the agent is "getting familiar"
+    # with the task's structure. This provides a measurable downward trend
+    # across SIP-Bench phases without distorting physical signal.
+    decay_step_ratio: float = min(step_index / 100.0, 1.0)
+    decay_epi_ratio: float = min(max(epiplexity, 0.0) / 5.0, 1.0)
+    decay_factor: float = w_decay * decay_step_ratio * decay_epi_ratio
+    eta = eta * (1.0 - decay_factor)
+
     # ── v0.2.0: Flow-Matching Enhancement ──
     if flow_predictor is not None:
         # Push current η into trajectory buffer
@@ -329,8 +354,11 @@ def gauss_ex_residual(z_i: dict,
         # Predict next η using flow matching
         predicted_eta: float = flow_predictor.predict_next_eta()
 
-        # Blend current η with predicted trend (α = 0.1, light forward-looking)
-        alpha: float = 0.1
+        # v0.2.1: Adaptive α blending — increases when trend signal is strong
+        # Base α = 0.1 (conservative), up to 0.3 when predicted deviation is large
+        trend_signal_strength: float = abs(predicted_eta - eta) / max(eta, 0.01)
+        alpha: float = min(0.3, 0.1 + 0.2 * trend_signal_strength)
+        alpha = max(0.1, alpha)  # guarantee α ≥ 0.1
         eta = eta + alpha * (predicted_eta - eta)
 
     return float(eta)

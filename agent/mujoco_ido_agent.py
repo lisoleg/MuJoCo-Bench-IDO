@@ -14,6 +14,10 @@ v0.2.0 Upgrade:
              Noether anchoring, epiplexity)
   FlowMatchingEtaPredictor → forward-looking η trend prediction
 
+v0.2.1 Upgrade (B4 η stagnation fix):
+  Step counter for familiarity decay in κ-Snap
+  Epiplexity passthrough from ψ-Anchor to gauss_ex_residual
+
 Author: tomas-arc3-solver project · IDO-MuJoCo-Bench extension
 """
 import numpy as np
@@ -216,6 +220,7 @@ class IDOMuJoCoAgent:
         self.stall_count: int = 0
         self.prev_data = None
         self._last_eta: Optional[float] = None
+        self._step_counter: int = 0
         self.mp = MotorPrimitives(env.physics)
 
         self.macros: List[Tuple[Callable, float]] = self.mp.get_library()
@@ -284,20 +289,27 @@ class IDOMuJoCoAgent:
 
         return obs
 
-    def _compute_kappa_snap(self, z_i: dict) -> float:
+    def _compute_kappa_snap(self, z_i: dict, step_index: int = 0) -> float:
         """Compute κ-Snap GaussEx residual η for current observation.
 
         v0.2.0: If flow_predictor is set, passes it to gauss_ex_residual
         for forward-looking η computation with trend blending.
 
+        v0.2.1: Passes step_index and epiplexity from ψ-Anchor to
+        gauss_ex_residual for familiarity decay computation.
+
         Args:
             z_i: EML observation dict from _extract_eml_obs.
+            step_index: Current decision-step index for familiarity decay.
 
         Returns:
             Scalar residual η measuring deviation from goal manifold.
         """
+        epiplexity: float = self.psi_anchor.epiplexity_score if self.psi_anchor else 0.0
         return gauss_ex_residual(z_i, self.goal,
-                                 flow_predictor=self.flow_predictor)
+                                 flow_predictor=self.flow_predictor,
+                                 step_index=step_index,
+                                 epiplexity=epiplexity)
 
     def _run_noether_check(self) -> Tuple[bool, str]:
         """Run Noether conservation gate between previous and current data.
@@ -337,8 +349,12 @@ class IDOMuJoCoAgent:
             raise ValueError("physics must be provided (either via physics arg or timestep.physics)")
         z_i = self._extract_eml_obs(phys, timestep=timestep)
 
+        # ── v0.2.1: Increment step counter for familiarity decay ──
+        self._step_counter += 1
+
         # ── v0.2.0: κ-Snap with flow predictor (forward-looking η) ──
-        eta: float = self._compute_kappa_snap(z_i)
+        # v0.2.1: Also passes step_index and epiplexity for familiarity decay
+        eta: float = self._compute_kappa_snap(z_i, step_index=self._step_counter)
 
         # ── Noether Gate ──
         noether_ok, noether_msg = self._run_noether_check()

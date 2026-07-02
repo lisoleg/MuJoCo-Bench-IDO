@@ -205,6 +205,10 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
         agent.psi_anchor.eta_history = []
         agent.psi_anchor.plateau_steps = 0
 
+    # v0.2.1: Reset step counter for familiarity decay if present
+    if hasattr(agent, '_step_counter'):
+        agent._step_counter = 0
+
     noether_violations: int = 0
     nvr_breakdown: dict = {"energy": 0, "torque": 0, "collision": 0}
     episode_return: float = 0.0

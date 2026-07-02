@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 
 from core.goal_eml_mj import GoalEML
 
-IDO_PSI_ANCHOR_VERSION: str = "v0.2.0"
+IDO_PSI_ANCHOR_VERSION: str = "v0.2.1"
 
 # Default configuration constants
 ETA_HISTORY_MAX_LEN: int = 100
@@ -86,16 +86,23 @@ class PsiAnchor:
                  eta_trend_window: int = ETA_TREND_WINDOW,
                  plateau_threshold: float = PLATEAU_THRESHOLD,
                  epiplexity_thresh: float = EPIPLEXITY_EVOLUTION_THRESH,
-                 plateau_evolution_min: int = PLATEAU_EVOLUTION_MIN_STEPS) -> None:
+                 plateau_evolution_min: int = PLATEAU_EVOLUTION_MIN_STEPS,
+                 relative_plateau_ratio: float = 0.01,
+                 abs_plateau_floor: float = 0.001) -> None:
         """Initialize ψ-Anchor with GoalEML and configuration parameters.
 
         Args:
             goal_eml: GoalEML instance defining the task's invariants.
             eta_history_max_len: Maximum length of η history buffer.
             eta_trend_window: Number of recent η values used for trend analysis.
-            plateau_threshold: Threshold for classifying η trend as 'plateau'.
+            plateau_threshold: Legacy absolute threshold (kept for backward compat).
+                              Effective threshold now uses relative+floor formula.
             epiplexity_thresh: Epiplexity threshold for evolution triggering.
             plateau_evolution_min: Minimum plateau steps before evolution trigger.
+            relative_plateau_ratio: Relative plateau threshold ratio (1% default).
+                                    Effective threshold = max(abs_floor, ratio * η_mean).
+            abs_plateau_floor: Absolute plateau threshold floor for small η values.
+                               Prevents overly tight thresholds when η is near zero.
         """
         self.goal_eml: GoalEML = goal_eml
         self.eta_history: List[float] = []
@@ -104,6 +111,8 @@ class PsiAnchor:
         self.plateau_threshold: float = plateau_threshold
         self.epiplexity_thresh: float = epiplexity_thresh
         self.plateau_evolution_min: int = plateau_evolution_min
+        self.relative_plateau_ratio: float = relative_plateau_ratio
+        self.abs_plateau_floor: float = abs_plateau_floor
 
         # Evolution policy: 'light' (promote/demote primitives) or 'freeze' (固化参数)
         self.evo_policy: str = 'light'
@@ -143,9 +152,14 @@ class PsiAnchor:
 
         Uses the last eta_trend_window η values to classify the trend:
         - 'descending': η is consistently decreasing (convergence)
-        - 'plateau': η changes are below plateau_threshold (stalled)
+        - 'plateau': η changes are below effective plateau threshold (stalled)
         - 'ascending': η is consistently increasing (diverging)
         - 'unknown': insufficient data (< 3 values in window)
+
+        v0.2.1: Plateau threshold is now relative (scales with η magnitude):
+            effective_threshold = max(abs_plateau_floor, relative_plateau_ratio * η_mean)
+        This prevents η≈1.0 tasks from being incorrectly classified as plateau
+        when a 1% relative change (abs_delta≈0.01) exceeds the old fixed 0.001.
 
         Returns:
             Trend classification string: 'descending', 'plateau', 'ascending', 'unknown'.
@@ -162,7 +176,12 @@ class PsiAnchor:
         mean_delta: float = float(np.mean(deltas))
         abs_mean_delta: float = abs(mean_delta)
 
-        if abs_mean_delta < self.plateau_threshold:
+        # v0.2.1: Relative plateau threshold — scales with η magnitude
+        eta_mean: float = float(np.mean(window))
+        effective_threshold: float = max(self.abs_plateau_floor,
+                                         self.relative_plateau_ratio * eta_mean)
+
+        if abs_mean_delta < effective_threshold:
             trend: str = 'plateau'
         elif mean_delta < 0:
             trend = 'descending'
