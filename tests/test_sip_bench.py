@@ -58,8 +58,8 @@ class TestSIPBenchVersion:
     """Verify run_mujoco_bench version upgrade."""
 
     def test_version_upgraded(self) -> None:
-        """run_mujoco_bench version should be v0.2.0."""
-        assert IDO_RUN_MUJOCO_BENCH_VERSION == "v0.2.0"
+        """run_mujoco_bench version should be v0.3.0."""
+        assert IDO_RUN_MUJOCO_BENCH_VERSION == "v0.3.0"
 
 
 # ── Aggregate Metrics ─────────────────────────────────────────────
@@ -321,4 +321,6 @@ class TestRunSingleEpisodeMetrics:
         result: dict = run_single_episode(mock_env, agent, max_steps=1)
         assert result['hesit_rmse'] == 0.0
         assert result['retry_voc'] == 0.0
-        assert result['epiplexity_score'] == 0.0
+        # v0.5.0: PsiAnchor is now created by default in IDOMuJoCoAgent.__init__,
+        # so epiplexity_score is no longer 0.0 — it's computed from GoalEML.
+        assert result['epiplexity_score'] > 0.0

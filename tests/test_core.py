@@ -145,8 +145,8 @@ class TestGoalEMLDataclass(unittest.TestCase):
         self.assertAlmostEqual(g.ori_tol, 0.2)
 
     def test_goal_eml_fields_count(self):
-        """GoalEML should have exactly 7 fields."""
-        self.assertEqual(len(fields(GoalEML)), 7)
+        """GoalEML should have exactly 8 fields (v0.5.2: added collide_thresh)."""
+        self.assertEqual(len(fields(GoalEML)), 8)
 
     def test_goal_eml_invariants_default_factory(self):
         """Each GoalEML instance should have an independent invariants list."""
@@ -520,9 +520,9 @@ class TestNoetherCheck(unittest.TestCase):
         cur = MockMjData(energy=[150.0, 200.0],  # E_cur = 350
                          actuator_force=np.array([100.0, 200.0]),
                          contacts=[])
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertTrue(ok)
-        self.assertEqual(msg, "")
+        result = noether_check_mj(prev, cur, goal)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['message'], "")
 
     def test_energy_violation(self):
         """Energy increase exceeding budget → fail with energy message."""
@@ -531,10 +531,10 @@ class TestNoetherCheck(unittest.TestCase):
         cur = MockMjData(energy=[200.0, 200.0],   # E_cur = 400, dE = 200
                          actuator_force=np.array([10.0]),
                          contacts=[])
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertFalse(ok)
-        self.assertIn("Noether-E", msg)
-        self.assertIn("energy", msg)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertFalse(result['ok'])
+        self.assertIn("Noether-E", result['message'])
+        self.assertIn("energy", result['message'])
 
     def test_energy_within_budget(self):
         """Energy increase within budget → pass."""
@@ -543,8 +543,8 @@ class TestNoetherCheck(unittest.TestCase):
         cur = MockMjData(energy=[200.0, 200.0],   # E_cur = 400, dE = 100
                          actuator_force=np.zeros(2),
                          contacts=[])
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertTrue(ok)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertTrue(result['ok'])
 
     def test_torque_violation(self):
         """Torque exceeding limit * margin → fail with torque message."""
@@ -554,9 +554,9 @@ class TestNoetherCheck(unittest.TestCase):
                          actuator_force=np.array([600.0]),
                          contacts=[])
         # max_torque=500, margin=1.05 → limit = 525, force=600 exceeds
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertFalse(ok)
-        self.assertIn("Noether-F", msg)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertFalse(result['ok'])
+        self.assertIn("Noether-F", result['message'])
 
     def test_torque_within_limit(self):
         """Torque within limit * margin → pass."""
@@ -565,20 +565,20 @@ class TestNoetherCheck(unittest.TestCase):
         cur = MockMjData(energy=[0.0, 0.0],
                          actuator_force=np.array([400.0]),
                          contacts=[])
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertTrue(ok)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertTrue(result['ok'])
 
     def test_self_collision(self):
         """Min geom distance < threshold → fail with collision message."""
         goal = self._make_goal()
         prev = MockMjData(energy=[0.0, 0.0])
-        contacts = [MockContact(0, 1, 0.001)]  # < SELF_COLLIDE_THRESH (0.005)
+        contacts = [MockContact(0, 1, 0.001)]  # < SELF_COLLIDE_THRESH (0.01)
         cur = MockMjData(energy=[0.0, 0.0],
                          actuator_force=np.array([10.0]),
                          contacts=contacts)
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertFalse(ok)
-        self.assertIn("Noether-C", msg)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertFalse(result['ok'])
+        self.assertIn("Noether-C", result['message'])
 
     def test_custom_thresholds(self):
         """Custom max_torque, torque_margin, collide_thresh should override defaults."""
@@ -588,10 +588,10 @@ class TestNoetherCheck(unittest.TestCase):
                          actuator_force=np.array([800.0]),  # would fail at default
                          contacts=[])
         # With custom max_torque=1000, margin=1.0 → limit=1000
-        ok, msg = noether_check_mj(prev, cur, goal,
+        result = noether_check_mj(prev, cur, goal,
                                     max_torque=1000.0,
                                     torque_margin=1.0)
-        self.assertTrue(ok)
+        self.assertTrue(result['ok'])
 
     def test_energy_drift_eps_borderline(self):
         """Energy increase exactly = budget + ε should NOT violate."""
@@ -601,8 +601,8 @@ class TestNoetherCheck(unittest.TestCase):
                          actuator_force=np.zeros(2),
                          contacts=[])
         # dE = 100 + eps, budget + eps = 100 + eps → NOT strictly greater → pass
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertTrue(ok)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertTrue(result['ok'])
 
     def test_no_actuator_force_attribute(self):
         """Missing actuator_force → skip torque check (pass)."""
@@ -612,14 +612,14 @@ class TestNoetherCheck(unittest.TestCase):
         # Remove actuator_force
         if hasattr(cur, 'actuator_force'):
             delattr(cur, 'actuator_force')
-        ok, msg = noether_check_mj(prev, cur, goal)
-        self.assertTrue(ok)
+        result = noether_check_mj(prev, cur, goal)
+        self.assertTrue(result['ok'])
 
     def test_default_constants(self):
         """Module-level constants should have expected values."""
         self.assertAlmostEqual(MAX_TORQUE, 500.0)
         self.assertAlmostEqual(TORQUE_MARGIN, 1.05)
-        self.assertAlmostEqual(SELF_COLLIDE_THRESH, 0.005)
+        self.assertAlmostEqual(SELF_COLLIDE_THRESH, 0.01)
         self.assertAlmostEqual(ENERGY_DRIFT_EPS, 1e-3)
 
     def test_noether_version(self):

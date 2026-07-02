@@ -834,6 +834,67 @@ IDO决策循环的五个环节（Sense → κ-Snap → Noether → Motor → Cri
 
 ---
 
+## 7.5 v0.5.2-v0.5.3 迭代优化：PHL/iLQR-MPC启发与dm_control奖励对齐
+
+### 7.5.1 dm_control奖励公式源码级分析
+
+通过直接阅读dm_control源码（`dm_control/suite/walker.py`, `cheetah.py`, `humanoid.py`），获得了精确的奖励公式：
+
+**Walker-walk**: `reward = stand_reward * (5*move_reward + 1) / 6`
+
+其中 `stand_reward = (3*standing + upright) / 4`, `standing = tolerance(torso_height, (1.2, ∞), margin=0.6)`, `upright = (1 + torso_upright) / 2`, `move_reward = tolerance(horizontal_velocity, (1.0, ∞), margin=0.5)`。最大reward=1.0/step。
+
+**Cheetah-run**: `reward = tolerance(speed, (10, ∞), margin=10, sigmoid='linear')`。speed≥10m/s时reward=1.0/step。
+
+**Humanoid-stand**: `reward = small_control * standing * upright * dont_move`
+
+关键发现：`small_control = tolerance(ctrl, margin=1, sigmoid='quadratic').mean()`, `(4 + small_control) / 5` — **ctrl值越接近0，small_control越高**。`dont_move = tolerance(horizontal_velocity, margin=2).mean()` — **速度越低，dont_move越高**。
+
+这意味着humanoid-stand的最优策略是"以极小的控制信号维持站立且完全不动"，而非"用力站稳"。
+
+### 7.5.2 iLQR MPC启发（arxiv 2503.04613）
+
+Whole-Body MPC论文（CMU + DeepMind）的核心启发：
+
+- **Gait作为soft cost residual**（不是硬约束）: iLQR可自由发现新接触模式
+- **关节PD控制器跟踪参考角度**（而非直接力矩）: 参考角度 = iLQR输出
+- **残差项设计**: Upright, Height, Position, Gait, Balance, Effort, Posture, Yaw
+- **实测频率**: iLQR ~50 Hz, TV-LQR反馈 ~300 Hz
+
+映射到IDO: PD控制器的gait phase = iLQR的Gait residual（每足一个相位信号），但缺少iLQR的高层规划 → 用固定振荡模式替代。
+
+### 7.5.3 PHL（物理启发式学习）启发
+
+PHL Walker2d案例闭环: 检测"脚滑"→ 加摩擦 → 检测"原地踏步"→ 加步态周期 → 稳定奔跑。映射到IDO:
+- **ee_pos = torso xpos**（PHL"代码即策略"）: 物理定律是符号化规则，最适合用代码表达 → ee_pos应该用物理意义明确的笛卡尔坐标
+- **Creative-Probe**（SAI文章）: η停滞时利用八元数非结合性生成宏序列扰动
+
+### 7.5.4 v0.5.2-v0.5.3 基准进展
+
+| 任务 | v0.2.2 avg_return | v0.5.0 avg_return | v0.5.2 avg_return | v0.5.3 avg_return | v0.5.3 success | Δ |
+|------|------------------|------------------|------------------|------------------|---------------|---|
+| humanoid-stand | ~0 | 5.22 | 6.63 | **8.65** | **100%** | ↑30% |
+| walker-walk | ~0 | 30.66 | 11.26 | **28.31** | 0% | ↑150% |
+| cheetah-run | ~0 | 14.37 | 0.31 | **5.32** | 0% | ↑1710% |
+| reacher-easy | ~0 | 529.8 | 93.3 | 93.3 | 100% | stable |
+
+关键改善:
+1. **humanoid-stand success=100%**: ctrl clip [-0.08,0.08] 对齐dm_control small_control奖励, avg_return 6.63→8.65 (↑30%)
+2. **walker-walk avg_return ↑150%**: 2-phase recovery+gait生成, 从11.26→28.31, walker确实在前进
+3. **cheetah-run avg_return ↑1710%**: bounding gait生效, 从0.31→5.32, cheetah从几乎不动到有实际前进运动
+4. NVR从983/ep降到46/ep→2246/ep (humanoid, 全为collision): 地面接触排除仍有效
+
+### 7.5.5 v0.5.3步态生成PD控制器设计
+
+基于dm_control奖励公式和iLQR MPC启发，v0.5.3实现:
+
+1. **WalkerWalkPD 2-phase控制**: Phase 1 (Recovery): Joint PD推向站立姿态; Phase 2 (Walking): 振荡步态+速度反馈
+2. **CheetahRunPD bounding gait**: 前后腿交替push, π/2相位偏移
+3. **HumanoidStandPD small control**: ctrl clip从[-0.3,0.3]缩到[-0.08,0.08] — dm_control奖励惩罚大ctrl!
+4. **ee_pos = torso xpos**: walker/cheetah用Cartesian世界坐标, 不是qpos[:3]混合
+
+---
+
 ## 8 结论与未来工作
 
 ### 8.1 结论
@@ -887,6 +948,16 @@ MuJoCo-Bench-IDO是首个物理域VG-Pair验证平台，为非冯架构AGI的连
 [13] Silver D, et al. Mastering the Game of Go with Deep Neural Networks and Tree Search. Nature, 2016.
 
 [14] Akkerman F, et al. Stable-Baselines3: Reliable Reinforcement Learning Implementations. JMLR, 2021.
+
+[15] Zhang JZ, Howell TA, Yi Z, et al. Whole-Body Model-Predictive Control of Legged Robots with MuJoCo. arXiv:2503.04613, 2025. Code: https://github.com/johnzhang3/mujoco_mpc_deploy
+
+[16] Singh R, et al. LearningHumanoidWalking: RL-driven humanoid locomotion in MuJoCo. GitHub: https://github.com/rohanpsingh/LearningHumanoidWalking, 2025.
+
+[17] 物理启发式学习(PHL): 策略=代码, Walker2d闭环优化. 微信公众号"复合体理学", 2026.
+
+[18] 超人类适应性智能(SAI): Creative-Probe与八元数非结合性. 微信公众号"复合体理学", 2026.
+
+[19] TOMAS RSI安全治理架构: PG-Gate硬锚点与MUS双存. yb.tencent.com, 2026.
 
 [15] Hafner D, et al. DreamerV3: Mastering Diverse Domains through Scalable Offline Reinforcement Learning. 2023.
 

@@ -16,7 +16,7 @@ API Endpoints:
   GET  /user_manual.html — User manual HTML page
   GET  /mujoco_docs_cn.html — MuJoCo docs Chinese translation page
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.4.5
+Author: MuJoCo-Bench-IDO Webviz extension v0.5.3
 """
 
 import asyncio
@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.4.5"
+WEBVIZ_VERSION: str = "v0.5.3"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -403,6 +403,7 @@ def _run_benchmark_background(request: RunRequest) -> None:
 
         goal = goal_factory(env.physics, kappa_thresh)
         agent = IDOMuJoCoAgent(env, goal,
+                                task_name=task,
                                 kappa_thresh=kappa_thresh,
                                 enable_critique=True)
         # Add ψ-Anchor and flow predictor
@@ -527,6 +528,7 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             ori_tol=original_goal.ori_tol,
         )
         agent_t0 = IDOMuJoCoAgent(env, goal_t0,
+                                   task_name=task,
                                    kappa_thresh=kappa_thresh,
                                    enable_critique=True)
         agent_t0.psi_anchor = PsiAnchor(goal_t0)
@@ -561,6 +563,7 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             ori_tol=original_goal.ori_tol,
         )
         agent_t1 = IDOMuJoCoAgent(env, goal_t1,
+                                   task_name=task,
                                    kappa_thresh=kappa_thresh,
                                    enable_critique=True)
         agent_t1.psi_anchor = PsiAnchor(goal_t1)
@@ -622,6 +625,7 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             ori_tol=original_goal.ori_tol,
         )
         agent_t2 = IDOMuJoCoAgent(env, goal_t2,
+                                   task_name=task,
                                    kappa_thresh=adjusted_dk_from_t1,
                                    enable_critique=True)
         agent_t2.macros = evolved_macros_from_t1

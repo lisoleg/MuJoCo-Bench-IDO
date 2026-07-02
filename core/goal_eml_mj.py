@@ -46,6 +46,10 @@ class GoalEML:
         max_energy_inject: Maximum allowed energy injection (J).
         pos_tol: Position tolerance for goal achievement (m).
         ori_tol: Orientation tolerance for goal achievement (rad).
+        collide_thresh: Self-collision detection threshold (m).
+            Locomotion tasks (humanoid, walker, cheetah, hopper) use
+            higher values (0.05) because body parts are naturally close.
+            Small tasks (reacher, fish) use lower values (0.01).
     """
     name: str
     invariants: List[str] = field(default_factory=list)
@@ -54,6 +58,7 @@ class GoalEML:
     max_energy_inject: float = 500.0
     pos_tol: float = 0.02
     ori_tol: float = 0.15
+    collide_thresh: float = 0.01
 
 
 def make_humanoid_stand_eml(physics,
@@ -78,6 +83,7 @@ def make_humanoid_stand_eml(physics,
         max_energy_inject=500.0,
         pos_tol=0.05,
         ori_tol=0.15,
+        collide_thresh=0.01,  # humanoid: default (low = tolerant, with parent-child exclusion)
     )
 
 
@@ -103,6 +109,7 @@ def make_hopper_stand_eml(physics,
         max_energy_inject=200.0,
         pos_tol=0.05,
         ori_tol=0.20,
+        collide_thresh=0.05,  # locomotion: legs naturally close
     )
 
 
@@ -128,6 +135,7 @@ def make_walker_run_eml(physics,
         max_energy_inject=600.0,
         pos_tol=0.10,
         ori_tol=0.25,
+        collide_thresh=0.05,  # locomotion: legs naturally close
     )
 
 
@@ -198,6 +206,7 @@ def make_generic_eml(task_name: str,
             max_energy_inject=300.0,
             pos_tol=0.20,
             ori_tol=0.30,
+            collide_thresh=0.05,  # locomotion: body segments naturally close
         )
 
     if 'finger' in t or 'ball_in_cup' in t or 'manipulator' in t:
@@ -220,6 +229,7 @@ def make_generic_eml(task_name: str,
             max_energy_inject=300.0,
             pos_tol=0.05,
             ori_tol=0.15,
+            collide_thresh=0.05,  # locomotion: legs naturally close
         )
 
     if 'walk' in t or 'run' in t or 'hop' in t:
@@ -231,6 +241,7 @@ def make_generic_eml(task_name: str,
             max_energy_inject=600.0,
             pos_tol=0.10,
             ori_tol=0.25,
+            collide_thresh=0.05,  # locomotion: legs naturally close
         )
 
     # Default fallback: try to stay upright and near origin.
@@ -270,6 +281,7 @@ def make_humanoid_walk_eml(physics,
         max_energy_inject=600.0,
         pos_tol=0.10,
         ori_tol=0.15,
+        collide_thresh=0.01,  # humanoid walk: default (parent-child exclusion handles proximity)
     )
 
 
@@ -295,6 +307,7 @@ def make_humanoid_run_eml(physics,
         max_energy_inject=800.0,
         pos_tol=0.15,
         ori_tol=0.20,
+        collide_thresh=0.01,  # humanoid run: default (parent-child exclusion handles proximity)
     )
 
 
@@ -320,6 +333,7 @@ def make_walker_stand_eml(physics,
         max_energy_inject=300.0,
         pos_tol=0.05,
         ori_tol=0.15,
+        collide_thresh=0.05,  # locomotion: legs naturally close
     )
 
 
@@ -345,6 +359,7 @@ def make_walker_walk_eml(physics,
         max_energy_inject=400.0,
         pos_tol=0.10,
         ori_tol=0.20,
+        collide_thresh=0.05,  # locomotion: legs naturally close
     )
 
 
@@ -370,6 +385,7 @@ def make_cheetah_run_eml(physics,
         max_energy_inject=500.0,
         pos_tol=0.10,
         ori_tol=0.0,
+        collide_thresh=0.05,  # locomotion: legs naturally close
     )
 
 
@@ -395,6 +411,7 @@ def make_hopper_hop_eml(physics,
         max_energy_inject=250.0,
         pos_tol=0.10,
         ori_tol=0.25,
+        collide_thresh=0.05,  # locomotion: legs naturally close
     )
 
 
@@ -745,6 +762,7 @@ def make_swimmer_swim6_eml(physics,
         max_energy_inject=200.0,
         pos_tol=0.10,
         ori_tol=0.0,
+        collide_thresh=0.05,  # locomotion: body segments naturally close
     )
 
 
@@ -770,4 +788,5 @@ def make_swimmer_swim15_eml(physics,
         max_energy_inject=300.0,
         pos_tol=0.10,
         ori_tol=0.0,
+        collide_thresh=0.05,  # locomotion: body segments naturally close
     )

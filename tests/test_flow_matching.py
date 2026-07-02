@@ -51,8 +51,8 @@ class TestFlowMatchingVersion:
     """Verify κ-Snap version upgrade."""
 
     def test_version_upgraded(self) -> None:
-        """κ-Snap version should be v0.2.0 after upgrade."""
-        assert IDO_KAPPA_SNAP_MJ_VERSION == "v0.2.0"
+        """κ-Snap version should be v0.2.1 after upgrade."""
+        assert IDO_KAPPA_SNAP_MJ_VERSION == "v0.2.1"
 
 
 # ── Buffer Management ────────────────────────────────────────────

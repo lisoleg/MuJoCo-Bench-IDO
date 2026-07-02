@@ -18,6 +18,12 @@ v0.2.1 Upgrade (B4 η stagnation fix):
   Step counter for familiarity decay in κ-Snap
   Epiplexity passthrough from ψ-Anchor to gauss_ex_residual
 
+v0.5.0 Upgrade (Phase 1 Motor layer refactor):
+  Replaces MotorPrimitives macro selection with per-task PD controllers.
+  Each dm_control task gets a TaskPDController that extracts real targets
+  from observation and computes goal-directed PD actions with per-task
+  KP/KD gains.  MotorPrimitives retained as fallback for pd_stabilize.
+
 Author: tomas-arc3-solver project · IDO-MuJoCo-Bench extension
 """
 import numpy as np
@@ -29,6 +35,9 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj, NoetherViolation
 from core.goal_eml_mj import GoalEML
 from agent.psi_anchor import PsiAnchor
+from agent.task_pd_controllers import (
+    TaskPDController, GenericPDController, get_controller_for_task,
+)
 
 
 class MotorPrimitives:
@@ -161,8 +170,8 @@ class MotorPrimitives:
 class IDOMuJoCoAgent:
     """IDO/TOMAS Self-Referential Manifold Agent for Continuous Control.
 
-    Orchestrates κ-Snap residual, Noether conservation gate, NARLA motor
-    primitives, PD stabilization, stall-detection critique, and oracle
+    Orchestrates κ-Snap residual, Noether conservation gate, per-task PD
+    controllers, PD stabilization, stall-detection critique, and oracle
     replay within a single choose_action loop.
 
     v0.2.0: Optionally integrates ψ-Anchor (meta-management) and
@@ -174,17 +183,29 @@ class IDOMuJoCoAgent:
     - ψ-Anchor Noether conservation anchoring
     - FlowMatchingEtaPredictor for forward-looking η computation
 
+    v0.5.0 (Phase 1 Motor layer refactor):
+    Replaces MotorPrimitives macro selection with per-task PD controllers.
+    Each task gets a dedicated TaskPDController that:
+    - Extracts real targets from dm_control observation
+    - Computes goal-directed PD actions with per-task KP/KD gains
+    - Provides safe-action fallback for Noether violations
+    MotorPrimitives is retained for pd_stabilize near-goal refinement.
+
     Attributes:
         env: dm_control environment instance.
         goal: GoalEML defining the task's invariants and tolerances.
+        task_name: Task identifier string (e.g., 'humanoid-stand').
         kappa_thresh: Threshold for η below which PD stabilization activates.
         max_stall: Maximum consecutive stall steps before critique kicks in.
         enable_critique: Whether to apply stall-detection critique.
         stall_count: Current consecutive stall counter.
         prev_data: Previous MuJoCo data for Noether comparison.
         _last_eta: Most recent κ-Snap residual value.
-        mp: MotorPrimitives instance.
+        mp: MotorPrimitives instance (retained for pd_stabilize fallback).
+        task_controller: Per-task TaskPDController instance.
         macros: List of (primitive_fn, base_ic_value) from MotorPrimitives.
+            (Retained for ψ-Anchor evolution compatibility, but NOT used
+            in choose_action decision loop.)
         oracle_buffer: Buffer for oracle demonstration actions.
         psi_anchor: Optional ψ-Anchor meta-management layer instance.
         flow_predictor: Optional FlowMatchingEtaPredictor instance.
@@ -193,6 +214,7 @@ class IDOMuJoCoAgent:
     def __init__(self,
                  env,
                  goal_eml: GoalEML,
+                 task_name: str = 'humanoid-stand',
                  kappa_thresh: float = 0.05,
                  max_stall: int = 80,
                  enable_critique: bool = True,
@@ -203,6 +225,7 @@ class IDOMuJoCoAgent:
         Args:
             env: dm_control environment.
             goal_eml: GoalEML defining task invariants and tolerances.
+            task_name: Task identifier for per-task PD controller selection.
             kappa_thresh: η threshold for PD stabilization activation.
             max_stall: Max consecutive stall steps before critique relax.
             enable_critique: Whether stall-detection critique is active.
@@ -213,6 +236,7 @@ class IDOMuJoCoAgent:
         """
         self.env = env
         self.goal = goal_eml
+        self.task_name: str = task_name
         self.kappa_thresh: float = kappa_thresh
         self.max_stall: int = max_stall
         self.enable_critique: bool = enable_critique
@@ -221,14 +245,53 @@ class IDOMuJoCoAgent:
         self.prev_data = None
         self._last_eta: Optional[float] = None
         self._step_counter: int = 0
+
+        # ── v0.5.2: Creative-Probe (SAI article 章锋2026) ──
+        # When η stagnates for probe_stall_threshold consecutive steps,
+        # perturb the PD controller's gait parameters (phase offset,
+        # gain multiplier) using octonion non-associativity analogy:
+        # different bracketing (timing order) of macro sequences →
+        # different outcomes. κ-Snap gates whether to accept the
+        # perturbation (η must decrease after applying it).
+        self._probe_active: bool = False
+        self._probe_stall_threshold: int = 30  # steps of η stagnation
+        self._probe_eta_history: List[float] = []  # last η values for stagnation detection
+        self._probe_perturbation: Optional[np.ndarray] = None
+        self._probe_phase_offset: float = 0.0
+        self._probe_gain_multiplier: float = 1.0
+
+        # ── v0.5.0: Per-task PD controller (replaces macro selection) ──
+        self.task_controller: TaskPDController = get_controller_for_task(
+            task_name, env.physics)
+
+        # MotorPrimitives retained for pd_stabilize near-goal fallback
         self.mp = MotorPrimitives(env.physics)
 
+        # macros retained for ψ-Anchor evolution compatibility (NOT used in
+        # choose_action decision loop anymore)
         self.macros: List[Tuple[Callable, float]] = self.mp.get_library()
         self.oracle_buffer: List[np.ndarray] = []
 
-        # v0.2.0: ψ-Anchor and FlowMatchingEtaPredictor (optional, set externally)
-        self.psi_anchor: Optional[PsiAnchor] = psi_anchor
-        self.flow_predictor: Optional[FlowMatchingEtaPredictor] = flow_predictor
+        # v0.2.0: ψ-Anchor and FlowMatchingEtaPredictor
+        # v0.5.0 fix: Always create PsiAnchor + FlowPredictor by default,
+        # so that epiplexity > 0 and η familiarity decay is active even in
+        # standard benchmark mode (not just SIP-Bench). Previously, psi_anchor
+        # was None in standard runs, causing decay_epi_ratio = 0 → η never decayed.
+        self.psi_anchor: PsiAnchor = psi_anchor if psi_anchor is not None else PsiAnchor(goal_eml)
+        self.flow_predictor: FlowMatchingEtaPredictor = flow_predictor if flow_predictor is not None else FlowMatchingEtaPredictor()
+
+    # ── v0.5.2: Main body name map for locomotion ee_pos extraction ──
+    # For walker/cheetah/hopper tasks without 'to_target' observation,
+    # use the torso xpos as ee_pos so that η = ||torso_pos - target_pos||²
+    # decreases as the body advances toward the goal.
+    _MAIN_BODY_MAP: dict = {
+        'walker': 'torso',
+        'cheetah': 'torso',
+        'humanoid': 'torso',
+        'hopper': 'torso',
+        'swimmer': 'head',
+        'fish': 'tail',
+    }
 
     def _extract_eml_obs(self, physics, timestep=None) -> dict:
         """Extract EML observation dict from dm_control physics state.
@@ -236,10 +299,18 @@ class IDOMuJoCoAgent:
         Reads qpos, qvel, end-effector position/velocity, and potential/
         kinetic/total energy from the physics state.
 
-        Handles task-specific observation differences:
-        - humanoid: ee_pos from xpos['right_hand']
-        - reacher: ee_pos from timestep.observation['position'] + 'to_target'
-        - hopper/walker: ee_pos from qpos[:3] (center-of-mass proxy)
+        ee_pos extraction priority (v0.5.2 — PHL-inspired Cartesian fix):
+        1. xpos['right_hand'] (humanoid tasks — EE position)
+        2. timestep.observation['to_target'] (reacher/fish/manipulator —
+           Cartesian distance to target, η = ||to_target||² when target=[0,0])
+        3. _MAIN_BODY_MAP[domain] xpos (locomotion: walker/cheetah/hopper —
+           actual Cartesian world position of main body, NOT qpos[:3])
+        4. xpos['torso'] / xpos['head'] / xpos['pelvis'] (fallback torso)
+        5. qpos[:3] (last resort, only for tasks without xpos)
+
+        PHL insight (章锋2026): "物理定律本身就是符号化的规则" —
+        ee_pos must be a physically meaningful Cartesian coordinate,
+        not a raw qpos vector that mixes meters and radians.
 
         Args:
             physics: dm_control Physics instance (from env.physics).
@@ -251,24 +322,84 @@ class IDOMuJoCoAgent:
         phys = physics
         obs: dict = {}
 
-        # End-effector position — fallback chain:
-        # 1. Try xpos['right_hand'] (humanoid)
-        # 2. Try timestep.observation for reacher-style tasks
-        # 3. Fallback to qpos[:3] (hopper/walker)
+        # End-effector position — v0.5.2 Cartesian fix (PHL-inspired):
+        # ee_pos must be a physically meaningful 3D Cartesian position,
+        # so that η = ||ee_pos - target_pos||² is a true distance metric.
+
+        # 1. Humanoid tasks: use right_hand xpos (EE position)
+        ee_pos_extracted: bool = False
         try:
             obs['ee_pos'] = phys.named.data.xpos['right_hand', :].copy()
+            ee_pos_extracted = True
         except (KeyError, IndexError, AttributeError):
-            if timestep is not None and hasattr(timestep, 'observation'):
-                # For reacher: to_target gives vector to target
+            pass
+
+        if not ee_pos_extracted:
+            # 2. Tasks with to_target observation (reacher/fish/manipulator):
+            # to_target is Cartesian distance to goal → η = ||to_target||²
+            if timestep is not None and hasattr(timestep, 'observation') and timestep.observation is not None:
                 to_target = timestep.observation.get('to_target', None)
                 if to_target is not None:
-                    # reacher: position + to_target → ee_pos relative to target
-                    pos = timestep.observation.get('position', np.zeros(2))
-                    obs['ee_pos'] = np.array(pos)  # 2D ee_pos
-                else:
-                    obs['ee_pos'] = phys.data.qpos[:3].copy()
-            else:
-                obs['ee_pos'] = phys.data.qpos[:min(3, len(phys.data.qpos))].copy()
+                    obs['ee_pos'] = np.array(to_target).flatten()
+                    ee_pos_extracted = True
+
+            if not ee_pos_extracted:
+                # 3. Locomotion tasks: use _MAIN_BODY_MAP for domain-specific
+                # body name. For walker/cheetah/hopper WITHOUT to_target,
+                # use the torso xpos as ee_pos so η decreases as body advances.
+                # Determine domain from task_name if available
+                domain: str = ''
+                if hasattr(self, 'task_name') and self.task_name:
+                    domain = self.task_name.split('-', 1)[0].lower()
+                main_body: str = self._MAIN_BODY_MAP.get(domain, 'torso')
+
+                try:
+                    obs['ee_pos'] = phys.named.data.xpos[main_body, :].copy()
+                    ee_pos_extracted = True
+                except (KeyError, IndexError):
+                    # 4. Fallback: try common body names
+                    for body_name in ['torso', 'head', 'pelvis']:
+                        try:
+                            obs['ee_pos'] = phys.named.data.xpos[body_name, :3].copy()
+                            ee_pos_extracted = True
+                            break
+                        except (KeyError, IndexError):
+                            continue
+
+                if not ee_pos_extracted:
+                    # 5. Fallback: first non-world body
+                    try:
+                        for bi in range(1, phys.model.nbody):
+                            body_xpos = phys.data.xpos[bi, :3].copy()
+                            obs['ee_pos'] = body_xpos
+                            ee_pos_extracted = True
+                            break
+                    except (IndexError, AttributeError):
+                        pass
+
+                if not ee_pos_extracted:
+                    # 6. Last resort: qpos[:3] (may be physically wrong)
+                    obs['ee_pos'] = phys.data.qpos[:min(3, len(phys.data.qpos))].copy()
+
+            # If no timestep provided, still try domain-specific body
+            if timestep is None and not ee_pos_extracted:
+                domain: str = ''
+                if hasattr(self, 'task_name') and self.task_name:
+                    domain = self.task_name.split('-', 1)[0].lower()
+                main_body: str = self._MAIN_BODY_MAP.get(domain, 'torso')
+                try:
+                    obs['ee_pos'] = phys.named.data.xpos[main_body, :].copy()
+                    ee_pos_extracted = True
+                except (KeyError, IndexError):
+                    for body_name in ['torso', 'head', 'pelvis']:
+                        try:
+                            obs['ee_pos'] = phys.named.data.xpos[body_name, :3].copy()
+                            ee_pos_extracted = True
+                            break
+                        except (KeyError, IndexError):
+                            continue
+                    if not ee_pos_extracted:
+                        obs['ee_pos'] = phys.data.qpos[:min(3, len(phys.data.qpos))].copy()
 
         # Generalized positions and velocities (clipped to model dimensions)
         nq: int = min(phys.model.nq, len(phys.data.qpos))
@@ -314,26 +445,35 @@ class IDOMuJoCoAgent:
     def _run_noether_check(self) -> Tuple[bool, str]:
         """Run Noether conservation gate between previous and current data.
 
+        v0.5.0 fix: noether_check_mj() now returns a dict with keys
+        {ok, total, energy, torque, collision, message} instead of a
+        (bool, str) tuple. This method adapts the dict to the tuple
+        interface expected by choose_action().
+
         Returns:
             Tuple of (ok: bool, message: str). ok=True means no violations.
         """
         if self.prev_data is None:
             return True, ""
-        return noether_check_mj(self.prev_data,
-                                self.env.physics.data,
-                                self.goal)
+        result: dict = noether_check_mj(self.prev_data,
+                                          self.env.physics.data,
+                                          self.goal,
+                                          collide_thresh=self.goal.collide_thresh)
+        return result["ok"], result.get("message", "")
 
     def choose_action(self, timestep, physics=None) -> np.ndarray:
-        """Select control action via IDO decision loop.
+        """Select control action via IDO decision loop with per-task PD.
 
-        Decision path:
+        Decision path (v0.5.0 — Motor layer refactor):
         1. Extract EML observation → compute η via κ-Snap (with flow predictor).
-        2. Run Noether check → if violation, execute squat fallback.
+        2. Run Noether check → if violation, use task_controller.compute_safe_action()
+           (NOT squat anymore — squat was too task-blind).
            v0.2.0: ψ-Anchor injects conservation anchor from Noether result.
         3. v0.2.0: ψ-Anchor updates η history and adjusts δ_K dynamically.
-        4. If η < κ_thresh → PD stabilize toward goal.
-        5. Else → select highest-scoring NARLA motor primitive.
-           v0.2.0: ψ-Anchor decides evolution policy for macros.
+        4. If η < κ_thresh → PD stabilize toward goal (MotorPrimitives.pd_stabilize
+           + task_controller for near-goal refinement).
+        5. Else → use task_controller.compute_action() for goal-directed action
+           (replaces old macro selection from MotorPrimitives).
         6. Critique: if stall detected, relax κ_thresh / increase max_stall.
 
         Args:
@@ -364,11 +504,14 @@ class IDOMuJoCoAgent:
             self.psi_anchor.inject_conservation_anchor(noether_ok, noether_msg)
 
         if not noether_ok:
-            self.mp.squat(phys)
+            # v0.5.0: Use task_controller safe action instead of squat
+            # squat was too task-blind — only touched ctrl[1]
+            ctrl = self.task_controller.compute_safe_action(timestep, phys)
+            phys.data.ctrl[:] = ctrl
             self.stall_count += 1
             self.prev_data = phys.data
             self._last_eta = eta
-            return phys.data.ctrl.copy()
+            return ctrl
 
         self.prev_data = phys.data
 
@@ -379,43 +522,96 @@ class IDOMuJoCoAgent:
             self.kappa_thresh = adjusted_dk
 
             # ψ-Anchor evolution policy — decides when to evolve macros
+            # (macros still maintained for ψ-Anchor compatibility even though
+            #  they are no longer used in the decision loop)
             evo_policy: str = self.psi_anchor.decide_evolution_policy()
             if self.psi_anchor.should_trigger_evolution():
                 self.macros = self.psi_anchor.apply_evolution_to_macros(
                     self.macros, evo_policy)
 
-        # ── Near-Goal: PD Stabilize ──
+        # ── Near-Goal: PD Stabilize + Task Controller ──
         if eta < self.kappa_thresh:
+            # Blend MotorPrimitives pd_stabilize with task controller
+            # for near-goal refinement
             delta = self.mp.pd_stabilize(phys, self.goal.target_pos,
                                          z_i['ee_pos'])
-            ctrl = phys.data.ctrl.copy()
-            ctrl = np.clip(ctrl + delta, -1.0, 1.0)
+            task_ctrl = self.task_controller.compute_action(timestep, phys)
+            # Blend: PD stabilize delta on top of task controller base
+            ctrl = np.clip(task_ctrl + delta, -1.0, 1.0)
             phys.data.ctrl[:] = ctrl
             self.stall_count = 0
             self._last_eta = eta
             return ctrl
 
-        # ── Far-Goal: NARLA Motor Primitive Selection ──
-        ee_pos: np.ndarray = z_i['ee_pos']
-        target: np.ndarray = self.goal.target_pos
-        best_macro: Optional[Callable] = None
-        best_score: float = -np.inf
+        # ── Far-Goal: Task PD Controller (replaces macro selection) ──
+        # v0.5.0: No longer select from MotorPrimitives macros.
+        # Instead, use per-task PD controller for goal-directed action.
+        ctrl = self.task_controller.compute_action(timestep, phys)
 
-        for macro_fn, base_score in self.macros:
-            # Align dimensions: pad shorter array to match
-            max_d: int = max(len(ee_pos), len(target))
-            ee_pad: np.ndarray = np.zeros(max_d)
-            ee_pad[:len(ee_pos)] = ee_pos
-            tgt_pad: np.ndarray = np.zeros(max_d)
-            tgt_pad[:len(target)] = target
-            desired = tgt_pad - ee_pad
-            score: float = base_score - np.linalg.norm(desired)
-            if score > best_score:
-                best_score = score
-                best_macro = macro_fn
+        # ── v0.5.2: Creative-Probe (SAI 章锋2026) ──
+        # When η stagnates (no decrease for probe_stall_threshold steps),
+        # Creative-Probe perturbs the gait parameters using octonion
+        # non-associativity analogy: (ab)c ≠ a(bc) → different macro
+        # sequence bracketings (timings) produce different outcomes.
+        # Perturbation: random phase offset, gain multiplier, or action
+        # noise. κ-Snap gates acceptance: only keep perturbation if η
+        # decreases after applying it for N probe steps.
+        self._probe_eta_history.append(eta)
+        if len(self._probe_eta_history) > self._probe_stall_threshold:
+            self._probe_eta_history = self._probe_eta_history[-self._probe_stall_threshold:]
 
-        if best_macro is not None:
-            best_macro(phys)
+        # Detect η stagnation: no decrease in last probe_stall_threshold steps
+        if len(self._probe_eta_history) >= self._probe_stall_threshold:
+            eta_min_recent = min(self._probe_eta_history)
+            eta_max_recent = max(self._probe_eta_history)
+            # Stagnation: η range is small relative to η magnitude
+            stagnation_ratio = (eta_max_recent - eta_min_recent) / max(abs(eta), 1e-6)
+            if stagnation_ratio < 0.05 and eta > self.kappa_thresh * 2:
+                # η is stagnant AND far from goal → trigger Creative-Probe
+                if not self._probe_active:
+                    self._probe_active = True
+                    # Generate random perturbation (octonion non-associativity
+                    # analogy: different bracketings → different timings)
+                    self._probe_phase_offset = np.random.uniform(-0.5, 0.5)
+                    self._probe_gain_multiplier = np.random.uniform(0.8, 1.3)
+                    self._probe_perturbation = np.random.uniform(
+                        -0.1, 0.1, size=self.nu if hasattr(self, 'nu') else len(ctrl))
+
+        if self._probe_active:
+            # Apply Creative-Probe perturbation to control action
+            perturbed_ctrl = ctrl * self._probe_gain_multiplier
+            perturbed_ctrl += self._probe_perturbation[:len(ctrl)]
+            # Also shift gait phase offset if task_controller has gait_freq
+            if hasattr(self.task_controller, 'gait_freq'):
+                # Inject phase offset via step counter adjustment
+                # (ab)c ≠ a(bc): shifting timing = different bracketing
+                self.task_controller._step_offset = (
+                    getattr(self.task_controller, '_step_offset', 0)
+                    + int(self._probe_phase_offset * 100))
+            ctrl = np.clip(perturbed_ctrl, -1.0, 1.0)
+
+            # Check if Creative-Probe reduced η (κ-Snap gate)
+            if self._last_eta is not None and eta < self._last_eta * 0.95:
+                # η decreased by ≥5% → probe successful, keep perturbation
+                # but gradually reduce perturbation magnitude
+                self._probe_gain_multiplier = (
+                    1.0 + (self._probe_gain_multiplier - 1.0) * 0.5)
+                self._probe_perturbation *= 0.5
+                # After sufficient η decrease, deactivate probe
+                if abs(self._probe_gain_multiplier - 1.0) < 0.05:
+                    self._probe_active = False
+                    self._probe_perturbation = None
+                    self._probe_phase_offset = 0.0
+                    self._probe_gain_multiplier = 1.0
+                    if hasattr(self.task_controller, '_step_offset'):
+                        self.task_controller._step_offset = 0
+            elif self._last_eta is not None and eta > self._last_eta * 1.05:
+                # η increased → probe failing, reduce perturbation
+                self._probe_gain_multiplier = (
+                    1.0 + (self._probe_gain_multiplier - 1.0) * 0.3)
+                self._probe_perturbation *= 0.3
+
+        phys.data.ctrl[:] = ctrl
 
         # ── Critique: Stall Detection ──
         if self.enable_critique and self._last_eta is not None:
@@ -430,7 +626,7 @@ class IDOMuJoCoAgent:
             self.max_stall = int(self.max_stall * 1.2)
             self.stall_count = 0
 
-        return phys.data.ctrl.copy()
+        return ctrl
 
     def store_oracle_step(self, action: np.ndarray) -> None:
         """Append an oracle demonstration action to the replay buffer.

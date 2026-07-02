@@ -245,7 +245,8 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
             from core.noether_check_mj import noether_check_mj
             nvr_result: dict = noether_check_mj(agent.prev_data,
                                                   env.physics.data,
-                                                  agent.goal)
+                                                  agent.goal,
+                                                  collide_thresh=agent.goal.collide_thresh)
             if not nvr_result["ok"]:
                 noether_violations += 1
                 nvr_breakdown["energy"] += nvr_result["energy"]
@@ -382,6 +383,7 @@ def run_benchmark(task: str = 'humanoid-stand',
 
     goal = goal_factory(env.physics, kappa_thresh)
     agent = IDOMuJoCoAgent(env, goal,
+                            task_name=task,
                             kappa_thresh=kappa_thresh,
                             enable_critique=enable_critique)
 
@@ -532,6 +534,7 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
         ori_tol=original_goal.ori_tol,
     )
     agent_t0 = IDOMuJoCoAgent(env, goal_t0,
+                               task_name=task,
                                kappa_thresh=kappa_thresh,
                                enable_critique=enable_critique)
     # Add psi_anchor for observation only (evolution disabled)
@@ -552,6 +555,7 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
         ori_tol=original_goal.ori_tol,
     )
     agent_t1 = IDOMuJoCoAgent(env, goal_t1,
+                               task_name=task,
                                kappa_thresh=kappa_thresh,
                                enable_critique=enable_critique)
     agent_t1.psi_anchor = PsiAnchor(goal_t1)
@@ -612,6 +616,7 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
         ori_tol=original_goal.ori_tol,
     )
     agent_t2 = IDOMuJoCoAgent(env, goal_t2,
+                               task_name=task,
                                kappa_thresh=adjusted_dk_from_t1,
                                enable_critique=enable_critique)
     # Retain evolved macro IC-Values from T1

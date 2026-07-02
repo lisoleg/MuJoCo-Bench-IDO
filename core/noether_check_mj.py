@@ -7,7 +7,8 @@ each IDO decision step:
 
   1. Energy Gate:  ΔE ≤ max_energy_inject + ε  (energy budget)
   2. Force Gate:   max |actuator_force| ≤ MAX_TORQUE * margin
-  3. Collision Gate: min geom distance ≥ SELF_COLLIDE_THRESH
+  3. Collision Gate: min self-collision geom distance ≥ collide_thresh
+     (excludes ground/worldbody and same-body contacts)
 
 If any gate fails, the IDO agent falls back to a safe squat primitive.
 
@@ -17,7 +18,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional
 
-IDO_NOETHER_MJ_VERSION: str = "v1.0.0"
+IDO_NOETHER_MJ_VERSION: str = "v1.1.0"
 
 
 @dataclass
@@ -37,25 +38,65 @@ class NoetherViolation:
 # Default physical safety thresholds
 MAX_TORQUE: float = 500.0
 TORQUE_MARGIN: float = 1.05
-SELF_COLLIDE_THRESH: float = 0.005
+SELF_COLLIDE_THRESH: float = 0.01
 ENERGY_DRIFT_EPS: float = 1e-3
 
 
 def _min_geom_distance(data) -> float:
-    """Compute minimum pairwise geom distance from MuJoCo contact data.
+    """Compute minimum self-collision geom distance from MuJoCo contact data.
+
+    Only considers contacts between geoms belonging to dynamic model bodies
+    (geom_bodyid > 0), excluding ground/worldbody contacts.  This prevents
+    normal ground contacts (feet on floor, dist ≈ 0) from triggering the
+    self-collision gate.
 
     Args:
-        data: MuJoCo Data object with .contact attribute.
+        data: MuJoCo Data object with .contact and .model attributes.
 
     Returns:
-        Minimum distance among all non-self contacts, or 1.0 if no contacts.
+        Minimum distance among self-collision contacts, or 1.0 if none found.
     """
     if not hasattr(data, 'contact') or len(data.contact) == 0:
         return 1.0
+    # Get body IDs for each geom — body 0 = worldbody (ground plane)
+    model = getattr(data, 'model', None)
+    if model is not None and hasattr(model, 'geom_bodyid'):
+        body_ids = model.geom_bodyid
+    else:
+        # Fallback: no model info, use all contacts (legacy behavior)
+        body_ids = None
+
     distances: List[float] = []
     for c in data.contact:
-        if c.geom1 != c.geom2:
-            distances.append(c.dist)
+        if c.geom1 == c.geom2:
+            continue
+        # Skip contacts involving ground/worldbody (body_id == 0)
+        if body_ids is not None:
+            if body_ids[c.geom1] == 0 or body_ids[c.geom2] == 0:
+                continue
+            # Skip same-body contacts and parent-child body contacts.
+            # In MuJoCo kinematic tree, adjacent bodies are structurally
+            # close (e.g., upper_leg–lower_leg, torso–upper_arm).
+            b1 = body_ids[c.geom1]
+            b2 = body_ids[c.geom2]
+            if b1 == b2:
+                continue  # same body → not self-collision
+            # Parent-child: check if either body is the other's parent
+            # in the kinematic tree (model.body_parentid)
+            # Sibling: same parent (e.g., upper_arm & upper_leg both
+            # attached to torso) → structurally adjacent by design.
+            if model is not None and hasattr(model, 'body_parentid'):
+                parent_ids = model.body_parentid
+                if parent_ids[b1] == b2 or parent_ids[b2] == b1:
+                    continue  # parent-child → structurally close by design
+                # Sibling exclusion: both bodies share the same parent
+                # (e.g., left_upper_arm & right_upper_arm, upper_arm &
+                # upper_leg — all children of torso). These are naturally
+                # close in locomotion tasks and should not be flagged as
+                # self-collision violations.
+                if parent_ids[b1] == parent_ids[b2] and parent_ids[b1] != 0:
+                    continue  # sibling bodies → structurally adjacent
+        distances.append(c.dist)
     return min(distances) if distances else 1.0
 
 

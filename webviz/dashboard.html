@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.4.5</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.5.3</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -288,7 +288,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.4.5</span>
+      <span class="text-sm font-medium text-slate-400">v0.5.3</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -468,6 +468,40 @@
     <!-- ─── RIGHT MAIN DASHBOARD ─── -->
     <main class="flex-1 p-4 overflow-y-auto grid grid-cols-2 gap-4"
            style="background: #0f172a;">
+
+      <!-- ═══ 5 Core Metrics Row ═══ -->
+      <div class="col-span-2 grid grid-cols-5 gap-3 mb-2">
+        <!-- Metric 1: Episode Return -->
+        <div class="card text-center">
+          <div class="card-header" data-i18n="metric_episode_return">Episode Return</div>
+          <div id="metricReturn" class="value-lg font-mono text-emerald-400">0.00</div>
+          <div class="hint-text" data-i18n="hint_metric_return">Cumulative reward per episode</div>
+        </div>
+        <!-- Metric 2: Success Rate -->
+        <div class="card text-center">
+          <div class="card-header" data-i18n="metric_success_rate">Success Rate</div>
+          <div id="metricSuccess" class="value-lg font-mono text-blue-400">0%</div>
+          <div class="hint-text" data-i18n="hint_metric_success">Task goal achieved ratio</div>
+        </div>
+        <!-- Metric 3: η (EML Residual) -->
+        <div class="card text-center">
+          <div class="card-header" data-i18n="metric_eta">η (EML Residual)</div>
+          <div id="metricEta" class="value-lg font-mono text-yellow-400">—</div>
+          <div class="hint-text" data-i18n="hint_metric_eta">Lower = closer to goal</div>
+        </div>
+        <!-- Metric 4: NVR (Noether Violation Rate) -->
+        <div class="card text-center">
+          <div class="card-header" data-i18n="metric_nvr">NVR</div>
+          <div id="metricNVR" class="value-lg font-mono text-red-400">0</div>
+          <div class="hint-text" data-i18n="hint_metric_nvr">Noether violations count</div>
+        </div>
+        <!-- Metric 5: SER (Snap Efficiency Ratio) -->
+        <div class="card text-center">
+          <div class="card-header" data-i18n="metric_ser">SER</div>
+          <div id="metricSER" class="value-lg font-mono text-purple-400">—</div>
+          <div class="hint-text" data-i18n="hint_metric_ser">Snap Efficiency Ratio</div>
+        </div>
+      </div>
 
       <!-- ═══ η Trajectory Real-time Line Chart ═══ -->
       <div class="card col-span-2">
@@ -708,7 +742,7 @@
         viewer_not_installed: "mjviser 未安装",
         viewer_opening: "正在打开",
         viewer_already_running: "mjviser 已在运行",
-        // ── v0.4.5 hint / explanation strings ──
+        // ── v0.5.3 hint / explanation strings ──
         hint_task_select: "选择 dm_control 基准任务。任务决定 IDO 代理的物理环境和目标不变量。",
         hint_episodes: "每次运行的评估回合数。更多回合可获得更稳定的统计结果，但耗时更长。",
         hint_max_steps: "每个回合的最大步数。如果代理在达到此限制之前就到达目标，将提前停止。",
@@ -727,6 +761,17 @@
         badge_current_scene_stairs: "当前场景：阶梯地形",
         badge_current_scene_floating: "当前场景：浮台地形",
         badge_current_scene_maze: "当前场景：迷宫场景",
+        // ── v0.5.3 5 Core Metrics ──
+        metric_episode_return: "累计回报",
+        hint_metric_return: "每回合累积奖励值",
+        metric_success_rate: "成功率",
+        hint_metric_success: "任务目标达成比例",
+        metric_eta: "η (EML残差)",
+        hint_metric_eta: "越低越接近目标",
+        metric_nvr: "NVR",
+        hint_metric_nvr: "Noether 违规次数",
+        metric_ser: "SER",
+        hint_metric_ser: "Snap 效率比",
       },
       en: {
         dashboard_title: "MuJoCo-Bench-IDO",
@@ -806,7 +851,7 @@
         viewer_not_installed: "mjviser not installed",
         viewer_opening: "Opening",
         viewer_already_running: "mjviser already running",
-        // ── v0.4.5 hint / explanation strings ──
+        // ── v0.5.3 hint / explanation strings ──
         hint_task_select: "Choose a dm_control benchmark task. The task determines the physics environment and goal invariants for the IDO agent.",
         hint_episodes: "Number of evaluation episodes per run. More episodes give more stable statistics but take longer.",
         hint_max_steps: "Maximum steps per episode. The agent stops early if it reaches the goal before this limit.",
@@ -825,6 +870,17 @@
         badge_current_scene_stairs: "Current Scene: Stairs Arena",
         badge_current_scene_floating: "Current Scene: Floating Platforms",
         badge_current_scene_maze: "Current Scene: Maze Arena",
+        // ── v0.5.3 5 Core Metrics ──
+        metric_episode_return: "Episode Return",
+        hint_metric_return: "Cumulative reward per episode",
+        metric_success_rate: "Success Rate",
+        hint_metric_success: "Task goal achieved ratio",
+        metric_eta: "η (EML Residual)",
+        hint_metric_eta: "Lower = closer to goal",
+        metric_nvr: "NVR",
+        hint_metric_nvr: "Noether violations count",
+        metric_ser: "SER",
+        hint_metric_ser: "Snap Efficiency Ratio",
       }
     };
 
@@ -1050,6 +1106,12 @@
 
         case 'episode_complete':
           addLog(`Episode ${data.episode} complete: steps=${data.metrics.steps_to_goal}, η=${data.metrics.final_eta.toFixed(6)}, NV=${data.metrics.noether_violations}`);
+          // Update success rate metric
+          if (!window._episodeStats) window._episodeStats = {success: 0, total: 0};
+          window._episodeStats.total++;
+          if (data.metrics.success) window._episodeStats.success++;
+          const sr = window._episodeStats.total > 0 ? Math.round(window._episodeStats.success / window._episodeStats.total * 100) : 0;
+          document.getElementById('metricSuccess').textContent = sr + '%';
           break;
 
         case 'run_stopped':
@@ -1190,6 +1252,19 @@
       const epProgress = (episode / totalEpisodes) * 100;
       document.getElementById('episodeProgressBar').style.width = epProgress + '%';
       document.getElementById('episodeProgressLabel').textContent = epProgress.toFixed(0) + '%';
+
+      // ── Update 5 Core Metrics ──
+      document.getElementById('metricReturn').textContent = data.episode_return.toFixed(2);
+      const successPct = data.success ? 100 : 0;  // Will be updated per-episode
+      document.getElementById('metricSuccess').textContent = successPct + '%';
+      document.getElementById('metricEta').textContent = data.eta.toFixed(4);
+      document.getElementById('metricNVR').textContent = data.noether_violations;
+      // SER = steps where kappa_snap_triggered / total steps (computed cumulatively)
+      if (!window._serStats) window._serStats = {snaps: 0, total: 0};
+      window._serStats.total++;
+      if (data.kappa_snap_triggered) window._serStats.snaps++;
+      const ser = window._serStats.total > 0 ? (window._serStats.snaps / window._serStats.total).toFixed(2) : '0.00';
+      document.getElementById('metricSER').textContent = ser;
     }
 
     // ── Update SIP-Bench Results ──
@@ -1240,6 +1315,15 @@
        'retentionGain', 'stabilityIndex'].forEach(id => {
         document.getElementById(id).textContent = '—';
       });
+
+      // ── Reset 5 Core Metrics ──
+      window._serStats = {snaps: 0, total: 0};
+      window._episodeStats = {success: 0, total: 0};
+      document.getElementById('metricReturn').textContent = '0.00';
+      document.getElementById('metricSuccess').textContent = '0%';
+      document.getElementById('metricEta').textContent = '—';
+      document.getElementById('metricNVR').textContent = '0';
+      document.getElementById('metricSER').textContent = '—';
     }
 
     // ── UI Helpers ──
@@ -1432,7 +1516,7 @@
       initCharts();
       connectWebSocket();
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.4.5');
+      addLog('Dashboard initialized v0.5.3');
     });
   </script>
 
