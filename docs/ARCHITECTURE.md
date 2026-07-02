@@ -744,6 +744,17 @@ graph TB
 
 根因：旧 evaluate_vs_baseline.py 中 PPO/SAC 实际不可运行，退化为 random baseline。
 
+**B4(P1): η 停滞问题修复**
+
+| 修改文件 | 说明 |
+|---------|------|
+| `core/kappa_snap_mj.py` | v0.2.0→v0.2.1: `gauss_ex_residual()` 新增 `step_index/epiplexity/w_decay` 参数，增加 familiarity decay (`η *= (1-decay_factor)` where `decay_factor = w_decay * min(step/100,1) * min(epip/5,1)`)；α blending 从固定 0.1 改为自适应 0.1–0.3 |
+| `agent/psi_anchor.py` | v0.2.0→v0.2.1: 新增 `relative_plateau_ratio=0.01` + `abs_plateau_floor=0.001` 参数；`analyze_eta_trend()` plateau 判断改为 `max(abs_floor, ratio*η_mean)` 相对阈值 |
+| `agent/mujoco_ido_agent.py` | 新增 `_step_counter` 属性；`_compute_kappa_snap()` 传入 `step_index+epiplexity` |
+| `benchmarks/run_mujoco_bench.py` | episode reset 时 `agent._step_counter = 0` |
+
+根因4个：(1) plateau_threshold 绝对值 0.001 → 大 η 时误判为停滞；(2) α blending=0.1 过低 → 趋势信号不起作用；(3) 无 familiarity decay → η 不反映结构理解加深；(4) MotorPrimitives 过粗糙 → deferred to v0.5.0
+
 #### v0.3.1 模块关系图更新
 
 ```mermaid
