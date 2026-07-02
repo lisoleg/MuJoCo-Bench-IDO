@@ -174,6 +174,7 @@ def run_episode_with_streaming(
     agent: IDOMuJoCoAgent,
     max_steps: int,
     episode: int,
+    task_name: Optional[str] = None,
 ) -> dict:
     """Run a single episode and broadcast per-step metrics via WebSocket.
 
@@ -181,11 +182,16 @@ def run_episode_with_streaming(
     step's data to connected WebSocket clients instead of just printing
     to console.
 
+    P0-1: episode_return is cumulative reward (not single-step).
+    P0-2: success is determined per-task via TASK_SUCCESS_CRITERIA.
+    P0-3: NVR breakdown tracks energy/torque/collision separately.
+
     Args:
         env: dm_control Environment instance.
         agent: IDOMuJoCoAgent instance.
         max_steps: Maximum number of steps per episode.
         episode: Current episode number (1-based) for broadcast.
+        task_name: Task name for per-task success criteria lookup.
 
     Returns:
         Dict with per-episode aggregated metrics.
@@ -205,8 +211,14 @@ def run_episode_with_streaming(
         agent.psi_anchor.plateau_steps = 0
 
     noether_violations: int = 0
+    nvr_breakdown: dict = {"energy": 0, "torque": 0, "collision": 0}
+    episode_return: float = 0.0
+    success: bool = False
     steps: int = 0
     start_time: float = time.time()
+
+    # P0-2: per-task success criteria lookup
+    success_fn = TASK_SUCCESS_CRITERIA.get(task_name, None) if task_name else None
 
     for step_idx in range(max_steps):
         # Check stop signal
@@ -227,6 +239,10 @@ def run_episode_with_streaming(
 
         steps += 1
 
+        # P0-1: accumulate episode return
+        step_reward: float = float(timestep.reward or 0.0)
+        episode_return += step_reward
+
         # ── Compute per-step metrics for WebSocket broadcast ──
         eta: float = agent._last_eta if agent._last_eta is not None else float('inf')
 
@@ -235,14 +251,25 @@ def run_episode_with_streaming(
         eta = gauss_ex_residual(z_i, agent.goal,
                                 flow_predictor=agent.flow_predictor)
 
-        # Noether check
+        # P0-3: Noether check with breakdown tracking
         noether_ok: bool = True
         noether_msg: str = ""
         if agent.prev_data is not None:
-            noether_ok, noether_msg = noether_check_mj(
+            nvr_result: dict = noether_check_mj(
                 agent.prev_data, env.physics.data, agent.goal)
+            noether_ok = nvr_result["ok"]
+            noether_msg = nvr_result["message"]
             if not noether_ok:
                 noether_violations += 1
+                nvr_breakdown["energy"] += nvr_result["energy"]
+                nvr_breakdown["torque"] += nvr_result["torque"]
+                nvr_breakdown["collision"] += nvr_result["collision"]
+
+        # P0-2: per-task success criteria check
+        if success_fn is not None and not success:
+            obs_dict: dict = timestep.observation if hasattr(timestep, 'observation') else {}
+            if success_fn(obs_dict, step_reward):
+                success = True
 
         # κ-Snap triggered check: whether η < kappa_thresh triggers PD stabilization
         kappa_snap_triggered: bool = eta < agent.kappa_thresh
@@ -280,6 +307,9 @@ def run_episode_with_streaming(
             "episode": episode,
             "eta": float(eta),
             "noether_violations": noether_violations,
+            "nvr_breakdown": nvr_breakdown,
+            "episode_return": episode_return,
+            "success": success,
             "kappa_snap_triggered": kappa_snap_triggered,
             "delta_k": float(delta_k),
             "psi_anchor_policy": psi_anchor_policy,
@@ -330,8 +360,10 @@ def run_episode_with_streaming(
         'steps_to_goal': steps,
         'final_eta': final_eta,
         'noether_violations': noether_violations,
+        'nvr_breakdown': nvr_breakdown,
         'elapsed_s': elapsed,
-        'avg_return': getattr(timestep, 'reward', 0.0),
+        'episode_return': episode_return,
+        'success': success,
         'hesit_rmse': hesit_rmse,
         'retry_voc': retry_voc,
         'epiplexity_score': epiplexity_score,
@@ -392,7 +424,7 @@ def _run_benchmark_background(request: RunRequest) -> None:
                 broadcast_sync({"type": "run_stopped", "episode": ep})
                 break
 
-            metrics = run_episode_with_streaming(env, agent, max_steps, ep)
+            metrics = run_episode_with_streaming(env, agent, max_steps, ep, task_name=task)
             results.append(metrics)
 
             # Broadcast episode complete event
@@ -506,7 +538,7 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
         for ep in range(1, episodes + 1):
             if run_state.should_stop:
                 break
-            metrics = run_episode_with_streaming(env, agent_t0, max_steps, ep)
+            metrics = run_episode_with_streaming(env, agent_t0, max_steps, ep, task_name=task)
             t0_results.append(metrics)
             broadcast_sync({
                 "type": "sip_phase_step",
@@ -543,7 +575,7 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
                 if run_state.should_stop:
                     break
                 total_ep: int = ep_offset + ep
-                metrics = run_episode_with_streaming(env, agent_t1, max_steps, total_ep)
+                metrics = run_episode_with_streaming(env, agent_t1, max_steps, total_ep, task_name=task)
                 t1_phase_results.append(metrics)
                 broadcast_sync({
                     "type": "sip_phase_step",
@@ -604,7 +636,7 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             if run_state.should_stop:
                 break
             total_ep: int = ep_offset_t2 + ep
-            metrics = run_episode_with_streaming(env, agent_t2, max_steps, total_ep)
+            metrics = run_episode_with_streaming(env, agent_t2, max_steps, total_ep, task_name=task)
             t2_results.append(metrics)
             broadcast_sync({
                 "type": "sip_phase_step",
@@ -1061,10 +1093,16 @@ async def start_viewer() -> JSONResponse:
                 root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. Root height: mild gravity assist + gentle PD (v0.4.5 fix) ──
-                # Only 30% gravity compensation — let legs + ground reaction support the body.
-                # Gentle PD guides toward target_height without strong levitation spring.
-                gravity_assist: float = 0.3 * humanoid_mass * 9.81
+                # ── 3. Root height: adaptive gravity assist + gentle PD (v0.4.5 fix) ──
+                # Adaptive gravity assist: more help near ground (standing), less when floating.
+                # This prevents levitation while allowing ground-contact standing.
+                if root_z < target_height:
+                    gravity_assist_frac: float = 0.5   # 50% assist when near ground (standing via legs)
+                elif root_z > target_height + 0.15:
+                    gravity_assist_frac = 0.1           # 10% assist when floating high (punish levitation)
+                else:
+                    gravity_assist_frac = 0.3           # 30% in transition zone
+                gravity_assist: float = gravity_assist_frac * humanoid_mass * 9.81
                 height_force: float = gravity_assist + KP_HEIGHT_GENTLE * (target_height - root_z) - KD_HEIGHT * root_vz
                 data.qfrc_applied[2] = float(np.clip(height_force, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
 

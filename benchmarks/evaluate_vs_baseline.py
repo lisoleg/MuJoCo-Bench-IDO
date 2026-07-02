@@ -32,10 +32,12 @@ import numpy as np
 from benchmarks.run_mujoco_bench import (
     IDOMuJoCoAgent,
     TASK_REGISTRY,
+    TASK_SUCCESS_CRITERIA,
     _import_env,
     run_single_episode,
 )
 from core.goal_eml_mj import GoalEML, make_humanoid_stand_eml
+from core.noether_check_mj import noether_check_mj
 from baselines.tdmpc2_adapter import TDMPC2Adapter, make_tdmpc2_adapter
 from baselines.cosmos_predict_adapter import CosmosPredictAdapter, make_cosmos_predict_adapter
 
@@ -219,14 +221,18 @@ def get_random_agent(env, goal: GoalEML, **kw):
 def compute_metrics(log: List[dict]) -> dict:
     """Compute aggregate metrics from a list of episode log entries.
 
+    P0-1: avg_return is mean of cumulative episode returns (not single-step).
+
+    P0-3: nvr_breakdown tracks energy/torque/collision separately.
+
     Args:
         log: List of dicts, each with keys: steps, final_eta, noether_v,
-             avg_return, elapsed_s, reached_goal.
+             avg_return, elapsed_s, reached_goal, success, nvr_breakdown.
 
     Returns:
         Dict with aggregated metrics: n_episodes, avg_steps, std_steps,
         min_steps, avg_final_eta, avg_return, total_noether_v, nvr,
-        avg_elapsed_s, survival_rate.
+        avg_elapsed_s, survival_rate, success_rate, nvr_breakdown.
     """
     n: int = len(log)
     return {
@@ -240,6 +246,12 @@ def compute_metrics(log: List[dict]) -> dict:
         'nvr':             float(np.mean([l['noether_v'] / max(l['steps'], 1) for l in log])),
         'avg_elapsed_s':   float(np.mean([l['elapsed_s'] for l in log])),
         'survival_rate':    float(np.mean([l['reached_goal'] for l in log])),
+        'success_rate':     float(np.mean([int(l.get('success', False)) for l in log])),
+        'nvr_breakdown': {
+            'energy': sum(l.get('nvr_breakdown', {}).get('energy', 0) for l in log),
+            'torque': sum(l.get('nvr_breakdown', {}).get('torque', 0) for l in log),
+            'collision': sum(l.get('nvr_breakdown', {}).get('collision', 0) for l in log),
+        },
     }
 
 
@@ -261,6 +273,10 @@ def compute_ser(steps_ido: float, steps_bl: float) -> float:
 def _remap_ido_metrics(raw: dict, max_steps: int) -> dict:
     """Remap run_single_episode output keys to compute_metrics format.
 
+    P0-1: maps episode_return (cumulative) → avg_return key for compute_metrics.
+    P0-2: maps success field for success_rate computation.
+    P0-3: maps nvr_breakdown for energy/torque/collision tracking.
+
     Args:
         raw: Dict from run_single_episode.
         max_steps: Maximum steps threshold for goal-reach classification.
@@ -272,9 +288,11 @@ def _remap_ido_metrics(raw: dict, max_steps: int) -> dict:
         'steps': raw['steps_to_goal'],
         'final_eta': raw['final_eta'],
         'noether_v': raw['noether_violations'],
-        'avg_return': raw['avg_return'],
+        'avg_return': raw.get('episode_return', 0.0),
         'elapsed_s': raw['elapsed_s'],
         'reached_goal': 1 if raw['steps_to_goal'] < max_steps else 0,
+        'success': raw.get('success', False),
+        'nvr_breakdown': raw.get('nvr_breakdown', {"energy": 0, "torque": 0, "collision": 0}),
     }
 
 
@@ -331,7 +349,7 @@ def run_cosmos_predict_comparison(task: str = 'humanoid-stand',
         print(f"  ── IDO Episode {ep}/{episodes} ──")
         # Reset flow predictor
         agent_ido.flow_predictor.clear()
-        raw_m = run_single_episode(env, agent_ido, max_steps)
+        raw_m = run_single_episode(env, agent_ido, max_steps, task_name=task)
         # Collect η trajectory from flow predictor buffer
         ido_eta_trajectory: List[float] = list(agent_ido.flow_predictor.eta_buffer)
         ido_eta_trajectories.append(ido_eta_trajectory)
@@ -498,7 +516,7 @@ def run_evaluation(task: str = 'humanoid-stand',
     ido_log: List[dict] = []
     for ep in range(1, episodes + 1):
         print(f"  ── Episode {ep}/{episodes} ──")
-        raw_m = run_single_episode(env, agent_ido, max_steps)
+        raw_m = run_single_episode(env, agent_ido, max_steps, task_name=task)
         m = _remap_ido_metrics(raw_m, max_steps)
         ido_log.append(m)
         print(f"  steps={m['steps']}, η={m['final_eta']:.6f}, "
@@ -530,6 +548,8 @@ def run_evaluation(task: str = 'humanoid-stand',
                 bl_agent = get_random_agent(env, goal)
 
         bl_log: List[dict] = []
+        # P0-2: per-task success criteria for baselines
+        bl_success_fn = TASK_SUCCESS_CRITERIA.get(task, None)
         for ep in range(1, episodes + 1):
             print(f"  ── Episode {ep}/{episodes} ──")
             timestep = env.reset()
@@ -541,6 +561,9 @@ def run_evaluation(task: str = 'humanoid-stand',
             returns: float = 0.0
             start: float = time.time()
             reached: int = 0
+            success: bool = False
+            nvr_breakdown: dict = {"energy": 0, "torque": 0, "collision": 0}
+            prev_data = None
 
             for _ in range(max_steps):
                 if hasattr(bl_agent, 'choose_action'):
@@ -555,7 +578,25 @@ def run_evaluation(task: str = 'humanoid-stand',
                     traceback.print_exc()
                     break
                 steps += 1
-                returns += float(getattr(timestep, 'reward', 0.0))
+                step_reward: float = float(timestep.reward or 0.0)
+                returns += step_reward
+
+                # P0-3: Noether check with breakdown for baselines
+                if prev_data is not None:
+                    nvr_result: dict = noether_check_mj(
+                        prev_data, env.physics.data, goal)
+                    if not nvr_result["ok"]:
+                        noether_v += 1
+                        nvr_breakdown["energy"] += nvr_result["energy"]
+                        nvr_breakdown["torque"] += nvr_result["torque"]
+                        nvr_breakdown["collision"] += nvr_result["collision"]
+                prev_data = env.physics.data
+
+                # P0-2: per-task success criteria check for baselines
+                if bl_success_fn is not None and not success:
+                    obs_dict: dict = timestep.observation if hasattr(timestep, 'observation') else {}
+                    if bl_success_fn(obs_dict, step_reward):
+                        success = True
 
                 try:
                     ee = env.physics.named.data.xpos['right_hand', :]
@@ -577,8 +618,10 @@ def run_evaluation(task: str = 'humanoid-stand',
                 'avg_return': returns,
                 'elapsed_s': elapsed,
                 'reached_goal': reached,
+                'success': success,
+                'nvr_breakdown': nvr_breakdown,
             })
-            print(f"  steps={steps}, return={returns:.2f}, reached={reached}")
+            print(f"  steps={steps}, return={returns:.2f}, reached={reached}, success={success}")
 
         bl_metrics: dict = compute_metrics(bl_log)
         bl_results[bl_name] = bl_metrics

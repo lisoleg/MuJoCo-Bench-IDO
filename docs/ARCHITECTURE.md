@@ -561,6 +561,7 @@ graph TB
 *v0.4.2 update: 2025-07-01 — Three-layer PD standing controller (gravity comp + root orientation + joint PD)*
 *v0.4.3 update: 2025-07-01 — Random walking controller + waypoint navigation + obstacle arena (replaces hard-lock root)*
 *v0.4.4 update: 2025-07-02 — Expanded dashboard task/scene selection + explanatory tooltips + 4 new 3D arenas*
+*v0.4.5 update: 2025-07-02 — Floating bug fix (root vertical force → adaptive gravity assist + leg joint ground support)*
 
 ---
 
@@ -667,6 +668,26 @@ graph TB
 | 修改文件 | 说明 |
 |---------|------|
 | `webviz/dashboard.html` | 导航链接从相对路径改为绝对URL `http://localhost:8080/user_manual.html` 和 `http://localhost:8080/mujoco_docs_cn.html` |
+
+#### v0.4.5 漂浮Bug修复 + 3D场景中文i18n
+
+| 修改文件 | 说明 |
+|---------|------|
+| `webviz/server.py` | Bug G（漂浮）修复：root垂直力从100%重力补偿+强PD弹簧改为自适应重力辅助（近地面50%/漂浮10%/过渡30%）+温和PD；腿部关节KP从50提至100、KD从15提至25；添加支撑相位逻辑（近地面boost腿伸展、漂浮时减弱）；水平移动KP从mass×5降至mass×1.5（步态驱动而非漂浮推力）；安全恢复力从mass×50降至mass×20、MIN_HEIGHT从0.5×target降至0.3×target；target_height从1.4降至1.28（dm_control）和1.0降至0.85（stick-figure）；版本号v0.4.5 |
+| `webviz/dashboard.html` | 3D场景选项value与API端点对齐（obstacle_arena→obstacle等）；i18n dict新增label_current_scene键和短名scene键（scene_obstacle/scene_ramp/scene_stairs/scene_floating/scene_maze）及对应badge键；版本号v0.4.5 |
+| `webviz/run_webviz.py` | 版本号v0.4.5 |
+
+**Bug G（漂浮）根因与修复**：
+
+根因：v0.4.3的step_fn在L1层使用`qfrc_applied[2] = m·g + KP·(h-z) - KD·vz`，完全抵消重力并加强PD弹簧推向target_height=1.4m，导致机器人像气球悬浮，脚不接触地面。
+
+修复策略（v0.4.5）：
+1. **自适应重力辅助**：不再100%抵消重力。近地面时50%辅助（站立稳定），漂浮时10%辅助（惩罚悬浮），过渡区30%
+2. **温和高度PD**：KP从mass×100降至mass×15，不再强弹簧推至target
+3. **腿部关节增强+支撑相位**：Hip/Knee KP从50→100、KD从15→25；支撑相位（root_z < target+0.05）boost腿伸展力×1.5、减少步态摆动；漂浮（root_z > target+0.1）减弱腿力×0.5
+4. **水平移动步态驱动**：KP_MOVE从mass×5降至mass×1.5，机器人通过步态前进而非被推着飘
+5. **安全恢复温和化**：恢复力从mass×50降至mass×20，MIN_HEIGHT从0.5×target降至0.3×target
+6. **target_height修正**：dm_control humanoid 1.28（自然站立高度），stick-figure 0.85
 
 #### v0.3.1 模块关系图更新
 

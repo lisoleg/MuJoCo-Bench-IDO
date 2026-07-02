@@ -15,7 +15,7 @@ Author: tomas-arc3-solver project · IDO-MuJoCo-Bench extension
 """
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 IDO_NOETHER_MJ_VERSION: str = "v1.0.0"
 
@@ -64,7 +64,7 @@ def noether_check_mj(prev_data,
                       goal,
                       max_torque: Optional[float] = None,
                       torque_margin: Optional[float] = None,
-                      collide_thresh: Optional[float] = None) -> Tuple[bool, str]:
+                      collide_thresh: Optional[float] = None) -> dict:
     """Run Noether conservation gate between two MuJoCo data snapshots.
 
     Checks:
@@ -81,9 +81,13 @@ def noether_check_mj(prev_data,
         collide_thresh: Override for self-collision threshold. Defaults to SELF_COLLIDE_THRESH.
 
     Returns:
-        Tuple of (ok: bool, message: str).
-        ok=True means all conservation invariants hold.
-        message is empty on success, or describes the violation on failure.
+        Dict with keys:
+          - ok: True if all gates passed, False if any violation detected.
+          - total: Total number of violations (0, 1, 2, or 3).
+          - energy: 1 if energy gate failed, 0 otherwise.
+          - torque: 1 if force/torque gate failed, 0 otherwise.
+          - collision: 1 if collision gate failed, 0 otherwise.
+          - message: Human-readable description of all violations (empty on success).
     """
     if max_torque is None:
         max_torque = MAX_TORQUE
@@ -91,6 +95,15 @@ def noether_check_mj(prev_data,
         torque_margin = TORQUE_MARGIN
     if collide_thresh is None:
         collide_thresh = SELF_COLLIDE_THRESH
+
+    result: dict = {
+        "ok": True,
+        "total": 0,
+        "energy": 0,
+        "torque": 0,
+        "collision": 0,
+        "message": "",
+    }
 
     # ── Energy Gate ──
     E_prev: float = (getattr(prev_data, 'energy', [0, 0])[0]
@@ -100,20 +113,37 @@ def noether_check_mj(prev_data,
     dE: float = E_cur - E_prev
 
     if dE > goal.max_energy_inject + ENERGY_DRIFT_EPS:
-        return False, (f"Noether-E: energy increased by {dE:.4f}J "
-                       f"exceeds budget {goal.max_energy_inject:.2f}J")
+        result["ok"] = False
+        result["energy"] = 1
+        result["total"] += 1
+        result["message"] = (f"Noether-E: energy increased by {dE:.4f}J "
+                             f"exceeds budget {goal.max_energy_inject:.2f}J")
 
     # ── Force Gate ──
     if hasattr(cur_data, 'actuator_force'):
         forces: np.ndarray = np.abs(np.asarray(cur_data.actuator_force))
         if len(forces) > 0 and np.max(forces) > max_torque * torque_margin:
-            return False, (f"Noether-F: max torque {np.max(forces):.2f} "
-                           f"exceeds limit {max_torque:.2f} N·m")
+            result["ok"] = False
+            result["torque"] = 1
+            result["total"] += 1
+            force_msg: str = (f"Noether-F: max torque {np.max(forces):.2f} "
+                              f"exceeds limit {max_torque:.2f} N·m")
+            if result["message"]:
+                result["message"] += "; " + force_msg
+            else:
+                result["message"] = force_msg
 
     # ── Collision Gate ──
     min_dist: float = _min_geom_distance(cur_data)
     if min_dist < collide_thresh:
-        return False, (f"Noether-C: self-collision detected "
-                       f"(min_dist={min_dist:.6f}m < {collide_thresh}m)")
+        result["ok"] = False
+        result["collision"] = 1
+        result["total"] += 1
+        collision_msg: str = (f"Noether-C: self-collision detected "
+                              f"(min_dist={min_dist:.6f}m < {collide_thresh}m)")
+        if result["message"]:
+            result["message"] += "; " + collision_msg
+        else:
+            result["message"] = collision_msg
 
-    return True, ""
+    return result

@@ -86,6 +86,53 @@ TASK_REGISTRY: dict = {
     'swimmer-swim15':            make_swimmer_swim15_eml,
 }
 
+# ── Per-Task Success Criteria (P0-2) ────────────────────────────────
+# Each lambda takes (obs_dict, step_reward) and returns bool indicating
+# whether the task goal has been achieved for that step. Thresholds are
+# based on dm_control reward structure documentation and common eval
+# conventions. obs_dict is timestep.observation (may be empty for some
+# tasks); step_reward is the single-step dm_control reward (float).
+TASK_SUCCESS_CRITERIA: dict = {
+    # reacher: reward = -dist_to_target + small_control_cost; success ≈ close to target
+    'reacher-easy': lambda obs, reward: reward > -0.01,
+    'reacher-hard': lambda obs, reward: reward > -0.01,
+    # humanoid: upright + standing/walking/running bonuses
+    'humanoid-stand': lambda obs, reward: reward > 0.5,
+    'humanoid-walk': lambda obs, reward: reward > 0.3,
+    'humanoid-run': lambda obs, reward: reward > 0.3,
+    # walker: upright + velocity reward
+    'walker-walk': lambda obs, reward: reward > 0.5,
+    'walker-run': lambda obs, reward: reward > 0.3,
+    'walker-stand': lambda obs, reward: reward > 0.8,
+    # hopper: standing + height reward
+    'hopper-stand': lambda obs, reward: reward > 0.5,
+    'hopper-hop': lambda obs, reward: reward > 0.3,
+    # cheetah: forward velocity reward
+    'cheetah-run': lambda obs, reward: reward > 0.5,
+    # cartpole: balance reward (close to 1 = perfectly balanced)
+    'cartpole-balance': lambda obs, reward: reward > 0.95,
+    'cartpole-swingup': lambda obs, reward: reward > 0.8,
+    'cartpole-balance_sparse': lambda obs, reward: reward > 0.0,  # sparse: 1 or 0
+    'cartpole-swingup_sparse': lambda obs, reward: reward > 0.0,
+    # finger: rotation reward
+    'finger-spin': lambda obs, reward: reward > 0.3,
+    'finger-turn_easy': lambda obs, reward: reward > 0.3,
+    'finger-turn_hard': lambda obs, reward: reward > 0.2,
+    # fish: swimming reward
+    'fish-swim': lambda obs, reward: reward > 0.3,
+    # manipulator: bring_ball reward
+    'manipulator-bring_ball': lambda obs, reward: reward > 0.3,
+    # acrobot: swingup reward (negative during swing, positive near goal)
+    'acrobot-swingup': lambda obs, reward: reward > -0.5,
+    # pendulum: balance reward (close to 1 = upright)
+    'pendulum-swingup': lambda obs, reward: reward > 0.9,
+    # ball_in_cup: catch reward (sparse, 1 on success)
+    'ball_in_cup-catch': lambda obs, reward: reward > 0.9,
+    # swimmer: forward swimming reward
+    'swimmer-swim6': lambda obs, reward: reward > 0.3,
+    'swimmer-swim15': lambda obs, reward: reward > 0.3,
+}
+
 
 def _import_env(task: str):
     """Import and load a dm_control environment by task name.
@@ -114,7 +161,8 @@ def _import_env(task: str):
 
 
 def run_single_episode(env, agent: IDOMuJoCoAgent,
-                       max_steps: int = 1000) -> dict:
+                       max_steps: int = 1000,
+                       task_name: Optional[str] = None) -> dict:
     """Run a single IDO agent episode and collect performance metrics.
 
     Executes the IDO decision loop for up to max_steps, checking oracle
@@ -123,14 +171,25 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
     v0.2.0: If agent has psi_anchor and flow_predictor, also collects
     Hesitation-RMSE, Retry-VOC, and Epiplexity metrics.
 
+    P0-1 fix: episode_return is cumulative reward across all steps (not
+    just the last single-step reward).
+
+    P0-2 fix: success is determined per-task via TASK_SUCCESS_CRITERIA
+    (no longer only humanoid-stand right_hand distance).
+
+    P0-3 fix: NVR breakdown tracks energy/torque/collision violations
+    separately.
+
     Args:
         env: dm_control Environment instance.
         agent: IDOMuJoCoAgent instance.
         max_steps: Maximum number of environment steps per episode.
+        task_name: Task identifier for per-task success criteria lookup.
 
     Returns:
         Dict with keys: steps_to_goal, final_eta, noether_violations,
-        elapsed_s, avg_return, hesit_rmse, retry_voc, epiplexity_score.
+        nvr_breakdown, elapsed_s, episode_return, success,
+        hesit_rmse, retry_voc, epiplexity_score.
     """
     timestep = env.reset()
     agent.prev_data = None
@@ -147,8 +206,14 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
         agent.psi_anchor.plateau_steps = 0
 
     noether_violations: int = 0
+    nvr_breakdown: dict = {"energy": 0, "torque": 0, "collision": 0}
+    episode_return: float = 0.0
+    success: bool = False
     steps: int = 0
     start_time: float = time.time()
+
+    # P0-2: per-task success criteria lookup
+    success_fn = TASK_SUCCESS_CRITERIA.get(task_name, None) if task_name else None
 
     for step_idx in range(max_steps):
         # Oracle replay takes precedence
@@ -167,16 +232,31 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
 
         steps += 1
 
-        # Noether check between prev and current data
+        # P0-1: accumulate episode return (dm_control timestep.reward is single-step)
+        step_reward: float = float(timestep.reward or 0.0)
+        episode_return += step_reward
+
+        # P0-3: Noether check with breakdown tracking
         if agent.prev_data is not None:
             from core.noether_check_mj import noether_check_mj
-            ok, _ = noether_check_mj(agent.prev_data,
-                                      env.physics.data,
-                                      agent.goal)
-            if not ok:
+            nvr_result: dict = noether_check_mj(agent.prev_data,
+                                                  env.physics.data,
+                                                  agent.goal)
+            if not nvr_result["ok"]:
                 noether_violations += 1
+                nvr_breakdown["energy"] += nvr_result["energy"]
+                nvr_breakdown["torque"] += nvr_result["torque"]
+                nvr_breakdown["collision"] += nvr_result["collision"]
 
-        # Goal achievement check via end-effector distance
+        # P0-2: per-task success criteria check
+        if success_fn is not None and not success:
+            obs_dict: dict = timestep.observation if hasattr(timestep, 'observation') else {}
+            if success_fn(obs_dict, step_reward):
+                success = True
+                print(f"  [IDO] Success achieved at step {steps} "
+                      f"(task={task_name}, step_reward={step_reward:.4f})")
+
+        # Goal achievement check via end-effector distance (legacy for humanoid-stand)
         ee: Optional[np.ndarray] = None
         try:
             ee = env.physics.named.data.xpos['right_hand', :].copy()
@@ -213,8 +293,10 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
         'steps_to_goal': steps,
         'final_eta': final_eta,
         'noether_violations': noether_violations,
+        'nvr_breakdown': nvr_breakdown,
         'elapsed_s': elapsed,
-        'avg_return': getattr(timestep, 'reward', 0.0),
+        'episode_return': episode_return,
+        'success': success,
         'hesit_rmse': hesit_rmse,
         'retry_voc': retry_voc,
         'epiplexity_score': epiplexity_score,
@@ -223,6 +305,15 @@ def run_single_episode(env, agent: IDOMuJoCoAgent,
 
 def _aggregate_metrics(results: List[dict]) -> dict:
     """Aggregate episode metrics into summary statistics.
+
+    P0-1: avg_episode_return is mean of cumulative episode returns
+    (not mean of single-step rewards).
+
+    P0-2: success_rate is fraction of episodes where task success
+    was achieved per TASK_SUCCESS_CRITERIA.
+
+    P0-3: nvr_breakdown aggregates energy/torque/collision counts
+    across all episodes.
 
     Args:
         results: List of per-episode metric dicts from run_single_episode.
@@ -239,7 +330,13 @@ def _aggregate_metrics(results: List[dict]) -> dict:
         'std_steps': float(np.std([r['steps_to_goal'] for r in results])),
         'avg_final_eta': float(np.mean([r['final_eta'] for r in results])),
         'total_noether_violations': sum(r['noether_violations'] for r in results),
-        'avg_return': float(np.mean([r['avg_return'] for r in results])),
+        'avg_episode_return': float(np.mean([r.get('episode_return', 0.0) for r in results])),
+        'success_rate': float(np.mean([int(r.get('success', False)) for r in results])),
+        'nvr_breakdown': {
+            'energy': sum(r.get('nvr_breakdown', {}).get('energy', 0) for r in results),
+            'torque': sum(r.get('nvr_breakdown', {}).get('torque', 0) for r in results),
+            'collision': sum(r.get('nvr_breakdown', {}).get('collision', 0) for r in results),
+        },
         'avg_hesit_rmse': float(np.mean([r.get('hesit_rmse', 0.0) for r in results])),
         'avg_retry_voc': float(np.mean([r.get('retry_voc', 0.0) for r in results])),
         'avg_epiplexity': float(np.mean([r.get('epiplexity_score', 0.0) for r in results])),
@@ -287,11 +384,13 @@ def run_benchmark(task: str = 'humanoid-stand',
     results: List[dict] = []
     for ep in range(1, episodes + 1):
         print(f"\n── Episode {ep}/{episodes} ──")
-        metrics = run_single_episode(env, agent, max_steps)
+        metrics = run_single_episode(env, agent, max_steps, task_name=task)
         results.append(metrics)
         print(f"  Result:  steps={metrics['steps_to_goal']},  "
               f"final_η={metrics['final_eta']:.6f},  "
               f"Noether_violations={metrics['noether_violations']},  "
+              f"episode_return={metrics['episode_return']:.4f},  "
+              f"success={metrics['success']},  "
               f"time={metrics['elapsed_s']:.1f}s")
 
     summary: dict = _aggregate_metrics(results)
@@ -321,7 +420,8 @@ def run_benchmark(task: str = 'humanoid-stand',
 
 def _run_sip_phase(env, agent: IDOMuJoCoAgent,
                    episodes: int, max_steps: int,
-                   phase_name: str) -> Dict[str, object]:
+                   phase_name: str,
+                   task_name: Optional[str] = None) -> Dict[str, object]:
     """Run one SIP-Bench phase (T0, T1, or T2).
 
     Args:
@@ -330,6 +430,7 @@ def _run_sip_phase(env, agent: IDOMuJoCoAgent,
         episodes: Number of episodes in this phase.
         max_steps: Maximum steps per episode.
         phase_name: Phase identifier ('T0', 'T1', 'T2').
+        task_name: Task name for per-task success criteria lookup.
 
     Returns:
         Dict with phase metrics and per-episode results.
@@ -342,11 +443,13 @@ def _run_sip_phase(env, agent: IDOMuJoCoAgent,
     phase_results: List[dict] = []
     for ep in range(1, episodes + 1):
         print(f"  ── {phase_name} Episode {ep}/{episodes} ──")
-        metrics = run_single_episode(env, agent, max_steps)
+        metrics = run_single_episode(env, agent, max_steps, task_name=task_name)
         phase_results.append(metrics)
         print(f"  steps={metrics['steps_to_goal']}, "
               f"η={metrics['final_eta']:.6f}, "
               f"NV={metrics['noether_violations']}, "
+              f"return={metrics.get('episode_return', 0.0):.4f}, "
+              f"success={metrics.get('success', False)}, "
               f"hesit_rmse={metrics.get('hesit_rmse', 0.0):.4f}, "
               f"retry_voc={metrics.get('retry_voc', 0.0):.4f}, "
               f"epiplexity={metrics.get('epiplexity_score', 0.0):.2f}")
@@ -431,7 +534,7 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
     agent_t0.psi_anchor = PsiAnchor(goal_t0)
     agent_t0.flow_predictor = FlowMatchingEtaPredictor()
 
-    t0_result: dict = _run_sip_phase(env, agent_t0, episodes, max_steps, 'T0')
+    t0_result: dict = _run_sip_phase(env, agent_t0, episodes, max_steps, 'T0', task_name=task)
 
     # ── Phase T1: Iterated (with ψ-Anchor evolution) ──
     # Create agent with psi_anchor active evolution
@@ -459,7 +562,7 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
         round_results: List[dict] = []
         for ep in range(1, episodes + 1):
             print(f"  ── T1 Evo-{evo_round} Episode {ep}/{episodes} ──")
-            metrics = run_single_episode(env, agent_t1, max_steps)
+            metrics = run_single_episode(env, agent_t1, max_steps, task_name=task)
             round_results.append(metrics)
 
         t1_phase_results.extend(round_results)
@@ -512,7 +615,7 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
     agent_t2.psi_anchor = PsiAnchor(goal_t2)
     agent_t2.flow_predictor = FlowMatchingEtaPredictor()
 
-    t2_result: dict = _run_sip_phase(env, agent_t2, episodes, max_steps, 'T2')
+    t2_result: dict = _run_sip_phase(env, agent_t2, episodes, max_steps, 'T2', task_name=task)
 
     # ── SIP-Bench Summary Metrics ──
     t0_avg_steps: float = t0_result.get('avg_steps', float('inf'))
