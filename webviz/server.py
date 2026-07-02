@@ -16,7 +16,7 @@ API Endpoints:
   GET  /user_manual.html — User manual HTML page
   GET  /mujoco_docs_cn.html — MuJoCo docs Chinese translation page
 
-Author: MuJoCo-Bench-IDO Webviz extension v0.5.4
+Author: MuJoCo-Bench-IDO Webviz extension v0.5.5
 """
 
 import asyncio
@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.5.4"
+WEBVIZ_VERSION: str = "v0.5.5"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)

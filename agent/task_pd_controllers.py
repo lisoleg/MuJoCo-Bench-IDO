@@ -174,6 +174,12 @@ class HumanoidStandPD(TaskPDController):
         factor in dm_control reward. Clips reduced from [-0.3, 0.3] to
         [-0.08, 0.08].
 
+        v0.5.5: REVERTED from two-phase recovery→stabilize (caused regression:
+        avg_return 8.47→3.87). Two-phase with ctrl_clip=0.3 in Phase 1 makes
+        upright WORSE (0.069 vs 0.223) and small_control WORSE (0.985 vs 0.995)
+        without improving stand_reward (0.014 stays ≈ same). Single-phase
+        ctrl_clip=0.08 remains the best approach.
+
         Args:
             physics: dm_control Physics instance.
         """
@@ -859,15 +865,15 @@ class WalkerWalkPD(TaskPDController):
         self.standing_targets: np.ndarray = np.array([0.0, -0.5, 0.0, 0.0, -0.5, 0.0])
         # ── Phase 3: Walking gait parameters (enhanced) ──
         self.gait_freq: float = 12.0  # rad/s (was 8.0)
-        self.gait_amplitude: float = 0.55  # hip push amplitude (was 0.35)
-        self.knee_amplitude: float = 0.4   # knee swing amplitude (was 0.25)
+        self.gait_amplitude: float = 0.65  # hip push amplitude (was 0.55)
+        self.knee_amplitude: float = 0.5   # knee swing amplitude (was 0.4)
         self.ankle_amplitude: float = 0.15  # ankle amplitude (was 0.1)
         # ── Velocity feedback (enhanced) ──
-        self.vel_kp: float = 0.5  # (was 0.15)
-        self.forward_bias_min: float = -0.3  # (was -0.2)
-        self.forward_bias_max: float = 0.8   # (was 0.4)
-        # ── Forward lean bias (2° ≈ 0.035 rad) ──
-        self.forward_lean_bias: float = 0.035
+        self.vel_kp: float = 0.8  # (was 0.5)
+        self.forward_bias_min: float = -0.2  # (was -0.3)
+        self.forward_bias_max: float = 1.0   # (was 0.8)
+        # ── Forward lean bias (~4° ≈ 0.07 rad) ──
+        self.forward_lean_bias: float = 0.07  # (was 0.035)
         # ── Upright maintenance during walking ──
         self.upright_kp: float = 0.5
         self.upright_kd: float = 0.2
@@ -990,7 +996,7 @@ class WalkerWalkPD(TaskPDController):
                         -1.0, 1.0)
                 return self._clip_ctrl(ctrl)
 
-            # Enhanced walking gait with forward lean
+            # Enhanced walking gait with forward lean + CoG shift
             t: float = step * 0.02
 
             phase_r: float = math.sin(self.gait_freq * t)
@@ -998,6 +1004,12 @@ class WalkerWalkPD(TaskPDController):
 
             right_push: float = max(phase_r, 0.0)
             left_push: float = max(-phase_l, 0.0)
+
+            # ── CoG shift: standing leg hip shifts forward to move CoG ──
+            # When right leg is in stance (right_push > 0.3), right hip shifts forward
+            # When left leg is in stance (left_push > 0.3), left hip shifts forward
+            cog_shift_r: float = 0.03 if right_push > 0.3 else 0.0
+            cog_shift_l: float = 0.03 if left_push > 0.3 else 0.0
 
             vel_error: float = self.target_speed - horiz_vel
             forward_bias: float = np.clip(
@@ -1007,12 +1019,13 @@ class WalkerWalkPD(TaskPDController):
             upright_error: float = max(0.0, 1.0 - torso_upright)
             upright_correction: float = self.upright_kp * upright_error
 
-            # ── Right leg (ctrl 0-2) with forward lean ──
-            # right_hip: forward push + gait + lean bias + upright correction
+            # ── Right leg (ctrl 0-2) with forward lean + CoG shift ──
+            # right_hip: forward push + gait + lean bias + upright correction + CoG shift
             ctrl[0] = np.clip(
                 forward_bias + right_push * self.gait_amplitude
-                + self.forward_lean_bias  # 2° forward lean
-                + upright_correction * 0.1,
+                + self.forward_lean_bias  # ~4° forward lean
+                + upright_correction * 0.1
+                + cog_shift_r,  # CoG shift when right leg is stance
                 -1.0, 1.0)
             ctrl[1] = np.clip(
                 -right_push * self.knee_amplitude + forward_bias * 0.3,
@@ -1021,11 +1034,12 @@ class WalkerWalkPD(TaskPDController):
                 right_push * self.ankle_amplitude,
                 -1.0, 1.0)
 
-            # ── Left leg (ctrl 3-5) with forward lean ──
+            # ── Left leg (ctrl 3-5) with forward lean + CoG shift ──
             ctrl[3] = np.clip(
                 forward_bias + left_push * self.gait_amplitude
-                + self.forward_lean_bias  # 2° forward lean
-                + upright_correction * 0.1,
+                + self.forward_lean_bias  # ~4° forward lean
+                + upright_correction * 0.1
+                + cog_shift_l,  # CoG shift when left leg is stance
                 -1.0, 1.0)
             ctrl[4] = np.clip(
                 -left_push * self.knee_amplitude + forward_bias * 0.3,
@@ -1104,15 +1118,15 @@ class WalkerRunPD(TaskPDController):
         self.stabilize_kd: float = 0.2
         # ── Phase 3: Running gait parameters ──
         self.gait_freq: float = 16.0  # rad/s (was 12)
-        self.gait_amplitude: float = 0.7  # (was 0.55)
-        self.knee_amplitude: float = 0.45  # (was 0.40)
+        self.gait_amplitude: float = 0.75  # (was 0.7) — larger stride for running
+        self.knee_amplitude: float = 0.5  # (was 0.45)
         self.ankle_amplitude: float = 0.2   # (was 0.15)
         # ── Velocity feedback (stronger for running) ──
-        self.vel_kp: float = 0.8  # (was 0.25)
-        self.forward_bias_min: float = -0.3  # (was -0.3)
-        self.forward_bias_max: float = 1.0   # (was 0.6)
+        self.vel_kp: float = 1.0  # (was 0.8)
+        self.forward_bias_min: float = -0.2  # (was -0.3)
+        self.forward_bias_max: float = 1.2   # (was 1.0)
         # ── Forward lean bias ──
-        self.forward_lean_bias: float = 0.05  # stronger lean for running (~3°)
+        self.forward_lean_bias: float = 0.07  # (~4° forward lean for running)
         # ── Upright maintenance during running ──
         self.upright_kp: float = 0.6
         self.upright_kd: float = 0.25
@@ -1213,7 +1227,7 @@ class WalkerRunPD(TaskPDController):
                     -0.8, 0.8)
 
         else:
-            # ── Phase 3: Running gait (enhanced) ──
+            # ── Phase 3: Running gait (enhanced) with CoG shift ──
             if fell_during_gait:
                 self._stabilize_steps = 0
                 for i in range(min(self.nu, 6)):
@@ -1240,6 +1254,10 @@ class WalkerRunPD(TaskPDController):
             right_push: float = max(phase_r, 0.0)
             left_push: float = max(-phase_l, 0.0)
 
+            # ── CoG shift: standing leg hip shifts forward to move CoG ──
+            cog_shift_r: float = 0.04 if right_push > 0.3 else 0.0  # larger for running
+            cog_shift_l: float = 0.04 if left_push > 0.3 else 0.0
+
             vel_error: float = self.target_speed - horiz_vel
             forward_bias: float = np.clip(
                 vel_error * self.vel_kp,
@@ -1248,11 +1266,12 @@ class WalkerRunPD(TaskPDController):
             upright_error: float = max(0.0, 1.0 - torso_upright)
             upright_correction: float = self.upright_kp * upright_error
 
-            # ── Right leg (ctrl 0-2) with forward lean ──
+            # ── Right leg (ctrl 0-2) with forward lean + CoG shift ──
             ctrl[0] = np.clip(
                 forward_bias + right_push * self.gait_amplitude
                 + self.forward_lean_bias
-                + upright_correction * 0.1,
+                + upright_correction * 0.1
+                + cog_shift_r,
                 -1.0, 1.0)
             ctrl[1] = np.clip(
                 -right_push * self.knee_amplitude + forward_bias * 0.4,
@@ -1261,11 +1280,12 @@ class WalkerRunPD(TaskPDController):
                 right_push * self.ankle_amplitude,
                 -1.0, 1.0)
 
-            # ── Left leg (ctrl 3-5) with forward lean ──
+            # ── Left leg (ctrl 3-5) with forward lean + CoG shift ──
             ctrl[3] = np.clip(
                 forward_bias + left_push * self.gait_amplitude
                 + self.forward_lean_bias
-                + upright_correction * 0.1,
+                + upright_correction * 0.1
+                + cog_shift_l,
                 -1.0, 1.0)
             ctrl[4] = np.clip(
                 -left_push * self.knee_amplitude + forward_bias * 0.4,
@@ -1296,7 +1316,7 @@ class WalkerRunPD(TaskPDController):
 
 
 class CheetahRunPD(TaskPDController):
-    """PD controller for cheetah-run: bounding gait for high speed.
+    """PD controller for cheetah-run: gallop gait for high speed (≥ 10 m/s).
 
     dm_control cheetah-run reward formula (critical alignment):
         reward = tolerance(speed(), bounds=(10, inf), margin=10,
@@ -1314,63 +1334,73 @@ class CheetahRunPD(TaskPDController):
         ctrl[4]: fshin (front shin, negative = extend)
         ctrl[5]: ffoot (front foot)
 
-    Strategy (v0.5.2 — bounding gait):
-    1. Bounding gait: back legs and front legs alternate push cycles.
-       back_phase = sin(freq*t), front_phase = sin(freq*t + pi/2)
-       (quarter offset for bounding — front pushes during back stance)
-    2. Velocity feedback: adjust gait amplitude based on speed error.
-       Target speed = 10 m/s (dm_control maximum reward threshold).
-       forward_bias = clip(vel_error * 0.3, -0.3, 0.8)
-    3. Torso stabilization: mild PD on torso pitch to prevent
-       excessive pitching during bounding.
-    4. Produce ACTUAL forward movement — not just oscillation.
+    Strategy (v0.5.5 — gallop gait with concentrated push):
+    1. Gallop gait: back legs push together, then front legs push together.
+       Unlike bounding (π/2 offset), gallop uses π*0.35 offset —
+       closer to real cheetah running pattern.
+       back_phase = sin(freq*t), front_phase = sin(freq*t + π*0.35)
+    2. Concentrated push profile: push^1.5 instead of push^1.0
+       → sharper thrust at peak of stance phase, less wasted energy.
+    3. Velocity feedback: vel_kp=0.5, target=10 m/s
+       forward_bias = clip(vel_error * 0.5, -0.3, 1.0)
+    4. Acceleration boost: 1.5x amplitude for first 50 steps to build speed.
+    5. Torso stabilization: mild PD on torso pitch.
 
-    PD gains (v0.5.2 — bounding gait):
-        Gait: gait_freq=18.0 rad/s (fast bounding cycle)
-        Back thigh amplitude: 0.7 (strong forward swing)
-        Front thigh amplitude: 0.6
-        Shin/knee amplitude: 0.4-0.5 (extend during stance)
-        Velocity feedback: vel_kp=0.3, target_speed=10.0 m/s
-        Torso pitch PD: kp=0.3, kd=0.1
+    PD gains (v0.5.5 — gallop gait):
+        Gait: gait_freq=18.0 rad/s
+        Back thigh amplitude: 0.9 (was 0.7)
+        Front thigh amplitude: 0.8 (was 0.6)
+        Back shin amplitude: 0.6 (was 0.5)
+        Front shin amplitude: 0.5 (was 0.4)
+        Velocity feedback: vel_kp=0.5 (was 0.3)
+        Forward bias clip: (-0.3, 1.0) (was (-0.3, 0.8))
+        Acceleration boost: 1.5x for first 50 steps
 
     Output: ctrl[0:6], clipped to [-1, 1].
     """
 
     def __init__(self, physics) -> None:
-        """Initialize CheetahRunPD with bounding gait parameters.
+        """Initialize CheetahRunPD with gallop gait parameters.
 
-        v0.5.2: Complete rewrite with bounding gait for high speed
-        targeting dm_control reward ≥ 10 m/s speed threshold.
+        v0.5.5: Complete rewrite — gallop gait (π*0.35 offset instead
+        of π/2 bounding), concentrated push profile (phase^1.5),
+        acceleration boost for first 50 steps, enhanced amplitudes.
 
         Args:
             physics: dm_control Physics instance.
         """
         super().__init__(physics, kp=0.3, kd=0.1)
         self.target_speed: float = 10.0
-        # Bounding gait parameters
-        self.gait_freq: float = 18.0  # rad/s for bounding cycle
-        self.back_thigh_amp: float = 0.7
-        self.back_shin_amp: float = 0.5
-        self.back_foot_amp: float = 0.3
-        self.front_thigh_amp: float = 0.6
-        self.front_shin_amp: float = 0.4
-        self.front_foot_amp: float = 0.2
-        # Velocity feedback
-        self.vel_kp: float = 0.3
+        # Gallop gait parameters
+        self.gait_freq: float = 18.0  # rad/s for gallop cycle
+        self.gallop_offset: float = math.pi * 0.35  # gallop phase offset (not π/2)
+        self.back_thigh_amp: float = 0.9   # (was 0.7)
+        self.back_shin_amp: float = 0.6    # (was 0.5)
+        self.back_foot_amp: float = 0.35   # (was 0.3)
+        self.front_thigh_amp: float = 0.8  # (was 0.6)
+        self.front_shin_amp: float = 0.5   # (was 0.4)
+        self.front_foot_amp: float = 0.25  # (was 0.2)
+        # Velocity feedback (enhanced)
+        self.vel_kp: float = 0.5   # (was 0.3)
+        self.forward_bias_min: float = -0.3
+        self.forward_bias_max: float = 1.0  # (was 0.8)
         # Torso pitch stabilization
         self.pitch_kp: float = 0.3
         self.pitch_kd: float = 0.1
+        # Acceleration boost: 1.5x amplitude for first 50 steps
+        self.boost_factor: float = 1.5
+        self.boost_steps: int = 50
 
     def compute_action(self, timestep, physics) -> np.ndarray:
-        """Compute bounding gait control for cheetah with velocity feedback.
+        """Compute gallop gait control for cheetah with concentrated push.
 
-        v0.5.2 Strategy:
-        1. Bounding gait: back legs and front legs alternate with
-           quarter-cycle offset for bounding locomotion.
-        2. Velocity feedback adjusts gait amplitude targeting 10 m/s.
-        3. Torso pitch stabilization prevents excessive pitching.
-        4. Strong forward push on thigh actuators, extend shins during
-           stance phase.
+        v0.5.5 Strategy:
+        1. Gallop gait: back legs push first, then front legs with
+           π*0.35 offset (not π/2 bounding).
+        2. Concentrated push: phase^1.5 → sharper thrust at peak.
+        3. Velocity feedback adjusts gait amplitude targeting 10 m/s.
+        4. Acceleration boost: 1.5x for first 50 steps.
+        5. Torso pitch stabilization prevents excessive pitching.
 
         Args:
             timestep: dm_control TimeStep.
@@ -1384,20 +1414,15 @@ class CheetahRunPD(TaskPDController):
         step: int = self._increment_step()
 
         # ── 1. Get cheetah state ──
-        # Forward speed: torso forward velocity
         speed: float = 0.0
         try:
             torso_vel = phys.named.data.sensordata['torso_subtreelinvel']
             speed = float(torso_vel[0]) if hasattr(torso_vel, '__len__') else float(torso_vel)
         except (KeyError, IndexError, TypeError):
-            # Fallback: use qvel root x velocity
             speed = float(phys.data.qvel[0]) if len(phys.data.qvel) > 0 else 0.0
 
-        # Torso pitch angle (from qpos — cheetah root includes orientation)
         torso_pitch: float = 0.0
         try:
-            # Cheetah qpos: [rootx, rootz, rooty_rotation, ...joints]
-            # rooty_rotation at qpos[2] is the pitch angle
             torso_pitch = float(phys.data.qpos[2]) if len(phys.data.qpos) > 2 else 0.0
         except (IndexError, AttributeError):
             torso_pitch = 0.0
@@ -1410,25 +1435,28 @@ class CheetahRunPD(TaskPDController):
 
         # ── 2. Velocity feedback ──
         vel_error: float = self.target_speed - speed
-        forward_bias: float = np.clip(vel_error * self.vel_kp, -0.3, 0.8)
+        forward_bias: float = np.clip(
+            vel_error * self.vel_kp,
+            self.forward_bias_min, self.forward_bias_max)
 
         # ── 3. Torso pitch stabilization ──
-        # Keep torso from pitching too much (mild PD)
         pitch_correction: float = (
             -self.pitch_kp * torso_pitch
             - self.pitch_kd * torso_pitch_vel)
 
-        # ── 4. Bounding gait ──
+        # ── 4. Acceleration boost ──
+        boost: float = self.boost_factor if step < self.boost_steps else 1.0
+
+        # ── 5. Gallop gait ──
         t: float = step * 0.02  # time in seconds
 
-        # Bounding: back and front legs alternate with quarter-cycle offset
+        # Gallop: back legs push first, then front legs with π*0.35 offset
         back_phase: float = math.sin(self.gait_freq * t)
-        front_phase: float = math.sin(self.gait_freq * t + math.pi / 2)
+        front_phase: float = math.sin(self.gait_freq * t + self.gallop_offset)
 
-        # Back leg: push when back_phase > 0 (stance phase for back)
-        back_push: float = max(back_phase, 0.0)
-        # Front leg: push when front_phase > 0 (stance phase for front)
-        front_push: float = max(front_phase, 0.0)
+        # Concentrated push profile: phase^1.5 → sharper thrust at peak
+        back_push: float = max(back_phase, 0.0) ** 1.5
+        front_push: float = max(front_phase, 0.0) ** 1.5
 
         # Swing phases (retract legs during non-push phases)
         back_swing: float = min(back_phase, 0.0)  # negative = swing
@@ -1438,41 +1466,42 @@ class CheetahRunPD(TaskPDController):
             # ── Back leg (ctrl 0-2) ──
             # ctrl[0]: bthigh — forward push during stance, retract during swing
             ctrl[0] = np.clip(
-                forward_bias + back_push * self.back_thigh_amp
+                forward_bias + back_push * self.back_thigh_amp * boost
                 + back_swing * self.back_thigh_amp * 0.3  # gentle retract
                 + pitch_correction * 0.2,
                 -1.0, 1.0)
-            # ctrl[1]: bshin — extend backward during stance (negative),
+            # ctrl[1]: bshin — extend backward during stance (negative)
             ctrl[1] = np.clip(
-                -back_push * self.back_shin_amp
+                -back_push * self.back_shin_amp * boost
                 - back_swing * self.back_shin_amp * 0.3,
                 -1.0, 1.0)
             # ctrl[2]: bfoot — push down during stance
             ctrl[2] = np.clip(
-                back_push * self.back_foot_amp,
+                back_push * self.back_foot_amp * boost,
                 -1.0, 1.0)
 
             # ── Front leg (ctrl 3-5) ──
             # ctrl[3]: fthigh — forward push during stance, retract during swing
             ctrl[3] = np.clip(
-                forward_bias + front_push * self.front_thigh_amp
+                forward_bias + front_push * self.front_thigh_amp * boost
                 + front_swing * self.front_thigh_amp * 0.3  # gentle retract
                 + pitch_correction * 0.2,
                 -1.0, 1.0)
             # ctrl[4]: fshin — extend backward during stance
             ctrl[4] = np.clip(
-                -front_push * self.front_shin_amp
+                -front_push * self.front_shin_amp * boost
                 - front_swing * self.front_shin_amp * 0.3,
                 -1.0, 1.0)
             # ctrl[5]: ffoot — push down during stance
             ctrl[5] = np.clip(
-                front_push * self.front_foot_amp,
+                front_push * self.front_foot_amp * boost,
                 -1.0, 1.0)
         else:
             # Fallback for fewer actuators
             for i in range(self.nu):
+                push: float = back_push if i < 3 else front_push
                 ctrl[i] = np.clip(
-                    forward_bias + (back_push if i < 3 else front_push) * 0.5,
+                    forward_bias + push * 0.5 * boost,
                     -1.0, 1.0)
 
         return self._clip_ctrl(ctrl)
