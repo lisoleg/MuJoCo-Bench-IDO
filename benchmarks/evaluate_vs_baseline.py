@@ -38,6 +38,7 @@ from benchmarks.run_mujoco_bench import (
 )
 from core.goal_eml_mj import GoalEML, make_humanoid_stand_eml
 from core.noether_check_mj import noether_check_mj
+from baselines.sb3_adapter import SB3PPOAdapter, SB3SACAdapter, make_sb3_ppo_adapter, make_sb3_sac_adapter
 from baselines.tdmpc2_adapter import TDMPC2Adapter, make_tdmpc2_adapter
 from baselines.cosmos_predict_adapter import CosmosPredictAdapter, make_cosmos_predict_adapter
 
@@ -62,48 +63,90 @@ def register_baseline(name: str):
 
 @register_baseline("ppo")
 def make_ppo_agent(env, goal: GoalEML, **kw):
-    """Factory for PPO baseline agent (requires stable-baselines3).
+    """Factory for PPO baseline agent using SB3PPOAdapter.
 
-    Falls back to None (→ random) if SB3 is not installed.
+    Uses the baselines/sb3_adapter.py adapter class, which:
+    - Loads pre-trained checkpoints from checkpoints/<task>/ppo/
+    - Auto-trains (100K steps) when no checkpoint exists
+    - Returns actual PPO policy actions (no random fallback after training)
+    - Gracefully degrades to random if SB3/shimmy not installed
 
     Args:
         env: dm_control Environment instance.
-        goal: GoalEML instance (used to derive model name).
-        **kw: Additional keyword arguments (unused).
+        goal: GoalEML instance (used to derive task name).
+        **kw: Additional keyword arguments:
+              - task_name: Task name override (default: goal.name).
+              - checkpoint_dir: Root checkpoint directory.
+              - auto_train_steps: Steps for auto-training (default 100K).
 
     Returns:
-        PPO model instance or None on import failure.
+        SB3PPOAdapter instance or None on failure.
     """
-    try:
-        from stable_baselines3 import PPO
-        import gymnasium as gym
-        return PPO.load("ppo_" + goal.name, env=gym.make(goal.name))
-    except ImportError:
-        print("  [Baseline] SB3 not installed; PPO → random fallback")
+    task_name: str = kw.get('task_name', goal.name)
+    checkpoint_dir: str = kw.get('checkpoint_dir', 'checkpoints')
+    auto_train_steps: int = kw.get('auto_train_steps', 100_000)
+
+    adapter: Optional[SB3PPOAdapter] = make_sb3_ppo_adapter(
+        task_name=task_name,
+        checkpoint_dir=checkpoint_dir,
+        auto_train_steps=auto_train_steps,
+        verbose=0,
+    )
+
+    if adapter is None or not adapter.is_available():
+        print("  [Baseline] SB3PPOAdapter not available; → random fallback")
         return None
+
+    if adapter.is_trained():
+        print(f"  [Baseline] PPO loaded/trained for {task_name}")
+    else:
+        print(f"  [Baseline] PPO auto-training in progress for {task_name}")
+
+    return adapter
 
 
 @register_baseline("sac")
 def make_sac_agent(env, goal: GoalEML, **kw):
-    """Factory for SAC baseline agent (requires stable-baselines3).
+    """Factory for SAC baseline agent using SB3SACAdapter.
 
-    Falls back to None (→ random) if SB3 is not installed.
+    Uses the baselines/sb3_adapter.py adapter class, which:
+    - Loads pre-trained checkpoints from checkpoints/<task>/sac/
+    - Auto-trains (100K steps) when no checkpoint exists
+    - Returns actual SAC policy actions (no random fallback after training)
+    - Gracefully degrades to random if SB3/shimmy not installed
 
     Args:
         env: dm_control Environment instance.
-        goal: GoalEML instance (used to derive model name).
-        **kw: Additional keyword arguments (unused).
+        goal: GoalEML instance (used to derive task name).
+        **kw: Additional keyword arguments:
+              - task_name: Task name override (default: goal.name).
+              - checkpoint_dir: Root checkpoint directory.
+              - auto_train_steps: Steps for auto-training (default 100K).
 
     Returns:
-        SAC model instance or None on import failure.
+        SB3SACAdapter instance or None on failure.
     """
-    try:
-        from stable_baselines3 import SAC
-        import gymnasium as gym
-        return SAC.load("sac_" + goal.name, env=gym.make(goal.name))
-    except ImportError:
-        print("  [Baseline] SB3 not installed; SAC → random fallback")
+    task_name: str = kw.get('task_name', goal.name)
+    checkpoint_dir: str = kw.get('checkpoint_dir', 'checkpoints')
+    auto_train_steps: int = kw.get('auto_train_steps', 100_000)
+
+    adapter: Optional[SB3SACAdapter] = make_sb3_sac_adapter(
+        task_name=task_name,
+        checkpoint_dir=checkpoint_dir,
+        auto_train_steps=auto_train_steps,
+        verbose=0,
+    )
+
+    if adapter is None or not adapter.is_available():
+        print("  [Baseline] SB3SACAdapter not available; → random fallback")
         return None
+
+    if adapter.is_trained():
+        print(f"  [Baseline] SAC loaded/trained for {task_name}")
+    else:
+        print(f"  [Baseline] SAC auto-training in progress for {task_name}")
+
+    return adapter
 
 
 @register_baseline("tdmpc2_v2")
