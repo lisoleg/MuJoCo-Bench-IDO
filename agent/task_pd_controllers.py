@@ -855,28 +855,28 @@ class WalkerWalkPD(TaskPDController):
         self.target_speed: float = 1.0
         self.target_height: float = 1.2
         # ── Phase 1: Recovery gains (aggressive) ──
-        self.recovery_kp: float = 2.0
-        self.recovery_kd: float = 0.8
+        self.recovery_kp: float = 2.5  # v0.6.1: increased from 2.0 for faster standup
+        self.recovery_kd: float = 0.9  # v0.6.1: increased from 0.8
         # ── Phase 2: Stabilize gains (gentle) ──
-        self.stabilize_kp: float = 0.5
-        self.stabilize_kd: float = 0.2
+        self.stabilize_kp: float = 0.6  # v0.6.1: increased from 0.5
+        self.stabilize_kd: float = 0.25 # v0.6.1: increased from 0.2
         # ── Standing pose targets for recovery/stabilize ──
         # [right_hip, right_knee, right_ankle, left_hip, left_knee, left_ankle]
         self.standing_targets: np.ndarray = np.array([0.0, -0.5, 0.0, 0.0, -0.5, 0.0])
-        # ── Phase 3: Walking gait parameters (enhanced) ──
-        self.gait_freq: float = 12.0  # rad/s (was 8.0)
-        self.gait_amplitude: float = 0.65  # hip push amplitude (was 0.55)
-        self.knee_amplitude: float = 0.5   # knee swing amplitude (was 0.4)
-        self.ankle_amplitude: float = 0.15  # ankle amplitude (was 0.1)
-        # ── Velocity feedback (enhanced) ──
-        self.vel_kp: float = 0.8  # (was 0.5)
-        self.forward_bias_min: float = -0.2  # (was -0.3)
-        self.forward_bias_max: float = 1.0   # (was 0.8)
-        # ── Forward lean bias (~4° ≈ 0.07 rad) ──
-        self.forward_lean_bias: float = 0.07  # (was 0.035)
+        # ── Phase 3: Walking gait parameters (v0.6.1 enhanced) ──
+        self.gait_freq: float = 14.0  # v0.6.1: increased from 12 for faster stepping
+        self.gait_amplitude: float = 0.85  # v0.6.1: increased from 0.65 for stronger push
+        self.knee_amplitude: float = 0.55  # v0.6.1: increased from 0.5
+        self.ankle_amplitude: float = 0.20  # v0.6.1: increased from 0.15
+        # ── Velocity feedback (v0.6.1 enhanced) ──
+        self.vel_kp: float = 1.2  # v0.6.1: increased from 0.8 for stronger drive
+        self.forward_bias_min: float = -0.1  # v0.6.1: less negative → more forward
+        self.forward_bias_max: float = 1.5   # v0.6.1: increased from 1.0
+        # ── Forward lean bias (v0.6.1: ~8° ≈ 0.14 rad) ──
+        self.forward_lean_bias: float = 0.14  # v0.6.1: doubled from 0.07
         # ── Upright maintenance during walking ──
-        self.upright_kp: float = 0.5
-        self.upright_kd: float = 0.2
+        self.upright_kp: float = 0.6  # v0.6.1: increased from 0.5
+        self.upright_kd: float = 0.25  # v0.6.1: increased from 0.2
         # ── Phase thresholds ──
         self.recovery_height_thresh: float = 1.0
         self.recovery_upright_thresh: float = 0.7
@@ -884,7 +884,7 @@ class WalkerWalkPD(TaskPDController):
         self.gait_fallback_upright_thresh: float = 0.6
         # ── Stabilize step counter ──
         self._stabilize_steps: int = 0
-        self._stabilize_target: int = 5
+        self._stabilize_target: int = 3  # v0.6.1: reduced from 5 → faster gait onset
 
     def compute_action(self, timestep, physics) -> np.ndarray:
         """Compute 3-phase walker-walk control: recovery → stabilize → gait.
@@ -1371,25 +1371,25 @@ class CheetahRunPD(TaskPDController):
         """
         super().__init__(physics, kp=0.3, kd=0.1)
         self.target_speed: float = 10.0
-        # Gallop gait parameters
-        self.gait_freq: float = 18.0  # rad/s for gallop cycle
+        # Gallop gait parameters (v0.6.1 enhanced)
+        self.gait_freq: float = 22.0  # v0.6.1: increased from 18 for faster cycle
         self.gallop_offset: float = math.pi * 0.35  # gallop phase offset (not π/2)
-        self.back_thigh_amp: float = 0.9   # (was 0.7)
-        self.back_shin_amp: float = 0.6    # (was 0.5)
-        self.back_foot_amp: float = 0.35   # (was 0.3)
-        self.front_thigh_amp: float = 0.8  # (was 0.6)
-        self.front_shin_amp: float = 0.5   # (was 0.4)
-        self.front_foot_amp: float = 0.25  # (was 0.2)
-        # Velocity feedback (enhanced)
-        self.vel_kp: float = 0.5   # (was 0.3)
-        self.forward_bias_min: float = -0.3
-        self.forward_bias_max: float = 1.0  # (was 0.8)
-        # Torso pitch stabilization
-        self.pitch_kp: float = 0.3
-        self.pitch_kd: float = 0.1
-        # Acceleration boost: 1.5x amplitude for first 50 steps
+        self.back_thigh_amp: float = 1.1   # v0.6.1: increased from 0.9
+        self.back_shin_amp: float = 0.7    # v0.6.1: increased from 0.6
+        self.back_foot_amp: float = 0.45   # v0.6.1: increased from 0.35
+        self.front_thigh_amp: float = 1.0  # v0.6.1: increased from 0.8
+        self.front_shin_amp: float = 0.6   # v0.6.1: increased from 0.5
+        self.front_foot_amp: float = 0.30  # v0.6.1: increased from 0.25
+        # Velocity feedback (v0.6.1 enhanced)
+        self.vel_kp: float = 0.8   # v0.6.1: increased from 0.5 for stronger drive
+        self.forward_bias_min: float = -0.2  # v0.6.1: less negative → more forward
+        self.forward_bias_max: float = 1.5  # v0.6.1: increased from 1.0
+        # Torso pitch stabilization (v0.6.1 enhanced)
+        self.pitch_kp: float = 0.4  # v0.6.1: increased from 0.3
+        self.pitch_kd: float = 0.15 # v0.6.1: increased from 0.1
+        # Acceleration boost: 1.5x amplitude for first 80 steps
         self.boost_factor: float = 1.5
-        self.boost_steps: int = 50
+        self.boost_steps: int = 80  # v0.6.1: increased from 50
 
     def compute_action(self, timestep, physics) -> np.ndarray:
         """Compute gallop gait control for cheetah with concentrated push.

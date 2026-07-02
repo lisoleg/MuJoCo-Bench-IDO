@@ -145,8 +145,8 @@ class TestGoalEMLDataclass(unittest.TestCase):
         self.assertAlmostEqual(g.ori_tol, 0.2)
 
     def test_goal_eml_fields_count(self):
-        """GoalEML should have exactly 8 fields (v0.5.2: added collide_thresh)."""
-        self.assertEqual(len(fields(GoalEML)), 8)
+        """GoalEML should have exactly 13 fields (v0.6.1: added locomotion η-mode fields)."""
+        self.assertEqual(len(fields(GoalEML)), 13)
 
     def test_goal_eml_invariants_default_factory(self):
         """Each GoalEML instance should have an independent invariants list."""

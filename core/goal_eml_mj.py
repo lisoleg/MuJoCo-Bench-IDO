@@ -38,6 +38,18 @@ class GoalEML:
     delta_K tolerance, the energy injection budget, and position/
     orientation tolerances.
 
+    v0.6.1 Upgrade: η-mode for locomotion tasks.
+    For locomotion (walker/cheetah/hopper), the dm_control reward is
+    velocity-based (speed ≥ threshold), not position-based (reach point).
+    Using a fixed target_pos for η makes η unreachable — the agent's
+    torso distance to [5,0,0] is ~5m even at start, producing η~25+.
+    locomotion η-mode replaces position residual with velocity+height+upright
+    residuals that align with dm_control's tolerance() reward formula:
+        η = w_vel * vel_deficit^2 + w_height * height_deficit^2
+            + w_upright * upright_deficit^2
+    This makes η decrease as the agent walks/runs correctly, allowing
+    it to enter near-goal PD stabilize mode.
+
     Attributes:
         name: Task name string (e.g., 'humanoid_reach').
         invariants: List of invariant names the agent must preserve.
@@ -50,6 +62,18 @@ class GoalEML:
             Locomotion tasks (humanoid, walker, cheetah, hopper) use
             higher values (0.05) because body parts are naturally close.
             Small tasks (reacher, fish) use lower values (0.01).
+        eta_mode: η computation mode — 'point' (default, distance to
+            target_pos) or 'locomotion' (velocity+height+upright deficit).
+        target_speed: Target horizontal speed for locomotion η (m/s).
+            walker-walk: 1.0, cheetah-run: 10.0.
+        target_height: Target torso height for locomotion η (m).
+            walker-walk: 1.2, cheetah-run: ~0.5.
+        target_upright: Target torso upright score for locomotion η.
+            walker-walk: 0.7, cheetah-run: ~0.3.
+        eta_weights: Override weights for η computation.
+            Default: w_pos=1.0, w_ori=0.3, w_eng=0.01, w_vel=0.05.
+            Locomotion override: w_vel=1.0, w_height=0.5, w_upright=0.3,
+                w_eng=0.01 (velocity-dominant, not position-dominant).
     """
     name: str
     invariants: List[str] = field(default_factory=list)
@@ -59,6 +83,12 @@ class GoalEML:
     pos_tol: float = 0.02
     ori_tol: float = 0.15
     collide_thresh: float = 0.01
+    # ── v0.6.1: Locomotion η-mode fields ──
+    eta_mode: str = 'point'  # 'point' | 'locomotion'
+    target_speed: float = 0.0  # m/s (0 = not applicable)
+    target_height: float = 0.0  # m (0 = not applicable)
+    target_upright: float = 0.0  # score (0 = not applicable)
+    eta_weights: Optional[dict] = None  # override default η weights
 
 
 def make_humanoid_stand_eml(physics,
@@ -344,22 +374,42 @@ def make_walker_walk_eml(physics,
     Creates a GoalEML for the walker-walk task where the walker
     must walk forward without falling.
 
+    v0.6.1: Switched to locomotion η-mode. The dm_control walker-walk
+    reward is velocity-based (speed ≥ 1.0 m/s + upright + height ≥ 1.2),
+    not position-based. Using a fixed target_pos=[5,0,0] made η ~38
+    (distance to point, never decreasing), trapping the agent in far-goal
+    mode. Locomotion η-mode computes η from velocity/height/upright
+    deficits, which decrease as the agent walks correctly.
+
+    η formula (locomotion mode):
+        η = w_vel * vel_deficit^2 + w_height * height_deficit^2
+            + w_upright * upright_deficit^2 + w_eng * energy_excess^2
+        vel_deficit = max(0, target_speed - current_speed)
+        height_deficit = max(0, target_height - torso_z)
+        upright_deficit = max(0, target_upright - torso_upright_score)
+
     Args:
         physics: dm_control Physics instance.
         delta_K: κ-Snap residual threshold.
 
     Returns:
-        GoalEML instance for walker-walk task.
+        GoalEML instance for walker-walk task with locomotion η-mode.
     """
     return GoalEML(
         name='walker_walk',
         invariants=['com_x_advancing', 'not_fallen', 'no_self_collide'],
-        target_pos=np.array([5.0, 0.0, 0.0]),
-        delta_K=delta_K,
+        target_pos=np.array([5.0, 0.0, 1.2]),  # kept for compatibility
+        delta_K=0.3,  # v0.6.1: higher κ_thresh for locomotion (η scales differently)
         max_energy_inject=400.0,
         pos_tol=0.10,
         ori_tol=0.20,
         collide_thresh=0.05,  # locomotion: legs naturally close
+        # ── v0.6.1: Locomotion η-mode ──
+        eta_mode='locomotion',
+        target_speed=1.0,   # dm_control: horizontal_velocity ≥ 1.0 m/s
+        target_height=1.2,  # dm_control: torso_height ≥ 1.2 m
+        target_upright=0.7, # dm_control: torso_upright ≥ 0.7 (xmat zz)
+        eta_weights={'w_vel': 1.0, 'w_height': 0.5, 'w_upright': 0.3, 'w_eng': 0.01},
     )
 
 
@@ -370,22 +420,40 @@ def make_cheetah_run_eml(physics,
     Creates a GoalEML for the cheetah-run task where the cheetah
     must run forward as fast as possible.
 
+    v0.6.1: Switched to locomotion η-mode. The dm_control cheetah-run
+    reward is purely speed-based (speed ≥ 10 m/s, linear ramp).
+    Using target_pos=[10,0,0] made η ~100 (point distance), making
+    η unreachable. Locomotion η-mode computes η from speed deficit,
+    which decreases as the cheetah runs faster.
+
+    η formula (locomotion mode):
+        η = w_vel * vel_deficit^2 + w_height * height_deficit^2
+            + w_upright * upright_deficit^2 + w_eng * energy_excess^2
+        vel_deficit = max(0, target_speed - current_speed)
+        For cheetah, upright is loosely required (not fallen = height > 0).
+
     Args:
         physics: dm_control Physics instance.
         delta_K: κ-Snap residual threshold.
 
     Returns:
-        GoalEML instance for cheetah-run task.
+        GoalEML instance for cheetah-run task with locomotion η-mode.
     """
     return GoalEML(
         name='cheetah_run',
         invariants=['com_x_advancing', 'not_fallen'],
-        target_pos=np.array([10.0, 0.0, 0.0]),
-        delta_K=delta_K,
+        target_pos=np.array([10.0, 0.0, 0.0]),  # kept for compatibility
+        delta_K=2.0,  # v0.6.1: much higher κ_thresh for fast-running task
         max_energy_inject=500.0,
         pos_tol=0.10,
         ori_tol=0.0,
         collide_thresh=0.05,  # locomotion: legs naturally close
+        # ── v0.6.1: Locomotion η-mode ──
+        eta_mode='locomotion',
+        target_speed=10.0,   # dm_control: speed ≥ 10 m/s for max reward
+        target_height=0.3,   # cheetah is low — just "not fallen"
+        target_upright=0.3,  # cheetah is horizontal — upright loosely
+        eta_weights={'w_vel': 1.0, 'w_height': 0.2, 'w_upright': 0.1, 'w_eng': 0.01},
     )
 
 

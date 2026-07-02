@@ -56,8 +56,8 @@ class TestPsiAnchorVersion:
     """Verify ψ-Anchor version constant."""
 
     def test_version_string(self) -> None:
-        """PsiAnchor version should be v0.2.1."""
-        assert IDO_PSI_ANCHOR_VERSION == "v0.2.1"
+        """PsiAnchor version should be v0.3.0."""
+        assert IDO_PSI_ANCHOR_VERSION == "v0.3.0"
 
 
 # ── Initialization ────────────────────────────────────────────────

@@ -36,7 +36,7 @@ import hashlib
 import numpy as np
 from typing import Optional
 
-IDO_KAPPA_SNAP_MJ_VERSION: str = "v0.3.0"
+IDO_KAPPA_SNAP_MJ_VERSION: str = "v0.3.1"
 
 
 class FlowMatchingEtaPredictor:
@@ -286,15 +286,39 @@ def gauss_ex_residual(z_i: dict,
     This provides a measurable downward trend across SIP-Bench phases
     without distorting the physical signal (max 2% decay per step).
 
+    v0.3.1: Locomotion η-mode — when goal.eta_mode == 'locomotion',
+    η is computed from velocity/height/upright deficits instead of
+    position distance. This fixes the fundamental problem where
+    locomotion tasks (walker-walk, cheetah-run) use velocity-based
+    rewards but η was measuring distance to a fixed point, making η
+    unreachable (walker η~38, cheetah η~100, never decreasing).
+
+    Locomotion η formula:
+        η = w_vel * vel_deficit^2 + w_height * height_deficit^2
+            + w_upright * upright_deficit^2 + w_eng * energy_excess^2
+        vel_deficit = max(0, target_speed - current_speed)
+        height_deficit = max(0, target_height - torso_z)
+        upright_deficit = max(0, target_upright - torso_upright_score)
+
+    This aligns η with dm_control's tolerance() reward formula, so η
+    decreases as the agent walks/runs correctly, enabling near-goal
+    PD stabilize mode and Creative-Probe effectiveness.
+
     Args:
         z_i: EML observation dict with keys:
              'ee_pos' (3-vector), 'qpos' (nq-vector), 'E_total' (float),
              'ee_vel' (6-vector or 3-vector).
+             For locomotion η-mode, also needs:
+             'horiz_vel' (float, horizontal speed m/s) and
+             'torso_z' (float, torso height m) and
+             'torso_upright' (float, upright score 0-1).
         goal: GoalEML instance with target_pos, max_energy_inject, etc.
-        w_pos: Weight for position error component.
-        w_ori: Weight for orientation (tilt) error component.
+            If goal.eta_mode == 'locomotion', also uses target_speed,
+            target_height, target_upright, eta_weights.
+        w_pos: Weight for position error component (point mode only).
+        w_ori: Weight for orientation (tilt) error component (point mode only).
         w_eng: Weight for energy excess component.
-        w_vel: Weight for velocity magnitude component.
+        w_vel: Weight for velocity magnitude component (point mode only).
         flow_predictor: Optional FlowMatchingEtaPredictor for trend enhancement.
                         If None, returns pure current η (backward compatible).
         step_index: Current decision-step index (for familiarity decay).
@@ -309,39 +333,102 @@ def gauss_ex_residual(z_i: dict,
         If flow_predictor is provided, η is trend-adjusted with predicted future.
         Familiarity decay is applied after trend blending.
     """
-    # Position error — align ee and target dimensions (pad/trim to same length)
-    ee: np.ndarray = np.asarray(z_i.get('ee_pos', np.zeros(3)))
-    target: np.ndarray = np.asarray(goal.target_pos)
-    # Pad shorter array with zeros to match dimensions
-    max_dim: int = max(len(ee), len(target))
-    ee_padded: np.ndarray = np.zeros(max_dim)
-    ee_padded[:len(ee)] = ee
-    target_padded: np.ndarray = np.zeros(max_dim)
-    target_padded[:len(target)] = target
-    pos_err: float = float(np.linalg.norm(ee_padded - target_padded))
+    # ── v0.3.1: Locomotion η-mode ──
+    # When goal.eta_mode == 'locomotion', compute η from velocity/height/upright
+    # deficits instead of position distance. This aligns η with dm_control's
+    # tolerance()-based reward formula for locomotion tasks.
+    eta_mode: str = getattr(goal, 'eta_mode', 'point')
 
-    # Orientation (tilt) error via quaternion → z-axis
-    quat: Optional[np.ndarray] = None
-    qpos: Optional[np.ndarray] = z_i.get('qpos', None)
-    if qpos is not None and len(qpos) >= 4:
-        quat = qpos[3:7] if len(qpos) >= 7 else qpos[:4]
-    z_body: np.ndarray = _quat_to_z_axis(quat)
-    tilt_err: float = float(np.arccos(
-        np.clip(np.dot(z_body, np.array([0.0, 0.0, 1.0])), -1.0, 1.0)))
+    if eta_mode == 'locomotion':
+        # Extract locomotion-specific observations from z_i
+        # horiz_vel: horizontal speed (m/s) — from torso velocity or qvel
+        horiz_vel: float = float(z_i.get('horiz_vel', 0.0))
+        # torso_z: torso height (m) — from ee_pos[2] or xpos
+        torso_z: float = float(z_i.get('torso_z',
+                             float(z_i.get('ee_pos', np.zeros(3))[2])
+                             if len(z_i.get('ee_pos', np.zeros(3))) >= 3
+                             else 0.0))
+        # torso_upright: upright score (0-1) — from quaternion or xmat
+        torso_upright: float = float(z_i.get('torso_upright', 0.0))
+        # If torso_upright not provided, compute from quaternion
+        if torso_upright == 0.0:
+            qpos_arr: Optional[np.ndarray] = z_i.get('qpos', None)
+            if qpos_arr is not None and len(qpos_arr) >= 4:
+                quat: np.ndarray = qpos_arr[3:7] if len(qpos_arr) >= 7 else qpos_arr[:4]
+                z_body: np.ndarray = _quat_to_z_axis(quat)
+                torso_upright = float(z_body[2])  # z-component of body z-axis
 
-    # Energy excess beyond budget
-    E: float = float(z_i.get('E_total', 0.0))
-    energy_excess: float = max(0.0, E - goal.max_energy_inject)
+        # Get locomotion η weights from goal.eta_weights (or defaults)
+        eta_w: dict = getattr(goal, 'eta_weights', None) or {}
+        w_vel_loc: float = float(eta_w.get('w_vel', 1.0))
+        w_height_loc: float = float(eta_w.get('w_height', 0.5))
+        w_upright_loc: float = float(eta_w.get('w_upright', 0.3))
+        w_eng_loc: float = float(eta_w.get('w_eng', 0.01))
 
-    # End-effector velocity magnitude
-    ee_vel: np.ndarray = z_i.get('ee_vel', np.zeros(6))
-    vel_mag: float = float(np.linalg.norm(ee_vel[:3])) if ee_vel is not None else 0.0
+        # Target values from GoalEML
+        target_speed: float = getattr(goal, 'target_speed', 0.0)
+        target_height: float = getattr(goal, 'target_height', 0.0)
+        target_upright: float = getattr(goal, 'target_upright', 0.0)
 
-    # Weighted sum of squared residuals
-    eta: float = (w_pos * pos_err ** 2
-                  + w_ori * tilt_err ** 2
-                  + w_eng * energy_excess ** 2
-                  + w_vel * vel_mag ** 2)
+        # Compute deficits (max(0, ...) = only penalize being BELOW target)
+        # Velocity deficit: LINEAR (not squared) — aligns with dm_control
+        # tolerance(speed, bounds=(target,inf), margin=target, sigmoid='linear')
+        # Linear penalty makes η proportional to speed deficit (0-10 for cheetah),
+        # not quadratic (0-100), keeping η manageable and κ_thresh reachable.
+        vel_deficit: float = max(0.0, target_speed - horiz_vel)
+        # Height/upright deficits: SQUARED — preserves basin effect near goal
+        # (η drops faster as agent approaches target height/upright, enabling
+        # near-goal PD stabilize mode to kick in smoothly)
+        height_deficit: float = max(0.0, target_height - torso_z)
+        upright_deficit: float = max(0.0, target_upright - torso_upright)
+
+        # Energy excess beyond budget
+        E: float = float(z_i.get('E_total', 0.0))
+        energy_excess: float = max(0.0, E - goal.max_energy_inject)
+
+        # Weighted locomotion η: velocity linear, height/upright squared
+        # η = w_vel * vel_deficit + w_height * height_deficit^2
+        #     + w_upright * upright_deficit^2 + w_eng * energy_excess^2
+        eta: float = (w_vel_loc * vel_deficit
+                      + w_height_loc * height_deficit ** 2
+                      + w_upright_loc * upright_deficit ** 2
+                      + w_eng_loc * energy_excess ** 2)
+
+    else:
+        # ── Point η-mode (default): distance to target_pos ──
+        # Position error — align ee and target dimensions (pad/trim to same length)
+        ee: np.ndarray = np.asarray(z_i.get('ee_pos', np.zeros(3)))
+        target: np.ndarray = np.asarray(goal.target_pos)
+        # Pad shorter array with zeros to match dimensions
+        max_dim: int = max(len(ee), len(target))
+        ee_padded: np.ndarray = np.zeros(max_dim)
+        ee_padded[:len(ee)] = ee
+        target_padded: np.ndarray = np.zeros(max_dim)
+        target_padded[:len(target)] = target
+        pos_err: float = float(np.linalg.norm(ee_padded - target_padded))
+
+        # Orientation (tilt) error via quaternion → z-axis
+        quat: Optional[np.ndarray] = None
+        qpos: Optional[np.ndarray] = z_i.get('qpos', None)
+        if qpos is not None and len(qpos) >= 4:
+            quat = qpos[3:7] if len(qpos) >= 7 else qpos[:4]
+        z_body: np.ndarray = _quat_to_z_axis(quat)
+        tilt_err: float = float(np.arccos(
+            np.clip(np.dot(z_body, np.array([0.0, 0.0, 1.0])), -1.0, 1.0)))
+
+        # Energy excess beyond budget
+        E: float = float(z_i.get('E_total', 0.0))
+        energy_excess: float = max(0.0, E - goal.max_energy_inject)
+
+        # End-effector velocity magnitude
+        ee_vel: np.ndarray = z_i.get('ee_vel', np.zeros(6))
+        vel_mag: float = float(np.linalg.norm(ee_vel[:3])) if ee_vel is not None else 0.0
+
+        # Weighted sum of squared residuals
+        eta: float = (w_pos * pos_err ** 2
+                      + w_ori * tilt_err ** 2
+                      + w_eng * energy_excess ** 2
+                      + w_vel * vel_mag ** 2)
 
     # ── v0.2.1: Familiarity Decay ──
     # Structural understanding accumulation: as steps and epiplexity increase,

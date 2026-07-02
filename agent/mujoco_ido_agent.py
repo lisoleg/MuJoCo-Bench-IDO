@@ -424,6 +424,53 @@ class IDOMuJoCoAgent:
         except (KeyError, IndexError):
             obs['ee_vel'] = np.zeros(6)
 
+        # ── v0.6.1: Locomotion η fields ──
+        # For locomotion tasks (walker/cheetah/hopper), gauss_ex_residual
+        # needs horiz_vel, torso_z, torso_upright for velocity-based η.
+        # These are extracted from the same physics state.
+        domain: str = ''
+        if hasattr(self, 'task_name') and self.task_name:
+            domain = self.task_name.split('-', 1)[0].lower()
+
+        # Horizontal velocity (m/s): torso forward speed
+        horiz_vel: float = 0.0
+        try:
+            main_body_name: str = self._MAIN_BODY_MAP.get(domain, 'torso')
+            torso_subtreelinvel = phys.named.data.sensordata[main_body_name + '_subtreelinvel']
+            horiz_vel = float(torso_subtreelinvel[0]) if hasattr(torso_subtreelinvel, '__len__') else float(torso_subtreelinvel)
+        except (KeyError, IndexError, TypeError, AttributeError):
+            # Fallback: qvel first component (forward velocity)
+            if len(phys.data.qvel) > 0:
+                horiz_vel = float(phys.data.qvel[0])
+        obs['horiz_vel'] = horiz_vel
+
+        # Torso height (m): z-coordinate of main body
+        torso_z: float = 0.0
+        if 'ee_pos' in obs and len(obs['ee_pos']) >= 3:
+            torso_z = float(obs['ee_pos'][2])
+        else:
+            try:
+                main_body_name = self._MAIN_BODY_MAP.get(domain, 'torso')
+                torso_z = float(phys.named.data.xpos[main_body_name, 2])
+            except (KeyError, IndexError):
+                if len(phys.data.qpos) > 2:
+                    torso_z = float(phys.data.qpos[2])
+        obs['torso_z'] = torso_z
+
+        # Torso upright score (0-1): how upright the torso is
+        torso_upright: float = 1.0
+        try:
+            main_body_name = self._MAIN_BODY_MAP.get(domain, 'torso')
+            torso_mat = phys.named.data.xmat[main_body_name, :]
+            torso_upright = float(torso_mat[8]) if hasattr(torso_mat, '__len__') else float(torso_mat)
+        except (KeyError, IndexError, TypeError):
+            # Fallback: from quaternion
+            if len(phys.data.qpos) >= 4:
+                qw = float(phys.data.qpos[3])
+                qx = float(phys.data.qpos[4]) if len(phys.data.qpos) > 4 else 0.0
+                torso_upright = 1.0 - 2.0 * qx * qx
+        obs['torso_upright'] = torso_upright
+
         return obs
 
     def _compute_kappa_snap(self, z_i: dict, step_index: int = 0) -> float:
