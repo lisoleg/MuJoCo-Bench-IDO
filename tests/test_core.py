@@ -214,7 +214,7 @@ class TestGoalEMLFactories(unittest.TestCase):
         self.assertAlmostEqual(g.delta_K, 0.15)
 
     def test_make_walker_run(self):
-        """make_walker_run_eml should return correct GoalEML."""
+        """make_walker_run_eml should return correct GoalEML (v0.6.1: locomotion η-mode)."""
         phys = self._make_mock_physics()
         g = make_walker_run_eml(phys)
         self.assertEqual(g.name, 'walker_run')
@@ -222,9 +222,12 @@ class TestGoalEMLFactories(unittest.TestCase):
                          ['com_x_advancing', 'not_fallen', 'no_self_collide'])
         np.testing.assert_array_almost_equal(g.target_pos, [10.0, 0.0, 0.0])
         self.assertAlmostEqual(g.max_energy_inject, 600.0)
-        self.assertAlmostEqual(g.delta_K, 0.05)
+        self.assertAlmostEqual(g.delta_K, 0.5)  # v0.6.1: locomotion η-mode needs larger threshold
         self.assertAlmostEqual(g.pos_tol, 0.10)
         self.assertAlmostEqual(g.ori_tol, 0.25)
+        self.assertEqual(g.eta_mode, 'locomotion')  # v0.6.1
+        self.assertAlmostEqual(g.target_speed, 5.0)
+        self.assertAlmostEqual(g.target_height, 1.2)
 
     def test_make_reacher_easy(self):
         """make_reacher_easy_eml should return correct GoalEML."""

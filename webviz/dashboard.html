@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.5.5</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.6.1</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -288,7 +288,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.5.3</span>
+      <span class="text-sm font-medium text-slate-400">v0.6.1</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -581,6 +581,37 @@
         </div>
       </div>
 
+      <!-- ═══ v0.6.1: η Mode Indicator Card ═══ -->
+      <div class="card">
+        <div class="card-header" data-i18n="card_eta_mode">η Mode (目标类型)</div>
+        <div class="grid grid-cols-2 gap-3 mt-2">
+          <div>
+            <span class="label-sm" data-i18n="label_eta_mode_type">η 计算模式</span>
+            <span id="etaModeType" class="value-md font-mono text-cyan-400">point</span>
+          </div>
+          <div>
+            <span class="label-sm" data-i18n="label_eta_target_desc">目标描述</span>
+            <span id="etaTargetDesc" class="value-sm" data-i18n="eta_target_position">位置目标 (ee→target)</span>
+          </div>
+        </div>
+        <div class="mt-2" id="locomotionParams" style="display: none;">
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <span class="label-sm" data-i18n="label_target_speed">目标速度</span>
+              <span id="targetSpeedDisplay" class="value-sm font-mono text-emerald-400">—</span>
+            </div>
+            <div>
+              <span class="label-sm" data-i18n="label_target_height">目标高度</span>
+              <span id="targetHeightDisplay" class="value-sm font-mono text-blue-400">—</span>
+            </div>
+            <div>
+              <span class="label-sm" data-i18n="label_target_upright">目标姿态</span>
+              <span id="targetUprightDisplay" class="value-sm font-mono text-yellow-400">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ v0.6.0: CQ (Conscience Quotient) Card ═══ -->
       <div class="card">
         <div class="card-header" data-i18n="card_cq">Conscience Quotient (CQ)</div>
@@ -819,6 +850,15 @@
         hint_metric_nvr: "Noether 违规次数",
         metric_ser: "SER",
         hint_metric_ser: "Snap 效率比",
+        // ── v0.6.1: η Mode ──
+        card_eta_mode: "η Mode (目标类型)",
+        label_eta_mode_type: "η 计算模式",
+        label_eta_target_desc: "目标描述",
+        eta_target_position: "位置目标 (ee→target)",
+        eta_target_locomotion: "运动目标 (速度+高度+姿态)",
+        label_target_speed: "目标速度",
+        label_target_height: "目标高度",
+        label_target_upright: "目标姿态",
       },
       en: {
         dashboard_title: "MuJoCo-Bench-IDO",
@@ -928,6 +968,15 @@
         hint_metric_nvr: "Noether violations count",
         metric_ser: "SER",
         hint_metric_ser: "Snap Efficiency Ratio",
+        // ── v0.6.1: η Mode ──
+        card_eta_mode: "η Mode (Goal Type)",
+        label_eta_mode_type: "η Computation Mode",
+        label_eta_target_desc: "Goal Description",
+        eta_target_position: "Position goal (ee→target)",
+        eta_target_locomotion: "Locomotion goal (speed+height+upright)",
+        label_target_speed: "Target Speed",
+        label_target_height: "Target Height",
+        label_target_upright: "Target Upright",
       }
     };
 
@@ -975,6 +1024,9 @@
   <!-- JAVASCRIPT (Core Dashboard Logic)                          -->
   <!-- ═══════════════════════════════════════════════════════════ -->
   <script>
+    // ── v0.6.1: η Mode state ──
+    let currentEtaMode = 'point';
+
     // ── Global State ──
     let ws = null;
     let isRunning = false;
@@ -1137,6 +1189,8 @@
           currentRunTask = data.task;
           totalEpisodes = data.episodes;
           maxStepsForRun = data.max_steps;
+          currentEtaMode = data.eta_mode || 'point';
+          updateEtaModeUI(currentEtaMode);
           updateRunningUI(true);
           addLog(`Run started: ${data.task}, ${data.episodes} episodes, max_steps=${data.max_steps}, mode=${data.eval_mode}`);
           clearChartData();
@@ -1312,6 +1366,12 @@
       if (data.kappa_snap_triggered) window._serStats.snaps++;
       const ser = window._serStats.total > 0 ? (window._serStats.snaps / window._serStats.total).toFixed(2) : '0.00';
       document.getElementById('metricSER').textContent = ser;
+
+      // ── v0.6.1: Update η Mode display ──
+      if (data.eta_mode) {
+        currentEtaMode = data.eta_mode;
+        updateEtaModeUI(currentEtaMode);
+      }
 
       // ── v0.6.0: Update CQ (Conscience Quotient) metrics ──
       if (data.cq) {
@@ -1611,6 +1671,28 @@
       }
     }
 
+    // ── v0.6.1: η Mode UI Update ──
+    function updateEtaModeUI(mode) {
+      const dict = i18nDict[currentLang];
+      const modeEl = document.getElementById('etaModeType');
+      const descEl = document.getElementById('etaTargetDesc');
+      const locParams = document.getElementById('locomotionParams');
+
+      if (mode === 'locomotion') {
+        modeEl.textContent = 'locomotion';
+        modeEl.style.color = '#22c55e';
+        descEl.textContent = dict.eta_target_locomotion;
+        descEl.style.color = '#22c55e';
+        locParams.style.display = '';
+      } else {
+        modeEl.textContent = 'point';
+        modeEl.style.color = '#06b6d4';
+        descEl.textContent = dict.eta_target_position;
+        descEl.style.color = '#94a3b8';
+        locParams.style.display = 'none';
+      }
+    }
+
     // ── Episodes Slider Update ──
     document.getElementById('episodesSlider').addEventListener('input', function() {
       document.getElementById('episodesValue').textContent = this.value;
@@ -1652,7 +1734,7 @@
       initCharts();
       connectWebSocket();
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.5.3');
+      addLog('Dashboard initialized v0.6.1');
     });
   </script>
 

@@ -144,15 +144,19 @@ def make_hopper_stand_eml(physics,
 
 
 def make_walker_run_eml(physics,
-                          delta_K: float = 0.05) -> GoalEML:
+                          delta_K: float = 0.5) -> GoalEML:
     """Factory for walker run GoalEML.
 
-    Creates a GoalEML for the walker-run task where the center-of-mass
-    must advance forward without falling.
+    Creates a GoalEML for the walker-run task where the walker must run
+    forward without falling.
+
+    v0.6.1: Switched to locomotion η-mode (same as walker-walk but higher
+    target speed). dm_control walker-run reward requires speed ≥ 5 m/s
+    while staying upright and at sufficient height.
 
     Args:
         physics: dm_control Physics instance.
-        delta_K: κ-Snap residual threshold.
+        delta_K: κ-Snap residual threshold (locomotion: larger tolerance).
 
     Returns:
         GoalEML instance for walker-run task.
@@ -166,6 +170,11 @@ def make_walker_run_eml(physics,
         pos_tol=0.10,
         ori_tol=0.25,
         collide_thresh=0.05,  # locomotion: legs naturally close
+        eta_mode='locomotion',
+        target_speed=5.0,
+        target_height=1.2,
+        target_upright=0.7,
+        eta_weights=np.array([1.0, 0.5, 0.3, 0.01]),
     )
 
 
@@ -290,11 +299,14 @@ def make_generic_eml(task_name: str,
 
 
 def make_humanoid_walk_eml(physics,
-                            delta_K: float = 0.05) -> GoalEML:
+                            delta_K: float = 0.3) -> GoalEML:
     """Factory for humanoid walk GoalEML.
 
     Creates a GoalEML for the humanoid-walk task where the humanoid
     must walk forward while maintaining upright posture.
+
+    v0.6.1: Switched to locomotion η-mode. dm_control humanoid-walk
+    reward is velocity-based (speed ≥ 1.0 m/s + upright + height ≥ 1.4).
 
     Args:
         physics: dm_control Physics instance.
@@ -312,15 +324,23 @@ def make_humanoid_walk_eml(physics,
         pos_tol=0.10,
         ori_tol=0.15,
         collide_thresh=0.01,  # humanoid walk: default (parent-child exclusion handles proximity)
+        eta_mode='locomotion',
+        target_speed=1.0,
+        target_height=1.4,
+        target_upright=0.8,
+        eta_weights=np.array([1.0, 0.5, 0.3, 0.01]),
     )
 
 
 def make_humanoid_run_eml(physics,
-                           delta_K: float = 0.08) -> GoalEML:
+                           delta_K: float = 0.5) -> GoalEML:
     """Factory for humanoid run GoalEML.
 
     Creates a GoalEML for the humanoid-run task where the humanoid
     must run forward at higher speed while maintaining upright posture.
+
+    v0.6.1: Switched to locomotion η-mode. dm_control humanoid-run
+    reward is velocity-based (speed ≥ 5 m/s + upright + height ≥ 1.4).
 
     Args:
         physics: dm_control Physics instance.
@@ -338,6 +358,11 @@ def make_humanoid_run_eml(physics,
         pos_tol=0.15,
         ori_tol=0.20,
         collide_thresh=0.01,  # humanoid run: default (parent-child exclusion handles proximity)
+        eta_mode='locomotion',
+        target_speed=5.0,
+        target_height=1.4,
+        target_upright=0.7,
+        eta_weights=np.array([1.0, 0.5, 0.3, 0.01]),
     )
 
 
@@ -458,11 +483,14 @@ def make_cheetah_run_eml(physics,
 
 
 def make_hopper_hop_eml(physics,
-                         delta_K: float = 0.04) -> GoalEML:
+                         delta_K: float = 0.3) -> GoalEML:
     """Factory for hopper hop GoalEML.
 
-    Creates a GoalEML for the hopper-hop task where the hopper
-    must hop forward while maintaining balance.
+    Creates a GoalEML for the hopper-hop task where the hopper must hop
+    forward while maintaining balance.
+
+    v0.6.1: Switched to locomotion η-mode. dm_control hopper-hop reward
+    requires forward speed ≥ 2 m/s while staying upright and hopping.
 
     Args:
         physics: dm_control Physics instance.
@@ -480,6 +508,11 @@ def make_hopper_hop_eml(physics,
         pos_tol=0.10,
         ori_tol=0.25,
         collide_thresh=0.05,  # locomotion: legs naturally close
+        eta_mode='locomotion',
+        target_speed=2.0,
+        target_height=0.8,
+        target_upright=0.7,
+        eta_weights=np.array([1.0, 0.5, 0.3, 0.01]),
     )
 
 

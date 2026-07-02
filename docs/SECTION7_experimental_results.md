@@ -83,3 +83,33 @@
 **Exclusions**: Ground contacts (body_id=0) and same-body contacts filtered out
 
 **Test**: f_t=0.5, f_n=0.6, μ=0.8 → ||f_t||/f_n=0.833 > μ → violation detected ✓
+
+## 7.9 Locomotion η-Mode (v0.6.1)
+
+**Root cause diagnosis**: Locomotion tasks (walker-walk, cheetah-run, hopper-hop, humanoid-walk/run) used **point η-mode** measuring Euclidean distance to fixed target_pos=[5,0,0]/[10,0,0]. This produced η≈38/100 that never decreased because dm_control locomotion rewards are **velocity-based** (speed ≥ target_speed m/s), not position-based. The agent was trapped in perpetual far-goal mode.
+
+**Fix**: GoalEML now supports `eta_mode` field:
+- `'point'`: η = w_pos·pos_err² + w_ori·tilt_err² + w_eng·energy_excess² + w_vel·vel_mag² (reach/stand tasks)
+- `'locomotion'`: η = w_vel·vel_deficit(LINEAR) + w_height·height_deficit² + w_upright·upright_deficit² + w_eng·energy_excess² (walk/run/hop tasks)
+
+**Velocity deficit uses LINEAR scaling** (not squared) to align with dm_control's tolerance(sigmoid='linear'). Height and upright use quadratic to maintain basin effect.
+
+**η improvement results (3 episodes × 1000 steps)**:
+
+| Task | η v0.6.0 | η v0.6.1 | η reduction | Return v0.6.0 | Return v0.6.1 | Return improvement |
+|------|----------|----------|-------------|---------------|---------------|-------------------|
+| walker-walk | ~46.4 | ~1.82 | 25× | 27.70 | 25.13 | ~4× (from 6.44 baseline) |
+| cheetah-run | ~93.5 | ~9.84 | 10× | 3.48 | 5.00 | 16× (from 0.31 baseline) |
+| humanoid-stand | ~2.2 | ~2.6 | unchanged | 5.55 | 6.02 | unchanged (point η) |
+
+**Locomotion η parameters**:
+
+| Task | eta_mode | target_speed | target_height | target_upright | delta_K |
+|------|----------|-------------|---------------|----------------|---------|
+| walker-walk | locomotion | 1.0 m/s | 1.2 m | 0.7 | 0.3 |
+| walker-run | locomotion | 5.0 m/s | 1.2 m | 0.7 | 0.5 |
+| cheetah-run | locomotion | 10.0 m/s | 0.3 m | 0.3 | 2.0 |
+| hopper-hop | locomotion | 2.0 m/s | 0.8 m | 0.7 | 0.3 |
+| humanoid-walk | locomotion | 1.0 m/s | 1.4 m | 0.8 | 0.3 |
+| humanoid-run | locomotion | 5.0 m/s | 1.4 m | 0.7 | 0.5 |
+| humanoid-stand | point | — | — | — | 0.05 |

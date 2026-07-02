@@ -51,7 +51,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 
-WEBVIZ_VERSION: str = "v0.5.5"
+WEBVIZ_VERSION: str = "v0.6.1"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -70,6 +70,8 @@ class RunState:
         self.results_history: List[dict] = []
         self.ws_clients: List[WebSocket] = []
         self.lock: threading.Lock = threading.Lock()
+        # v0.6.0: CQ/Merkle metrics dict (populated during runs)
+        self.current_metrics: Optional[Dict[str, Any]] = None
 
 run_state: RunState = RunState()
 
@@ -306,6 +308,7 @@ def run_episode_with_streaming(
             "step": step_idx + 1,
             "episode": episode,
             "eta": float(eta),
+            "eta_mode": agent.goal.eta_mode,
             "noether_violations": noether_violations,
             "nvr_breakdown": nvr_breakdown,
             "episode_return": episode_return,
@@ -417,6 +420,7 @@ def _run_benchmark_background(request: RunRequest) -> None:
             "episodes": episodes,
             "max_steps": max_steps,
             "eval_mode": request.eval_mode,
+            "eta_mode": goal.eta_mode,
         })
 
         results: List[dict] = []
@@ -526,6 +530,13 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             max_energy_inject=original_goal.max_energy_inject,
             pos_tol=original_goal.pos_tol,
             ori_tol=original_goal.ori_tol,
+            collide_thresh=original_goal.collide_thresh,
+            eta_mode=original_goal.eta_mode,
+            target_speed=original_goal.target_speed,
+            target_height=original_goal.target_height,
+            target_upright=original_goal.target_upright,
+            eta_weights=original_goal.eta_weights.copy() if original_goal.eta_weights else None,
+            ori_tol=original_goal.ori_tol,
         )
         agent_t0 = IDOMuJoCoAgent(env, goal_t0,
                                    task_name=task,
@@ -561,6 +572,12 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             max_energy_inject=original_goal.max_energy_inject,
             pos_tol=original_goal.pos_tol,
             ori_tol=original_goal.ori_tol,
+            collide_thresh=original_goal.collide_thresh,
+            eta_mode=original_goal.eta_mode,
+            target_speed=original_goal.target_speed,
+            target_height=original_goal.target_height,
+            target_upright=original_goal.target_upright,
+            eta_weights=original_goal.eta_weights.copy() if original_goal.eta_weights else None,
         )
         agent_t1 = IDOMuJoCoAgent(env, goal_t1,
                                    task_name=task,
@@ -623,6 +640,12 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             max_energy_inject=original_goal.max_energy_inject,
             pos_tol=original_goal.pos_tol,
             ori_tol=original_goal.ori_tol,
+            collide_thresh=original_goal.collide_thresh,
+            eta_mode=original_goal.eta_mode,
+            target_speed=original_goal.target_speed,
+            target_height=original_goal.target_height,
+            target_upright=original_goal.target_upright,
+            eta_weights=original_goal.eta_weights.copy() if original_goal.eta_weights else None,
         )
         agent_t2 = IDOMuJoCoAgent(env, goal_t2,
                                    task_name=task,
@@ -854,7 +877,7 @@ async def get_cq_metrics() -> JSONResponse:
     """
     # Get CQ from last run results if available
     cq_data: Dict[str, Any] = {}
-    if run_state.current_metrics:
+    if run_state.current_metrics is not None:
         cq_data = {
             "cq": run_state.current_metrics.get("cq_avg", 0.0),
             "cq_noether": run_state.current_metrics.get("cq_noether_avg", 0.0),
@@ -897,7 +920,7 @@ async def get_merkle_chain() -> JSONResponse:
     }
 
     # Get Merkle chain from last run results
-    if run_state.current_metrics:
+    if run_state.current_metrics is not None:
         merkle_data["chain"] = run_state.current_metrics.get("merkle_chain", [])
         merkle_data["verified"] = run_state.current_metrics.get("merkle_chain_verified", False)
         merkle_data["chain_length"] = len(merkle_data["chain"])
@@ -1546,7 +1569,7 @@ async def websocket_stream(websocket: WebSocket) -> None:
             elif msg.get("type") == "get_cq":
                 # v0.6.0: Client requests CQ metrics
                 cq_response: Dict[str, Any] = {}
-                if run_state.current_metrics:
+                if run_state.current_metrics is not None:
                     cq_response = {
                         "cq": run_state.current_metrics.get("cq_avg", 0.0),
                         "cq_noether": run_state.current_metrics.get("cq_noether_avg", 0.0),
@@ -1560,7 +1583,7 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     "chain": [],
                     "verified": False,
                 }
-                if run_state.current_metrics:
+                if run_state.current_metrics is not None:
                     merkle_response["chain"] = run_state.current_metrics.get("merkle_chain", [])
                     merkle_response["verified"] = run_state.current_metrics.get("merkle_chain_verified", False)
                 await websocket.send_json({"type": "merkle_update", "data": merkle_response})
