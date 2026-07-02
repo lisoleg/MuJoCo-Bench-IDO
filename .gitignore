@@ -34,3 +34,6 @@ mujoco_*.dll
 *.log
 .pip_deps/
 checkpoints/
+
+# Diagnostic test scripts (local-only, not for repo)
+test_walker_*.py

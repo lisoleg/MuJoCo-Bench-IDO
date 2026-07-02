@@ -536,7 +536,6 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             target_height=original_goal.target_height,
             target_upright=original_goal.target_upright,
             eta_weights=original_goal.eta_weights.copy() if original_goal.eta_weights else None,
-            ori_tol=original_goal.ori_tol,
         )
         agent_t0 = IDOMuJoCoAgent(env, goal_t0,
                                    task_name=task,

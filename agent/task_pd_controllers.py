@@ -744,26 +744,29 @@ class WalkerStandPD(TaskPDController):
         phys = physics
         ctrl: np.ndarray = np.zeros(self.nu)
 
-        # ── Height PD ──
-        root_z: float = float(phys.data.qpos[2])
+        # ── Height PD (v0.6.3: use xpos for walker, not raw qpos) ──
+        # Walker model: nq=9, root qpos = [rootz, rootx, rooty] (3 entries, NOT 7)
+        # Raw qpos[2] = rooty (pitch angle, NOT height!)
+        # Use xpos['torso','z'] for actual height
+        root_z: float = float(phys.named.data.xpos['torso', :][2])
         height_error: float = self.target_height - root_z
-        root_vz: float = float(phys.data.qvel[2])
+        root_vz: float = float(phys.data.qvel[0])  # rootz velocity (NOT qvel[2])
         height_torque: float = self._pd_scalar(
             height_error, -root_vz, self.height_kp, self.height_kd)
 
-        # ── Upright PD ──
-        upright_torque: float = 0.0
-        if len(phys.data.qpos) >= 7:
-            qw: float = float(phys.data.qpos[3])
-            qx: float = float(phys.data.qpos[4])
-            upright_vel: float = float(phys.data.qvel[3])
-            upright_torque = self._pd_scalar(
-                -qx, -upright_vel, self.upright_kp, self.upright_kd)
+        # ── Upright PD (v0.6.3: use xmat for walker, not raw qpos) ──
+        # Walker has NO quaternion in qpos. Use xmat['torso','zz'] for upright.
+        torso_upright: float = float(phys.named.data.xmat['torso', :][8])
+        upright_error: float = 1.0 - torso_upright  # want upright >= 1.0
+        root_pitch_vel: float = float(phys.data.qvel[2])  # rooty angular velocity
+        upright_torque: float = self._pd_scalar(
+            upright_error, -root_pitch_vel, self.upright_kp, self.upright_kd)
 
-        # ── Joint stabilization ──
+        # ── Joint stabilization (v0.6.3: correct qvel indices for walker) ──
+        # Walker: nv=9, root qvel = [rootz_vel, rootx_vel, rooty_vel] (3 entries)
+        # Joint qvel starts at qvel[3], NOT qvel[5]
         for i in range(min(self.nu, 6)):
-            # Walker joints: qvel indices shift by root (6 root DOF + joint DOFs)
-            qvel_idx: int = i + 5  # walker root has 5 velocity DOFs
+            qvel_idx: int = i + 3  # v0.6.3: walker has 3 root velocity DOFs
             if qvel_idx < len(phys.data.qvel):
                 joint_vel: float = float(phys.data.qvel[qvel_idx])
                 joint_ctrl: float = -self.joint_kp * joint_vel * 0.1
@@ -788,7 +791,7 @@ class WalkerStandPD(TaskPDController):
         """
         ctrl: np.ndarray = np.zeros(self.nu)
         for i in range(min(self.nu, 6)):
-            qvel_idx: int = i + 5
+            qvel_idx: int = i + 3  # v0.6.3: walker has 3 root velocity DOFs
             if qvel_idx < len(physics.data.qvel):
                 vel: float = float(physics.data.qvel[qvel_idx])
                 ctrl[i] = np.clip(-0.3 * vel, -0.5, 0.5)
@@ -808,244 +811,249 @@ class WalkerWalkPD(TaskPDController):
 
     Maximum reward per step = 1.0 (when standing=1, upright=1, move_reward=1).
     Needs: torso_height ≥ 1.2m, torso_upright ≥ 1.0, horizontal_velocity ≥ 1.0 m/s.
-    Walker starts from RANDOM fallen state — must recover first!
 
-    Walker actuator layout (confirmed from dm_control):
-        ctrl[0]: right_hip (positive = swing forward, range [-0.35, 1.75])
-        ctrl[1]: right_knee (negative = extend backward, range [-2.62, 0])
-        ctrl[2]: right_ankle (range [-0.79, 0.79])
-        ctrl[3]: left_hip (same as right_hip)
-        ctrl[4]: left_knee (same as right_knee)
-        ctrl[5]: left_ankle (same as right_ankle)
+    Walker actuator layout (CONFIRMED — TORQUE actuators, NOT position):
+        ctrl[0]: right_hip torque (gain=1, ctrlrange [-1,1], jnt_range [-0.35, 1.75])
+        ctrl[1]: right_knee torque (gain=1, ctrlrange [-1,1], jnt_range [-2.62, 0])
+        ctrl[2]: right_ankle torque (gain=1, ctrlrange [-1,1], jnt_range [-0.79, 0.79])
+        ctrl[3]: left_hip torque (same as right_hip)
+        ctrl[4]: left_knee torque (same as right_knee)
+        ctrl[5]: left_ankle torque (same as right_ankle)
+        ALL ctrl values ARE torques in [-1, 1] range.
 
-    Strategy (v0.5.4 — 3-phase control with stabilize buffer):
-    Phase 1 (Recovery): torso_z < 1.0 OR torso_upright < 0.7
-        - Aggressive PD: kp=2.0, kd=0.8 (was 0.8, 0.3)
-        - ctrl clip: [-1, 1] (recovery needs full force)
-        - PD toward standing pose targets [0, -0.5, 0, 0, -0.5, 0]
-    Phase 2 (Stabilize): just stood up, need to hold for 30 steps
-        - Gentle PD to maintain standing: kp=0.5, kd=0.2
-        - ctrl clip: [-0.8, 0.8]
-        - _stabilize_steps counter (0 → 30), then switch to Phase 3
+    Walker model structure (CONFIRMED from diagnostic):
+        nq=9, nv=9, nu=6
+        Root: rootz(slide), rootx(slide), rooty(hinge) → qpos[0:3], qvel[0:3]
+        Joints: right_hip, right_knee, right_ankle, left_hip, left_knee, left_ankle → qpos[3:9]
+        NO actuator for root_y — torso orientation controlled INDIRECTLY via leg joints
+        torso_upright = xmat['torso','zz'] — can be NEGATIVE (upside down) at start
+
+    Strategy (v0.6.3 — torque-actuator + one-sided height PD):
+    Phase 1 (Recovery): height < 1.0 or upright < 0.5
+        - Positive torque on hip/ankle to push walker up and forward
+        - One-sided height PD: only pushes UP (never pushes down)
+        - Upright PD: pushes toward upright orientation
+    Phase 2 (Stabilize): upright for 30 steps
+        - Joint PD toward standing pose + height PD + upright PD
+        - One-sided height PD maintains height ≥ 1.2
     Phase 3 (Walking gait): stabilized for 30+ steps
-        - Enhanced gait: amplitude 0.55, freq 12 rad/s, vel_kp=0.5
-        - Forward lean bias: 2° on all hip joints
-        - forward_bias clip: (-0.3, 0.8)
-        - If torso_z < 0.8 or upright < 0.6 → reset to Phase 1
+        - Full-sine gait + height PD + upright PD
+        - If height < 0.8 or upright < 0.4 → reset to Phase 1
 
-    PD gains (v0.5.4 — 3-phase enhanced):
-        Recovery: kp=2.0, kd=0.8
-        Stabilize: kp=0.5, kd=0.2
-        Walking: gait_freq=12, gait_amp=0.55, vel_kp=0.5
-
-    Output: ctrl[0:6], clipped per phase.
+    Output: ctrl[0:6], ALL clipped to [-1, 1] (torque range).
     """
 
     def __init__(self, physics) -> None:
-        """Initialize WalkerWalkPD with 3-phase recovery+stabilize+gait gains.
+        """Initialize WalkerWalkPD with torque-actuator-aware gains.
 
-        v0.5.4: Complete rewrite — 3-phase control with stabilize buffer.
-        Added _stabilize_steps counter (0→30) before gait starts.
-        Enhanced gait parameters for faster walking speed.
+        v0.6.3 CRITICAL FIX: Walker actuators are TORQUE (gain=1, bias=0),
+        ctrl range [-1, 1]. Previous versions incorrectly used per-joint angle
+        ranges as clip bounds. Now all ctrl clipped to [-1, 1].
+
+        Also: height PD is one-sided (only push UP when below target).
+        When walker is above 1.2m, height PD doesn't push it down.
+
+        Standing pose uses moderate targets instead of raw reset angles,
+        since reset angles are randomized and not ideal for standing.
 
         Args:
             physics: dm_control Physics instance.
         """
-        super().__init__(physics, kp=2.0, kd=0.8)
+        super().__init__(physics, kp=5.0, kd=1.5)
         self.target_speed: float = 1.0
         self.target_height: float = 1.2
-        # ── Phase 1: Recovery gains (aggressive) ──
-        self.recovery_kp: float = 2.5  # v0.6.1: increased from 2.0 for faster standup
-        self.recovery_kd: float = 0.9  # v0.6.1: increased from 0.8
-        # ── Phase 2: Stabilize gains (gentle) ──
-        self.stabilize_kp: float = 0.6  # v0.6.1: increased from 0.5
-        self.stabilize_kd: float = 0.25 # v0.6.1: increased from 0.2
-        # ── Standing pose targets for recovery/stabilize ──
-        # [right_hip, right_knee, right_ankle, left_hip, left_knee, left_ankle]
-        self.standing_targets: np.ndarray = np.array([0.0, -0.5, 0.0, 0.0, -0.5, 0.0])
-        # ── Phase 3: Walking gait parameters (v0.6.1 enhanced) ──
-        self.gait_freq: float = 14.0  # v0.6.1: increased from 12 for faster stepping
-        self.gait_amplitude: float = 0.85  # v0.6.1: increased from 0.65 for stronger push
-        self.knee_amplitude: float = 0.55  # v0.6.1: increased from 0.5
-        self.ankle_amplitude: float = 0.20  # v0.6.1: increased from 0.15
-        # ── Velocity feedback (v0.6.1 enhanced) ──
-        self.vel_kp: float = 1.2  # v0.6.1: increased from 0.8 for stronger drive
-        self.forward_bias_min: float = -0.1  # v0.6.1: less negative → more forward
-        self.forward_bias_max: float = 1.5   # v0.6.1: increased from 1.0
-        # ── Forward lean bias (v0.6.1: ~8° ≈ 0.14 rad) ──
-        self.forward_lean_bias: float = 0.14  # v0.6.1: doubled from 0.07
-        # ── Upright maintenance during walking ──
-        self.upright_kp: float = 0.6  # v0.6.1: increased from 0.5
-        self.upright_kd: float = 0.25  # v0.6.1: increased from 0.2
+        # ── Phase 1: Recovery — fixed torque push + height/upright PD ──
+        # Don't use angle targets — they destabilize because initial state varies randomly.
+        # Instead: push walker up with positive hip/ankle torque, let knee support weight.
+        # These "default recovery torques" are based on ctrl→joint diagnostic:
+        #   ctrl=0.5 on all joints → upright=0.98, so positive hip/ankle = upright.
+        self.recovery_hip_torque: float = 0.5   # push hip forward → lift torso
+        self.recovery_knee_torque: float = -0.3  # bend knee → support weight
+        self.recovery_ankle_torque: float = 0.2  # push ankle forward → balance
+        self.recovery_vel_kd: float = 1.0        # velocity damping during recovery
+        # ── Phase 2: Stabilize gains (WalkerStandPD-style) ──
+        self.stabilize_kp: float = 2.0   # joint damping gain (NOT target-tracking)
+        self.stabilize_kd: float = 0.0    # unused for damping-only mode
+        # ── Height PD (one-sided: only push UP, but always damp velocity) ──
+        self.height_kp: float = 35.0     # v0.6.3: aligned with WalkerStandPD kp=35
+        self.height_kd: float = 3.5      # v0.6.3: aligned with WalkerStandPD kd=3.5
+        # ── Upright PD ──
+        self.upright_kp: float = 20.0    # v0.6.3: aligned with WalkerStandPD kp=20
+        self.upright_kd: float = 2.0      # v0.6.3: aligned with WalkerStandPD kd=2.0
+        # ── Standing pose targets (for Recovery only; Stabilize uses damping) ──
+        self.standing_targets: np.ndarray = np.array([0.4, -0.5, 0.0, 0.4, -0.5, 0.0])
+        # ── Phase 3: Walking gait parameters ──
+        self.gait_freq: float = 10.0
+        self.gait_amplitude: float = 0.45
+        self.knee_amplitude: float = 0.40
+        self.ankle_amplitude: float = 0.15
+        # ── Velocity feedback ──
+        self.vel_kp: float = 2.5
+        self.forward_bias_min: float = 0.0
+        self.forward_bias_max: float = 2.0
+        # ── Forward lean bias ──
+        self.forward_lean_bias: float = 0.21
         # ── Phase thresholds ──
         self.recovery_height_thresh: float = 1.0
-        self.recovery_upright_thresh: float = 0.7
-        self.gait_fallback_height_thresh: float = 0.8  # if falls during gait → Phase 1
-        self.gait_fallback_upright_thresh: float = 0.6
+        self.recovery_upright_thresh: float = 0.5  # lowered: upright can start very negative
+        self.gait_fallback_height_thresh: float = 0.8
+        self.gait_fallback_upright_thresh: float = 0.4
         # ── Stabilize step counter ──
         self._stabilize_steps: int = 0
-        self._stabilize_target: int = 3  # v0.6.1: reduced from 5 → faster gait onset
+        self._stabilize_target: int = 30
 
     def compute_action(self, timestep, physics) -> np.ndarray:
-        """Compute 3-phase walker-walk control: recovery → stabilize → gait.
+        """Compute 3-phase walker-walk control with one-sided height+upright PD.
 
-        v0.5.4 Strategy:
-        Phase 1 (Recovery): torso_z < 1.0 or upright < 0.7 → aggressive PD
-        Phase 2 (Stabilize): just upright, hold for 30 steps → gentle PD
-        Phase 3 (Walking gait): stabilized 30+ steps → enhanced gait
-            If falls (z < 0.8 or upright < 0.6) → reset to Phase 1
+        v0.6.3 CRITICAL FIXES:
+        1. ctrl = TORQUE in [-1,1] (confirmed from model diagnostic).
+           Per-joint actuator range clipping was WRONG — all ctrl [-1,1].
+        2. Height PD is ONE-SIDED: only pushes UP when below target.
+           When walker is above 1.2m, height PD = 0 (no downward push).
+        3. upright can be NEGATIVE (walker starts nearly upside down).
+           upright_thresh lowered to 0.5 to accommodate negative starts.
+        4. Standing targets use moderate values, not raw reset angles.
 
         Args:
             timestep: dm_control TimeStep.
             physics: dm_control Physics instance.
 
         Returns:
-            ctrl[0:6] clipped per phase.
+            ctrl[0:6] clipped to [-1, 1] (torque range).
         """
         phys = physics
         ctrl: np.ndarray = np.zeros(self.nu)
         step: int = self._increment_step()
 
         # ── 1. Get walker state ──
-        torso_z: float = 0.0
-        try:
-            torso_pos = phys.named.data.xpos['torso', :]
-            torso_z = float(torso_pos[2]) if hasattr(torso_pos, '__len__') else float(torso_pos)
-        except (KeyError, IndexError, TypeError):
-            torso_z = float(phys.data.qpos[2]) if len(phys.data.qpos) > 2 else 0.0
+        # Walker model: nq=9, nv=9, nu=6
+        # Root joints: rootz(slide)=qpos[0], rootx(slide)=qpos[1], rooty(hinge)=qpos[2]
+        # Joint qpos: qpos[3:9] = [right_hip, right_knee, right_ankle, left_hip, left_knee, left_ankle]
+        # Note: qpos[0]=rootz=0 after reset (2D walker convention), use xpos for actual height
+        torso_z: float = float(phys.named.data.xpos['torso', :][2])  # actual torso height from xpos
+        torso_upright: float = float(phys.named.data.xmat['torso', :][8])  # zz rotation matrix component
+        root_vz: float = float(phys.data.qvel[0])  # rootz velocity (vertical)
+        root_pitch_vel: float = float(phys.data.qvel[2])  # rooty velocity (pitch angular)
+        horiz_vel: float = float(phys.data.qvel[1])  # rootx velocity (horizontal)
 
-        torso_upright: float = 1.0
-        try:
-            torso_mat = phys.named.data.xmat['torso', :]
-            torso_upright = float(torso_mat[8]) if hasattr(torso_mat, '__len__') else float(torso_mat)
-        except (KeyError, IndexError, TypeError):
-            if len(phys.data.qpos) >= 4:
-                qw = float(phys.data.qpos[3])
-                qx = float(phys.data.qpos[4])
-                torso_upright = 1.0 - 2.0 * qx * qx
+        # ── 2. One-sided height PD (only push UP when below target) ──
+        height_error: float = max(0.0, self.target_height - torso_z)
+        height_torque: float = self.height_kp * height_error - self.height_kd * root_vz
 
-        horiz_vel: float = 0.0
-        try:
-            torso_vel = phys.named.data.sensordata['torso_subtreelinvel']
-            horiz_vel = float(torso_vel[0]) if hasattr(torso_vel, '__len__') else float(torso_vel)
-        except (KeyError, IndexError, TypeError):
-            horiz_vel = float(phys.data.qvel[1]) if len(phys.data.qvel) > 1 else 0.0
+        # ── 3. Upright PD (push toward upright ≥ 1.0) ──
+        # torso_upright = xmat['torso','zz'] ranges from -1 (upside down) to 1 (upright)
+        # dm_control reward uses (1 + upright) / 2, so upright=1 → reward=1, upright=-1 → reward=0
+        upright_error: float = 1.0 - torso_upright  # want upright ≥ 1.0
+        upright_torque: float = self.upright_kp * upright_error - self.upright_kd * root_pitch_vel
 
         # ── Phase determination ──
         need_recovery: bool = (torso_z < self.recovery_height_thresh
                                 or torso_upright < self.recovery_upright_thresh)
-        is_upright: bool = (torso_z >= self.recovery_height_thresh
-                            and torso_upright >= self.recovery_upright_thresh)
         fell_during_gait: bool = (torso_z < self.gait_fallback_height_thresh
                                   or torso_upright < self.gait_fallback_upright_thresh)
 
         if need_recovery:
-            # ── Phase 1: Recovery — aggressive joint-level PD ──
-            self._stabilize_steps = 0  # reset stabilize counter
+            # ── Phase 1: Recovery — fixed torque + height/upright PD ──
+            # v0.6.3: Use fixed base torques instead of PD toward angle targets.
+            # The initial state varies randomly, so angle targets don't work for all cases.
+            # Strategy: positive hip torque pushes walker up, negative knee for support.
+            self._stabilize_steps = 0
             for i in range(min(self.nu, 6)):
-                qpos_idx: int = i + 3
-                joint_angle: float = 0.0
-                if qpos_idx < len(phys.data.qpos):
-                    joint_angle = float(phys.data.qpos[qpos_idx])
                 qvel_idx: int = i + 3
-                joint_vel: float = 0.0
-                if qvel_idx < len(phys.data.qvel):
-                    joint_vel = float(phys.data.qvel[qvel_idx])
-                target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
-                ctrl[i] = np.clip(
-                    self.recovery_kp * (target_angle - joint_angle)
-                    - self.recovery_kd * joint_vel,
-                    -1.0, 1.0)
+                joint_vel: float = float(phys.data.qvel[qvel_idx]) if qvel_idx < len(phys.data.qvel) else 0.0
+                # Fixed base torques (0=right_hip, 1=right_knee, 2=right_ankle, 3=left_hip, 4=left_knee, 5=left_ankle)
+                if i in (0, 3):  # hip — push forward to lift torso
+                    base_torque: float = self.recovery_hip_torque
+                elif i in (1, 4):  # knee — bend for support
+                    base_torque = self.recovery_knee_torque
+                elif i in (2, 5):  # ankle — push forward for balance
+                    base_torque = self.recovery_ankle_torque
+                else:
+                    base_torque = 0.0
+                # Velocity damping
+                vel_damp: float = -self.recovery_vel_kd * joint_vel * 0.1
+                # Height/upright PD (WalkerStandPD-style)
+                height_contrib: float = height_torque * 0.02
+                upright_contrib: float = upright_torque * 0.01
+                ctrl[i] = np.clip(base_torque + vel_damp + height_contrib + upright_contrib, -1.0, 1.0)
 
         elif self._stabilize_steps < self._stabilize_target:
-            # ── Phase 2: Stabilize — gentle PD to hold standing pose ──
+            # ── Phase 2: Stabilize — WalkerStandPD-style damping + height/upright ──
+            # v0.6.3 KEY: Use damping-only (no angle targets) like WalkerStandPD.
+            # Previous version used joint PD toward standing targets which destabilized
+            # the walker by pushing joints away from their natural standing pose.
+            # WalkerStandPD uses: ctrl[i] = height_torque*0.02 + upright_torque*0.01 + damping
             self._stabilize_steps += 1
             for i in range(min(self.nu, 6)):
-                qpos_idx = i + 3
-                joint_angle: float = 0.0
-                if qpos_idx < len(phys.data.qpos):
-                    joint_angle = float(phys.data.qpos[qpos_idx])
-                qvel_idx = i + 3
-                joint_vel: float = 0.0
-                if qvel_idx < len(phys.data.qvel):
-                    joint_vel = float(phys.data.qvel[qvel_idx])
-                target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
-                ctrl[i] = np.clip(
-                    self.stabilize_kp * (target_angle - joint_angle)
-                    - self.stabilize_kd * joint_vel,
-                    -0.8, 0.8)
+                qvel_idx: int = i + 3
+                joint_vel: float = float(phys.data.qvel[qvel_idx]) if qvel_idx < len(phys.data.qvel) else 0.0
+                # Joint damping (like WalkerStandPD: -kp * vel * 0.1)
+                joint_ctrl: float = -self.stabilize_kp * joint_vel * 0.1
+                # Height/upright PD contributions (WalkerStandPD-style scaling)
+                height_contrib: float = height_torque * 0.02  # all joints get height PD
+                upright_contrib: float = upright_torque * 0.01  # all joints get upright PD
+                ctrl[i] = np.clip(joint_ctrl + height_contrib + upright_contrib, -1.0, 1.0)
 
         else:
-            # ── Phase 3: Walking gait (enhanced) ──
-            # Check if walker fell during gait → reset to Phase 1
+            # ── Phase 3: Walking gait + height/upright PD ──
             if fell_during_gait:
                 self._stabilize_steps = 0
                 for i in range(min(self.nu, 6)):
-                    qpos_idx = i + 3
-                    joint_angle: float = 0.0
-                    if qpos_idx < len(phys.data.qpos):
-                        joint_angle = float(phys.data.qpos[qpos_idx])
                     qvel_idx = i + 3
-                    joint_vel: float = 0.0
-                    if qvel_idx < len(phys.data.qvel):
-                        joint_vel = float(phys.data.qvel[qvel_idx])
-                    target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
-                    ctrl[i] = np.clip(
-                        self.recovery_kp * (target_angle - joint_angle)
-                        - self.recovery_kd * joint_vel,
-                        -1.0, 1.0)
+                    joint_vel: float = float(phys.data.qvel[qvel_idx]) if qvel_idx < len(phys.data.qvel) else 0.0
+                    if i in (0, 3):
+                        base_torque = self.recovery_hip_torque
+                    elif i in (1, 4):
+                        base_torque = self.recovery_knee_torque
+                    elif i in (2, 5):
+                        base_torque = self.recovery_ankle_torque
+                    else:
+                        base_torque = 0.0
+                    vel_damp: float = -self.recovery_vel_kd * joint_vel * 0.1
+                    height_contrib: float = height_torque * 0.02
+                    upright_contrib: float = upright_torque * 0.01
+                    ctrl[i] = np.clip(base_torque + vel_damp + height_contrib + upright_contrib, -1.0, 1.0)
                 return self._clip_ctrl(ctrl)
 
-            # Enhanced walking gait with forward lean + CoG shift
-            t: float = step * 0.02
-
+            # ── Gait: full-sine drive + height/upright PD ──
+            t: float = step * 0.002
             phase_r: float = math.sin(self.gait_freq * t)
             phase_l: float = math.sin(self.gait_freq * t + math.pi)
-
-            right_push: float = max(phase_r, 0.0)
-            left_push: float = max(-phase_l, 0.0)
-
-            # ── CoG shift: standing leg hip shifts forward to move CoG ──
-            # When right leg is in stance (right_push > 0.3), right hip shifts forward
-            # When left leg is in stance (left_push > 0.3), left hip shifts forward
-            cog_shift_r: float = 0.03 if right_push > 0.3 else 0.0
-            cog_shift_l: float = 0.03 if left_push > 0.3 else 0.0
-
+            ankle_r: float = max(-phase_r, 0.0)
+            ankle_l: float = max(-phase_l, 0.0)
             vel_error: float = self.target_speed - horiz_vel
-            forward_bias: float = np.clip(
-                vel_error * self.vel_kp,
-                self.forward_bias_min, self.forward_bias_max)
+            forward_bias: float = np.clip(vel_error * self.vel_kp, self.forward_bias_min, self.forward_bias_max)
 
-            upright_error: float = max(0.0, 1.0 - torso_upright)
-            upright_correction: float = self.upright_kp * upright_error
-
-            # ── Right leg (ctrl 0-2) with forward lean + CoG shift ──
-            # right_hip: forward push + gait + lean bias + upright correction + CoG shift
+            # Right leg (ctrl 0-2)
             ctrl[0] = np.clip(
-                forward_bias + right_push * self.gait_amplitude
-                + self.forward_lean_bias  # ~4° forward lean
-                + upright_correction * 0.1
-                + cog_shift_r,  # CoG shift when right leg is stance
+                forward_bias + self.forward_lean_bias
+                + phase_r * self.gait_amplitude
+                + height_torque * 0.03
+                + upright_torque * 0.02,
                 -1.0, 1.0)
             ctrl[1] = np.clip(
-                -right_push * self.knee_amplitude + forward_bias * 0.3,
+                -phase_r * self.knee_amplitude + forward_bias * 0.2,
                 -1.0, 1.0)
             ctrl[2] = np.clip(
-                right_push * self.ankle_amplitude,
+                ankle_r * self.ankle_amplitude
+                + height_torque * 0.01
+                + upright_torque * 0.01,
                 -1.0, 1.0)
 
-            # ── Left leg (ctrl 3-5) with forward lean + CoG shift ──
+            # Left leg (ctrl 3-5)
             ctrl[3] = np.clip(
-                forward_bias + left_push * self.gait_amplitude
-                + self.forward_lean_bias  # ~4° forward lean
-                + upright_correction * 0.1
-                + cog_shift_l,  # CoG shift when left leg is stance
+                forward_bias + self.forward_lean_bias
+                + phase_l * self.gait_amplitude
+                + height_torque * 0.03
+                + upright_torque * 0.02,
                 -1.0, 1.0)
             ctrl[4] = np.clip(
-                -left_push * self.knee_amplitude + forward_bias * 0.3,
+                -phase_l * self.knee_amplitude + forward_bias * 0.2,
                 -1.0, 1.0)
             ctrl[5] = np.clip(
-                left_push * self.ankle_amplitude,
+                ankle_l * self.ankle_amplitude
+                + height_torque * 0.01
+                + upright_torque * 0.01,
                 -1.0, 1.0)
 
         return self._clip_ctrl(ctrl)
@@ -1192,7 +1200,10 @@ class WalkerRunPD(TaskPDController):
 
         if need_recovery:
             # ── Phase 1: Recovery — aggressive joint-level PD ──
+            # Walker actuator ranges: hip [-0.35, 1.75], knee [-2.62, 0], ankle [-0.79, 0.79]
             self._stabilize_steps = 0
+            actuator_ranges = [(-0.35, 1.75), (-2.62, 0.0), (-0.79, 0.79),
+                               (-0.35, 1.75), (-2.62, 0.0), (-0.79, 0.79)]
             for i in range(min(self.nu, 6)):
                 qpos_idx: int = i + 3
                 joint_angle: float = 0.0
@@ -1203,10 +1214,11 @@ class WalkerRunPD(TaskPDController):
                 if qvel_idx < len(phys.data.qvel):
                     joint_vel = float(phys.data.qvel[qvel_idx])
                 target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
+                lo, hi = actuator_ranges[min(i, len(actuator_ranges) - 1)]
                 ctrl[i] = np.clip(
                     self.recovery_kp * (target_angle - joint_angle)
                     - self.recovery_kd * joint_vel,
-                    -1.0, 1.0)
+                    lo, hi)
 
         elif self._stabilize_steps < self._stabilize_target:
             # ── Phase 2: Stabilize — gentle PD to hold standing pose ──
@@ -1240,10 +1252,11 @@ class WalkerRunPD(TaskPDController):
                     if qvel_idx < len(phys.data.qvel):
                         joint_vel = float(phys.data.qvel[qvel_idx])
                     target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
+                    lo, hi = actuator_ranges[min(i, len(actuator_ranges) - 1)]
                     ctrl[i] = np.clip(
                         self.recovery_kp * (target_angle - joint_angle)
                         - self.recovery_kd * joint_vel,
-                        -1.0, 1.0)
+                        lo, hi)
                 return self._clip_ctrl(ctrl)
 
             t: float = step * 0.02

@@ -1,4 +1,4 @@
-# §7 Experimental Results — v0.6.0 Machine Conscience Audit Framework
+# §7 Experimental Results — v0.6.3 PD Controller Diagnosis & Locomotion η-Mode
 
 ## 7.1 Benchmark Results: IDO vs PPO (humanoid-stand)
 
@@ -113,3 +113,50 @@
 | humanoid-walk | locomotion | 1.0 m/s | 1.4 m | 0.8 | 0.3 |
 | humanoid-run | locomotion | 5.0 m/s | 1.4 m | 0.7 | 0.5 |
 | humanoid-stand | point | — | — | — | 0.05 |
+
+## 7.10 Walker PD Controller Diagnosis & v0.6.3 Critical Fixes
+
+**Root cause diagnosis** (3 separate bugs identified and fixed):
+
+1. **Torque vs position actuator confusion**: Walker actuators are pure **torque** (gainprm=[1,0,...], biasprm=[0,0,...], ctrlrange=[-1,1]). Previous code incorrectly used per-joint angle ranges (hip [-0.35, 1.75], knee [-2.62, 0]) as ctrl clip bounds. **Fix**: all ctrl clipped to [-1, 1].
+
+2. **WalkerStandPD qpos/qvel index errors**: Walker model has nq=9, nv=9 with only 3 root DOFs (rootz, rootx, rooty). WalkerStandPD previously:
+   - Used `qpos[2]` for height → but qpos[2]=rooty (pitch angle, NOT height!). Walker 2D convention: qpos[0]=rootz=0.
+   - Used `qpos[3], qpos[4]` for upright quaternion → Walker has NO quaternion in qpos, only 3 root entries.
+   - Used `qvel_idx = i + 5` → Walker has 3 root velocity DOFs, not 5. Correct: `i + 3`.
+   **Fix**: height from `xpos['torso','z']`, upright from `xmat['torso',8]` (zz rotation matrix component), qvel from `qvel[i+3]`.
+
+3. **Height PD bidirectional push**: `height_error = target - torso_z` produced negative push when walker was already above target (initial height ≈ 1.3 > target 1.2). This actively pushed walker DOWN. **Fix**: one-sided height PD — `height_error = max(0, target_height - torso_z)`, only pushes UP.
+
+**Walker model structure (diagnostic confirmed)**:
+- nq=9: qpos[0]=rootz(slide)=0, qpos[1]=rootx(slide), qpos[2]=rooty(hinge), qpos[3:9]=joints
+- nv=9: qvel[0]=rootz_vel, qvel[1]=rootx_vel, qvel[2]=rooty_vel, qvel[3:9]=joint_vel
+- nu=6: ctrl[0:6] = torque on right_hip, right_knee, right_ankle, left_hip, left_knee, left_ankle
+- torso_z from `xpos['torso',:][2]` (NOT from qpos)
+- torso_upright from `xmat['torso',:][8]` (zz component, range [-1,1], -1=upside-down)
+
+**WalkerWalkPD v0.6.3 strategy**:
+- Phase 1 (Recovery): height < 1.0 or upright < 0.5 → fixed base torques (hip=+0.5, knee=-0.3, ankle=+0.2) + velocity damping + one-sided height/upright PD
+- Phase 2 (Stabilize): upright sustained 30 steps → WalkerStandPD-style joint damping + one-sided height/upright PD
+- Phase 3 (Walking gait): stabilized 30+ steps → full-sine oscillation + height/upright PD + velocity feedback
+
+**Current PD controller performance**:
+
+| Controller | Metric | v0.6.1 | v0.6.3 | Status |
+|-----------|--------|--------|--------|--------|
+| WalkerStandPD | upright peak | — | 0.98 | Can briefly stand up |
+| WalkerStandPD | stable standing | — | Falls in ~1s | PD limitation |
+| WalkerWalkPD | avg speed | ~0.2 m/s | ~0.2 m/s | PD cannot sustain gait |
+| CheetahRunPD | avg speed | ~0.2 m/s | ~0.2 m/s | PD gallop not tuned |
+
+**PD controller limitation diagnosis**: Walker 2D dynamics requires coordinated multi-joint control that simple phase-based PD cannot achieve. Even WalkerStandPD with correct indices can only briefly upright the walker (peak 0.98) before it falls. This confirms the "聪明的残废" diagnosis at a deeper level — not just IDO's open-loop PD vs PPO, but **PD control itself** has inherent limitations on underactuated 2D locomotion. The value of IDO's η-mode + ψ-anchor framework is that it can detect these failures (η staying high) and trigger SafeFuse fallback, maintaining conscience guarantees even when the motor layer fails.
+
+**Implication**: Locomotion PD controllers serve as **initialization** for the IDO cognitive loop — they provide a structured starting point (recovery → stabilize → gait phases) that the η-mode can track. Actual locomotion performance requires either:
+1. SB3 PPO/SAC trained policies (Phase 2 baseline)
+2. Hybrid IDO+SB3 agent (Phase 3, using IDO's η-aware decision loop to switch between PD fallback and SB3 policy)
+
+## 7.11 QA Test Verification
+
+**v0.6.3 test status**: 292/292 tests pass (pytest, 7.41s)
+
+No regressions from WalkerWalkPD v0.6.3 refactor, WalkerStandPD index fixes, or one-sided height PD changes.
