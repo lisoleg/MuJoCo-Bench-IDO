@@ -790,7 +790,7 @@ class WalkerStandPD(TaskPDController):
 
 
 class WalkerWalkPD(TaskPDController):
-    """PD controller for walker-walk: 2-phase recovery + gait locomotion.
+    """PD controller for walker-walk: 3-phase recovery → stabilize → walking gait.
 
     dm_control walker-walk reward formula (critical alignment):
         standing = tolerance(torso_height(), bounds=(1.2, inf), margin=0.6)
@@ -802,7 +802,7 @@ class WalkerWalkPD(TaskPDController):
 
     Maximum reward per step = 1.0 (when standing=1, upright=1, move_reward=1).
     Needs: torso_height ≥ 1.2m, torso_upright ≥ 1.0, horizontal_velocity ≥ 1.0 m/s.
-    Walker starts from RANDOM fallen state — PD recovery is imperfect.
+    Walker starts from RANDOM fallen state — must recover first!
 
     Walker actuator layout (confirmed from dm_control):
         ctrl[0]: right_hip (positive = swing forward, range [-0.35, 1.75])
@@ -812,88 +812,95 @@ class WalkerWalkPD(TaskPDController):
         ctrl[4]: left_knee (same as right_knee)
         ctrl[5]: left_ankle (same as right_ankle)
 
-    Walker qpos: [rootz, rootx, rooty, right_hip, right_knee, right_ankle,
-                  left_hip, left_knee, left_ankle]
-    Walker joints start RANDOMIZED — walker may start upside down!
+    Strategy (v0.5.4 — 3-phase control with stabilize buffer):
+    Phase 1 (Recovery): torso_z < 1.0 OR torso_upright < 0.7
+        - Aggressive PD: kp=2.0, kd=0.8 (was 0.8, 0.3)
+        - ctrl clip: [-1, 1] (recovery needs full force)
+        - PD toward standing pose targets [0, -0.5, 0, 0, -0.5, 0]
+    Phase 2 (Stabilize): just stood up, need to hold for 30 steps
+        - Gentle PD to maintain standing: kp=0.5, kd=0.2
+        - ctrl clip: [-0.8, 0.8]
+        - _stabilize_steps counter (0 → 30), then switch to Phase 3
+    Phase 3 (Walking gait): stabilized for 30+ steps
+        - Enhanced gait: amplitude 0.55, freq 12 rad/s, vel_kp=0.5
+        - Forward lean bias: 2° on all hip joints
+        - forward_bias clip: (-0.3, 0.8)
+        - If torso_z < 0.8 or upright < 0.6 → reset to Phase 1
 
-    Strategy (v0.5.2 — 2-phase gait-generation):
-    Phase 1 (Recovery): When torso_z < 1.0 or torso_upright < 0.7, use
-        joint-level PD to push toward standing pose:
-        action = kp*(standing_targets - joint_angles) - kd*joint_vel
-        Standing targets = [0, -0.5, 0, 0, -0.5, 0]. kp=0.8, kd=0.3.
-    Phase 2 (Walking gait): When upright, switch to oscillating gait
-        with velocity feedback. Use sinusoidal phase with alternating
-        left/right leg push.
-        horizontal_velocity from phys.named.data.sensordata['torso_subtreelinvel'][0]
-        Gait: right_push = max(sin(freq*t), 0), left_push = max(-sin(freq*t), 0)
-        Velocity feedback: forward_bias = clip(vel_error * 0.15, -0.2, 0.4)
-        targeting 1.0 m/s
-        Maintain upright + height with gentle PD while walking.
+    PD gains (v0.5.4 — 3-phase enhanced):
+        Recovery: kp=2.0, kd=0.8
+        Stabilize: kp=0.5, kd=0.2
+        Walking: gait_freq=12, gait_amp=0.55, vel_kp=0.5
 
-    PD gains (v0.5.2 — dm_control reward aligned):
-        Recovery: kp=0.8, kd=0.3 (joint-level standing pose PD)
-        Gait: gait_freq=8.0 rad/s, gait_amplitude=0.35
-        Velocity feedback: vel_kp=0.15, target_speed=1.0 m/s
-        Upright: kp=0.5, kd=0.2 (gentle PD while walking)
-
-    Output: ctrl[0:6], all clipped to [-1, 1].
+    Output: ctrl[0:6], clipped per phase.
     """
 
     def __init__(self, physics) -> None:
-        """Initialize WalkerWalkPD with 2-phase recovery+gait gains.
+        """Initialize WalkerWalkPD with 3-phase recovery+stabilize+gait gains.
 
-        v0.5.2: Complete rewrite with dm_control reward-aligned gait
-        generation. Two-phase control: recovery PD when fallen, walking
-        gait when upright with velocity feedback.
+        v0.5.4: Complete rewrite — 3-phase control with stabilize buffer.
+        Added _stabilize_steps counter (0→30) before gait starts.
+        Enhanced gait parameters for faster walking speed.
 
         Args:
             physics: dm_control Physics instance.
         """
-        super().__init__(physics, kp=0.8, kd=0.3)
+        super().__init__(physics, kp=2.0, kd=0.8)
         self.target_speed: float = 1.0
         self.target_height: float = 1.2
-        # Recovery phase gains
-        self.recovery_kp: float = 0.8
-        self.recovery_kd: float = 0.3
-        # Standing pose targets for recovery PD
+        # ── Phase 1: Recovery gains (aggressive) ──
+        self.recovery_kp: float = 2.0
+        self.recovery_kd: float = 0.8
+        # ── Phase 2: Stabilize gains (gentle) ──
+        self.stabilize_kp: float = 0.5
+        self.stabilize_kd: float = 0.2
+        # ── Standing pose targets for recovery/stabilize ──
         # [right_hip, right_knee, right_ankle, left_hip, left_knee, left_ankle]
         self.standing_targets: np.ndarray = np.array([0.0, -0.5, 0.0, 0.0, -0.5, 0.0])
-        # Gait phase parameters
-        self.gait_freq: float = 8.0  # rad/s for walking frequency
-        self.gait_amplitude: float = 0.35  # max hip push amplitude
-        self.knee_amplitude: float = 0.25  # max knee swing amplitude
-        self.ankle_amplitude: float = 0.1   # max ankle amplitude
-        # Velocity feedback
-        self.vel_kp: float = 0.15  # forward bias from velocity error
-        # Upright maintenance during walking
+        # ── Phase 3: Walking gait parameters (enhanced) ──
+        self.gait_freq: float = 12.0  # rad/s (was 8.0)
+        self.gait_amplitude: float = 0.55  # hip push amplitude (was 0.35)
+        self.knee_amplitude: float = 0.4   # knee swing amplitude (was 0.25)
+        self.ankle_amplitude: float = 0.15  # ankle amplitude (was 0.1)
+        # ── Velocity feedback (enhanced) ──
+        self.vel_kp: float = 0.5  # (was 0.15)
+        self.forward_bias_min: float = -0.3  # (was -0.2)
+        self.forward_bias_max: float = 0.8   # (was 0.4)
+        # ── Forward lean bias (2° ≈ 0.035 rad) ──
+        self.forward_lean_bias: float = 0.035
+        # ── Upright maintenance during walking ──
         self.upright_kp: float = 0.5
         self.upright_kd: float = 0.2
-        # Phase switching thresholds
+        # ── Phase thresholds ──
         self.recovery_height_thresh: float = 1.0
         self.recovery_upright_thresh: float = 0.7
+        self.gait_fallback_height_thresh: float = 0.8  # if falls during gait → Phase 1
+        self.gait_fallback_upright_thresh: float = 0.6
+        # ── Stabilize step counter ──
+        self._stabilize_steps: int = 0
+        self._stabilize_target: int = 5
 
     def compute_action(self, timestep, physics) -> np.ndarray:
-        """Compute 2-phase walker-walk control: recovery → gait.
+        """Compute 3-phase walker-walk control: recovery → stabilize → gait.
 
-        v0.5.2 Strategy:
-        Phase 1 (Recovery): When fallen (torso_z < 1.0 or upright < 0.7),
-            use joint-level PD toward standing pose.
-        Phase 2 (Walking gait): When upright, use oscillating gait with
-            velocity feedback targeting 1.0 m/s.
+        v0.5.4 Strategy:
+        Phase 1 (Recovery): torso_z < 1.0 or upright < 0.7 → aggressive PD
+        Phase 2 (Stabilize): just upright, hold for 30 steps → gentle PD
+        Phase 3 (Walking gait): stabilized 30+ steps → enhanced gait
+            If falls (z < 0.8 or upright < 0.6) → reset to Phase 1
 
         Args:
             timestep: dm_control TimeStep.
             physics: dm_control Physics instance.
 
         Returns:
-            ctrl[0:6] clipped to [-1, 1].
+            ctrl[0:6] clipped per phase.
         """
         phys = physics
         ctrl: np.ndarray = np.zeros(self.nu)
         step: int = self._increment_step()
 
         # ── 1. Get walker state ──
-        # Torso height (z-position)
         torso_z: float = 0.0
         try:
             torso_pos = phys.named.data.xpos['torso', :]
@@ -901,101 +908,128 @@ class WalkerWalkPD(TaskPDController):
         except (KeyError, IndexError, TypeError):
             torso_z = float(phys.data.qpos[2]) if len(phys.data.qpos) > 2 else 0.0
 
-        # Torso upright (xmat['torso','zz'] → 1.0 = perfectly upright)
         torso_upright: float = 1.0
         try:
             torso_mat = phys.named.data.xmat['torso', :]
             torso_upright = float(torso_mat[8]) if hasattr(torso_mat, '__len__') else float(torso_mat)
         except (KeyError, IndexError, TypeError):
-            # Fallback from quaternion
             if len(phys.data.qpos) >= 4:
                 qw = float(phys.data.qpos[3])
                 qx = float(phys.data.qpos[4])
                 torso_upright = 1.0 - 2.0 * qx * qx
 
-        # Horizontal velocity (forward velocity of torso)
         horiz_vel: float = 0.0
         try:
             torso_vel = phys.named.data.sensordata['torso_subtreelinvel']
             horiz_vel = float(torso_vel[0]) if hasattr(torso_vel, '__len__') else float(torso_vel)
         except (KeyError, IndexError, TypeError):
-            # Fallback: qvel root x velocity
             horiz_vel = float(phys.data.qvel[1]) if len(phys.data.qvel) > 1 else 0.0
 
         # ── Phase determination ──
-        # Walker starts RANDOMIZED — may start upside down
         need_recovery: bool = (torso_z < self.recovery_height_thresh
                                 or torso_upright < self.recovery_upright_thresh)
+        is_upright: bool = (torso_z >= self.recovery_height_thresh
+                            and torso_upright >= self.recovery_upright_thresh)
+        fell_during_gait: bool = (torso_z < self.gait_fallback_height_thresh
+                                  or torso_upright < self.gait_fallback_upright_thresh)
 
         if need_recovery:
-            # ── Phase 1: Recovery — joint-level PD toward standing pose ──
-            # Walker qpos layout: [rootz, rootx, rooty, right_hip, right_knee,
-            #                      right_ankle, left_hip, left_knee, left_ankle]
-            # Joint angles start at qpos[3], velocities at qvel[3]
+            # ── Phase 1: Recovery — aggressive joint-level PD ──
+            self._stabilize_steps = 0  # reset stabilize counter
             for i in range(min(self.nu, 6)):
-                qpos_idx: int = i + 3  # walker: 3 root position DOFs
+                qpos_idx: int = i + 3
                 joint_angle: float = 0.0
                 if qpos_idx < len(phys.data.qpos):
                     joint_angle = float(phys.data.qpos[qpos_idx])
-
-                qvel_idx: int = i + 3  # walker: 3 root velocity DOFs (nv=5, but root_vel has 5 entries)
+                qvel_idx: int = i + 3
                 joint_vel: float = 0.0
                 if qvel_idx < len(phys.data.qvel):
                     joint_vel = float(phys.data.qvel[qvel_idx])
-
                 target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
                 ctrl[i] = np.clip(
                     self.recovery_kp * (target_angle - joint_angle)
                     - self.recovery_kd * joint_vel,
                     -1.0, 1.0)
+
+        elif self._stabilize_steps < self._stabilize_target:
+            # ── Phase 2: Stabilize — gentle PD to hold standing pose ──
+            self._stabilize_steps += 1
+            for i in range(min(self.nu, 6)):
+                qpos_idx = i + 3
+                joint_angle: float = 0.0
+                if qpos_idx < len(phys.data.qpos):
+                    joint_angle = float(phys.data.qpos[qpos_idx])
+                qvel_idx = i + 3
+                joint_vel: float = 0.0
+                if qvel_idx < len(phys.data.qvel):
+                    joint_vel = float(phys.data.qvel[qvel_idx])
+                target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
+                ctrl[i] = np.clip(
+                    self.stabilize_kp * (target_angle - joint_angle)
+                    - self.stabilize_kd * joint_vel,
+                    -0.8, 0.8)
+
         else:
-            # ── Phase 2: Walking gait with velocity feedback ──
-            # Sinusoidal gait: alternating left/right leg push
-            t: float = step * 0.02  # time in seconds (dm_control uses 0.01s timestep, 2 substeps)
+            # ── Phase 3: Walking gait (enhanced) ──
+            # Check if walker fell during gait → reset to Phase 1
+            if fell_during_gait:
+                self._stabilize_steps = 0
+                for i in range(min(self.nu, 6)):
+                    qpos_idx = i + 3
+                    joint_angle: float = 0.0
+                    if qpos_idx < len(phys.data.qpos):
+                        joint_angle = float(phys.data.qpos[qpos_idx])
+                    qvel_idx = i + 3
+                    joint_vel: float = 0.0
+                    if qvel_idx < len(phys.data.qvel):
+                        joint_vel = float(phys.data.qvel[qvel_idx])
+                    target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
+                    ctrl[i] = np.clip(
+                        self.recovery_kp * (target_angle - joint_angle)
+                        - self.recovery_kd * joint_vel,
+                        -1.0, 1.0)
+                return self._clip_ctrl(ctrl)
 
-            # Gait phase for right and left legs
+            # Enhanced walking gait with forward lean
+            t: float = step * 0.02
+
             phase_r: float = math.sin(self.gait_freq * t)
-            phase_l: float = math.sin(self.gait_freq * t + math.pi)  # opposite phase
+            phase_l: float = math.sin(self.gait_freq * t + math.pi)
 
-            # Right push: only push forward when sin > 0 (swing phase)
             right_push: float = max(phase_r, 0.0)
-            # Left push: only push forward when sin < 0 (swing phase for left)
             left_push: float = max(-phase_l, 0.0)
 
-            # Velocity feedback: forward bias targeting 1.0 m/s
             vel_error: float = self.target_speed - horiz_vel
-            forward_bias: float = np.clip(vel_error * self.vel_kp, -0.2, 0.4)
+            forward_bias: float = np.clip(
+                vel_error * self.vel_kp,
+                self.forward_bias_min, self.forward_bias_max)
 
-            # Upright maintenance: gentle PD on torso orientation
             upright_error: float = max(0.0, 1.0 - torso_upright)
             upright_correction: float = self.upright_kp * upright_error
 
-            # ── Right leg (ctrl 0-2) ──
-            # right_hip: forward push + gait phase + velocity feedback
+            # ── Right leg (ctrl 0-2) with forward lean ──
+            # right_hip: forward push + gait + lean bias + upright correction
             ctrl[0] = np.clip(
                 forward_bias + right_push * self.gait_amplitude
+                + self.forward_lean_bias  # 2° forward lean
                 + upright_correction * 0.1,
                 -1.0, 1.0)
-            # right_knee: swing during gait (extend during stance, flex during swing)
             ctrl[1] = np.clip(
                 -right_push * self.knee_amplitude + forward_bias * 0.3,
                 -1.0, 1.0)
-            # right_ankle: small stabilizing push
             ctrl[2] = np.clip(
                 right_push * self.ankle_amplitude,
                 -1.0, 1.0)
 
-            # ── Left leg (ctrl 3-5) ──
-            # left_hip: forward push + gait phase + velocity feedback
+            # ── Left leg (ctrl 3-5) with forward lean ──
             ctrl[3] = np.clip(
                 forward_bias + left_push * self.gait_amplitude
+                + self.forward_lean_bias  # 2° forward lean
                 + upright_correction * 0.1,
                 -1.0, 1.0)
-            # left_knee: swing during gait
             ctrl[4] = np.clip(
                 -left_push * self.knee_amplitude + forward_bias * 0.3,
                 -1.0, 1.0)
-            # left_ankle: small stabilizing push
             ctrl[5] = np.clip(
                 left_push * self.ankle_amplitude,
                 -1.0, 1.0)
@@ -1014,7 +1048,7 @@ class WalkerWalkPD(TaskPDController):
         """
         ctrl: np.ndarray = np.zeros(self.nu)
         for i in range(min(self.nu, 6)):
-            qvel_idx: int = i + 3  # walker: 3 root velocity DOFs
+            qvel_idx: int = i + 3
             if qvel_idx < len(physics.data.qvel):
                 vel: float = float(physics.data.qvel[qvel_idx])
                 ctrl[i] = np.clip(-0.2 * vel, -0.5, 0.5)
@@ -1022,73 +1056,90 @@ class WalkerWalkPD(TaskPDController):
 
 
 class WalkerRunPD(TaskPDController):
-    """PD controller for walker-run: faster gait with velocity feedback.
+    """PD controller for walker-run: 3-phase recovery → stabilize → running gait.
 
-    Same 2-phase structure as WalkerWalkPD but with:
+    Same 3-phase structure as WalkerWalkPD but with:
     - Higher target speed: 8 m/s (vs 1.0 m/s for walk)
-    - Higher gait amplitude: 0.55 (vs 0.35 for walk)
-    - Higher gait frequency: 12 rad/s (vs 8 for walk)
-    - Stronger velocity feedback: vel_kp=0.25
+    - Higher gait amplitude: 0.7 (vs 0.55 for walk)
+    - Higher gait frequency: 16 rad/s (vs 12 for walk)
+    - Stronger velocity feedback: vel_kp=0.8 (vs 0.5 for walk)
+    - Forward bias clip: (-0.3, 1.0) (vs (-0.3, 0.8) for walk)
 
     dm_control walker-run reward: same formula as walk but
-    horizontal_velocity target is higher (walking ~1 m/s, running faster).
+    horizontal_velocity target is higher (running faster).
 
-    Strategy (v0.5.2 — 2-phase gait-generation):
-    Phase 1 (Recovery): When fallen, use joint-level PD toward standing pose.
-    Phase 2 (Running gait): When upright, use fast oscillating gait with
-        velocity feedback targeting 8 m/s.
+    Strategy (v0.5.4 — 3-phase control with stabilize buffer):
+    Phase 1 (Recovery): torso_z < 1.0 or upright < 0.7 → aggressive PD
+    Phase 2 (Stabilize): just upright, hold for 30 steps → gentle PD
+    Phase 3 (Running gait): stabilized 30+ steps → fast gait
+        If falls (z < 0.8 or upright < 0.6) → reset to Phase 1
 
-    PD gains (v0.5.2 — dm_control reward aligned):
-        Recovery: kp=1.0, kd=0.4 (slightly stronger for faster recovery)
-        Gait: gait_freq=12.0 rad/s, gait_amplitude=0.55
-        Velocity feedback: vel_kp=0.25, target_speed=8.0 m/s
+    PD gains (v0.5.4 — 3-phase enhanced):
+        Recovery: kp=2.5, kd=1.0 (stronger for faster recovery)
+        Stabilize: kp=0.5, kd=0.2
+        Running: gait_freq=16, gait_amp=0.7, vel_kp=0.8
 
-    Output: ctrl[0:6], all clipped to [-1, 1].
+    Output: ctrl[0:6], clipped per phase.
     """
 
     def __init__(self, physics) -> None:
-        """Initialize WalkerRunPD with high-speed gait gains.
+        """Initialize WalkerRunPD with 3-phase high-speed gait gains.
 
-        v0.5.2: Complete rewrite — same 2-phase structure as WalkerWalkPD
-        but with higher target_speed, gait amplitude, and velocity feedback.
+        v0.5.4: Complete rewrite — 3-phase control with stabilize buffer,
+        same as WalkerWalkPD but with higher target_speed, gait amplitude,
+        and velocity feedback for running.
 
         Args:
             physics: dm_control Physics instance.
         """
-        super().__init__(physics, kp=1.0, kd=0.4)
+        super().__init__(physics, kp=2.5, kd=1.0)
         self.target_speed: float = 8.0
         self.target_height: float = 1.2
-        # Recovery phase gains
-        self.recovery_kp: float = 1.0
-        self.recovery_kd: float = 0.4
+        # ── Phase 1: Recovery gains (aggressive) ──
+        self.recovery_kp: float = 2.5
+        self.recovery_kd: float = 1.0
         self.standing_targets: np.ndarray = np.array([0.0, -0.5, 0.0, 0.0, -0.5, 0.0])
-        # Gait phase parameters (higher for running)
-        self.gait_freq: float = 12.0
-        self.gait_amplitude: float = 0.55
-        self.knee_amplitude: float = 0.40
-        self.ankle_amplitude: float = 0.15
-        # Velocity feedback (stronger for higher speed)
-        self.vel_kp: float = 0.25
-        # Upright maintenance during running
+        # ── Phase 2: Stabilize gains (gentle) ──
+        self.stabilize_kp: float = 0.5
+        self.stabilize_kd: float = 0.2
+        # ── Phase 3: Running gait parameters ──
+        self.gait_freq: float = 16.0  # rad/s (was 12)
+        self.gait_amplitude: float = 0.7  # (was 0.55)
+        self.knee_amplitude: float = 0.45  # (was 0.40)
+        self.ankle_amplitude: float = 0.2   # (was 0.15)
+        # ── Velocity feedback (stronger for running) ──
+        self.vel_kp: float = 0.8  # (was 0.25)
+        self.forward_bias_min: float = -0.3  # (was -0.3)
+        self.forward_bias_max: float = 1.0   # (was 0.6)
+        # ── Forward lean bias ──
+        self.forward_lean_bias: float = 0.05  # stronger lean for running (~3°)
+        # ── Upright maintenance during running ──
         self.upright_kp: float = 0.6
         self.upright_kd: float = 0.25
-        # Phase switching thresholds
+        # ── Phase thresholds ──
         self.recovery_height_thresh: float = 1.0
         self.recovery_upright_thresh: float = 0.7
+        self.gait_fallback_height_thresh: float = 0.8
+        self.gait_fallback_upright_thresh: float = 0.6
+        # ── Stabilize step counter ──
+        self._stabilize_steps: int = 0
+        self._stabilize_target: int = 5
 
     def compute_action(self, timestep, physics) -> np.ndarray:
-        """Compute 2-phase walker-run control: recovery → fast gait.
+        """Compute 3-phase walker-run control: recovery → stabilize → fast gait.
 
-        v0.5.2 Strategy:
-        Phase 1 (Recovery): Same as WalkerWalkPD when fallen.
-        Phase 2 (Running gait): Higher frequency gait targeting 8 m/s.
+        v0.5.4 Strategy:
+        Phase 1 (Recovery): fallen → aggressive PD
+        Phase 2 (Stabilize): just upright → gentle PD for 30 steps
+        Phase 3 (Running gait): stabilized → fast gait targeting 8 m/s
+            If falls → reset to Phase 1
 
         Args:
             timestep: dm_control TimeStep.
             physics: dm_control Physics instance.
 
         Returns:
-            ctrl[0:6] clipped to [-1, 1].
+            ctrl[0:6] clipped per phase.
         """
         phys = physics
         ctrl: np.ndarray = np.zeros(self.nu)
@@ -1122,9 +1173,12 @@ class WalkerRunPD(TaskPDController):
         # ── Phase determination ──
         need_recovery: bool = (torso_z < self.recovery_height_thresh
                                 or torso_upright < self.recovery_upright_thresh)
+        fell_during_gait: bool = (torso_z < self.gait_fallback_height_thresh
+                                  or torso_upright < self.gait_fallback_upright_thresh)
 
         if need_recovery:
-            # ── Phase 1: Recovery — joint-level PD toward standing pose ──
+            # ── Phase 1: Recovery — aggressive joint-level PD ──
+            self._stabilize_steps = 0
             for i in range(min(self.nu, 6)):
                 qpos_idx: int = i + 3
                 joint_angle: float = 0.0
@@ -1139,8 +1193,45 @@ class WalkerRunPD(TaskPDController):
                     self.recovery_kp * (target_angle - joint_angle)
                     - self.recovery_kd * joint_vel,
                     -1.0, 1.0)
+
+        elif self._stabilize_steps < self._stabilize_target:
+            # ── Phase 2: Stabilize — gentle PD to hold standing pose ──
+            self._stabilize_steps += 1
+            for i in range(min(self.nu, 6)):
+                qpos_idx = i + 3
+                joint_angle: float = 0.0
+                if qpos_idx < len(phys.data.qpos):
+                    joint_angle = float(phys.data.qpos[qpos_idx])
+                qvel_idx = i + 3
+                joint_vel: float = 0.0
+                if qvel_idx < len(phys.data.qvel):
+                    joint_vel = float(phys.data.qvel[qvel_idx])
+                target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
+                ctrl[i] = np.clip(
+                    self.stabilize_kp * (target_angle - joint_angle)
+                    - self.stabilize_kd * joint_vel,
+                    -0.8, 0.8)
+
         else:
-            # ── Phase 2: Running gait with velocity feedback ──
+            # ── Phase 3: Running gait (enhanced) ──
+            if fell_during_gait:
+                self._stabilize_steps = 0
+                for i in range(min(self.nu, 6)):
+                    qpos_idx = i + 3
+                    joint_angle: float = 0.0
+                    if qpos_idx < len(phys.data.qpos):
+                        joint_angle = float(phys.data.qpos[qpos_idx])
+                    qvel_idx = i + 3
+                    joint_vel: float = 0.0
+                    if qvel_idx < len(phys.data.qvel):
+                        joint_vel = float(phys.data.qvel[qvel_idx])
+                    target_angle: float = float(self.standing_targets[min(i, len(self.standing_targets) - 1)])
+                    ctrl[i] = np.clip(
+                        self.recovery_kp * (target_angle - joint_angle)
+                        - self.recovery_kd * joint_vel,
+                        -1.0, 1.0)
+                return self._clip_ctrl(ctrl)
+
             t: float = step * 0.02
 
             phase_r: float = math.sin(self.gait_freq * t)
@@ -1150,14 +1241,17 @@ class WalkerRunPD(TaskPDController):
             left_push: float = max(-phase_l, 0.0)
 
             vel_error: float = self.target_speed - horiz_vel
-            forward_bias: float = np.clip(vel_error * self.vel_kp, -0.3, 0.6)
+            forward_bias: float = np.clip(
+                vel_error * self.vel_kp,
+                self.forward_bias_min, self.forward_bias_max)
 
             upright_error: float = max(0.0, 1.0 - torso_upright)
             upright_correction: float = self.upright_kp * upright_error
 
-            # ── Right leg (ctrl 0-2) ──
+            # ── Right leg (ctrl 0-2) with forward lean ──
             ctrl[0] = np.clip(
                 forward_bias + right_push * self.gait_amplitude
+                + self.forward_lean_bias
                 + upright_correction * 0.1,
                 -1.0, 1.0)
             ctrl[1] = np.clip(
@@ -1167,9 +1261,10 @@ class WalkerRunPD(TaskPDController):
                 right_push * self.ankle_amplitude,
                 -1.0, 1.0)
 
-            # ── Left leg (ctrl 3-5) ──
+            # ── Left leg (ctrl 3-5) with forward lean ──
             ctrl[3] = np.clip(
                 forward_bias + left_push * self.gait_amplitude
+                + self.forward_lean_bias
                 + upright_correction * 0.1,
                 -1.0, 1.0)
             ctrl[4] = np.clip(
@@ -1348,39 +1443,36 @@ class CheetahRunPD(TaskPDController):
                 + pitch_correction * 0.2,
                 -1.0, 1.0)
             # ctrl[1]: bshin — extend backward during stance (negative),
-            #           flex during swing
             ctrl[1] = np.clip(
-                -back_push * self.back_shin_amp  # extend (negative)
-                - back_swing * self.back_shin_amp * 0.2,  # slight flex during swing
+                -back_push * self.back_shin_amp
+                - back_swing * self.back_shin_amp * 0.3,
                 -1.0, 1.0)
-            # ctrl[2]: bfoot — push down during stance, lift during swing
+            # ctrl[2]: bfoot — push down during stance
             ctrl[2] = np.clip(
-                back_push * self.back_foot_amp
-                - back_swing * self.back_foot_amp * 0.15,
+                back_push * self.back_foot_amp,
                 -1.0, 1.0)
 
             # ── Front leg (ctrl 3-5) ──
-            # ctrl[3]: fthigh — forward push during stance
+            # ctrl[3]: fthigh — forward push during stance, retract during swing
             ctrl[3] = np.clip(
                 forward_bias + front_push * self.front_thigh_amp
-                + front_swing * self.front_thigh_amp * 0.3
+                + front_swing * self.front_thigh_amp * 0.3  # gentle retract
                 + pitch_correction * 0.2,
                 -1.0, 1.0)
-            # ctrl[4]: fshin — extend during stance, flex during swing
+            # ctrl[4]: fshin — extend backward during stance
             ctrl[4] = np.clip(
                 -front_push * self.front_shin_amp
-                - front_swing * self.front_shin_amp * 0.2,
+                - front_swing * self.front_shin_amp * 0.3,
                 -1.0, 1.0)
-            # ctrl[5]: ffoot — push during stance, lift during swing
+            # ctrl[5]: ffoot — push down during stance
             ctrl[5] = np.clip(
-                front_push * self.front_foot_amp
-                - front_swing * self.front_foot_amp * 0.15,
+                front_push * self.front_foot_amp,
                 -1.0, 1.0)
         else:
             # Fallback for fewer actuators
             for i in range(self.nu):
                 ctrl[i] = np.clip(
-                    forward_bias + (back_push if i < 3 else front_push) * 0.3,
+                    forward_bias + (back_push if i < 3 else front_push) * 0.5,
                     -1.0, 1.0)
 
         return self._clip_ctrl(ctrl)

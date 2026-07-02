@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO User Manual v0.5.3</title>
+  <title>MuJoCo-Bench-IDO User Manual v0.5.4</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background-color: #0f172a; color: #e2e8f0; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
@@ -42,7 +42,7 @@
 
 <!-- LEFT SIDEBAR -->
 <nav class="sidebar">
-  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.5.3</div>
+  <div class="sidebar-title" data-i18n="sidebar_title">📘 MuJoCo-Bench-IDO<br/>用户手册 v0.5.4</div>
   <a href="#sec1" data-i18n="nav_sec1">1. 项目简介</a>
   <a href="#sec2" data-i18n="nav_sec2">2. 环境要求</a>
   <a href="#sec3" data-i18n="nav_sec3">3. 快速开始</a>
@@ -64,7 +64,7 @@
 <!-- HEADER -->
 <div class="section-card" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: none; margin-bottom: 32px;">
   <h1 style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-bottom: 8px;" data-i18n="header_title">MuJoCo-Bench-IDO 用户手册</h1>
-  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.5.3 · 最后更新 2026-07-02 · IDO/TOMAS 连续物理基准验证平台</p>
+  <p style="color: #94a3b8;" data-i18n="header_subtitle">版本 v0.5.4 · 最后更新 2026-07-02 · IDO/TOMAS 连续物理基准验证平台</p>
 </div>
 
 <!-- ═══ Section 1: 项目简介 ═══ -->
@@ -143,7 +143,7 @@ pip install nvidia-cosmos-predict1         # 需 CUDA + 7B+ 模型</code></pre>
 python benchmarks/run_mujoco_bench.py --task reacher-easy --episodes 3</code></pre>
 
   <p data-i18n="sec3_output_example">输出示例：</p>
-  <pre><code>=== MuJoCo-Bench-IDO v0.5.3 ===
+  <pre><code>=== MuJoCo-Bench-IDO v0.5.4 ===
 Task: reacher-easy | Episodes: 3 | Max steps: 1000
 Episode 1: steps=1000, episode_return=0.85, success=True, eta=2.45, NV=0, nvr_breakdown={energy:0,torque:0,collision:0}
 Episode 2: steps=1000, episode_return=0.72, success=True, eta=3.10, NV=0, nvr_breakdown={energy:0,torque:0,collision:0}
@@ -752,7 +752,7 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
 
 <!-- FOOTER -->
 <div style="text-align: center; padding: 32px 0; color: #64748b; border-top: 1px solid #475569; margin-top: 40px;">
-  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.5.3 用户手册</p>
+  <p data-i18n="footer_line1">MuJoCo-Bench-IDO v0.5.4 用户手册</p>
   <p data-i18n="footer_line2">最后更新: 2026-07-02</p>
 </div>
 
@@ -765,14 +765,14 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
   const i18nDict = {
     zh: {
       lang_btn: "中/EN",
-      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.5.3",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>用户手册 v0.5.4",
       nav_sec1: "1. 项目简介", nav_sec2: "2. 环境要求", nav_sec3: "3. 快速开始",
       nav_sec4: "4. Web可视化仪表盘指南", nav_sec5: "5. mjviser 3D可视化指南",
       nav_sec6: "6. SIP-Bench模式", nav_sec7: "7. 核心概念通俗解释",
       nav_sec8: "8. Benchmark任务详解", nav_sec9: "9. Baseline对比使用",
       nav_sec10: "10. 物理/数学速查表", nav_sec11: "11. 常见问题与故障排查",
       header_title: "MuJoCo-Bench-IDO 用户手册",
-      header_subtitle: "版本 v0.5.3 · 最后更新 2026-07-02 · IDO/TOMAS 连续物理基准验证平台",
+      header_subtitle: "版本 v0.5.4 · 最后更新 2026-07-02 · IDO/TOMAS 连续物理基准验证平台",
       sec1_title: "1. 项目简介",
       sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> 是一个将 IDO/TOMAS 架构从离散符号域（ARC 拼图）迁移到连续物理控制域（MuJoCo 机器人）的基准验证平台。",
       sec1_what_is_ido: "什么是 IDO/TOMAS？",
@@ -1085,19 +1085,19 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
       sec13_m5_desc: "Snap 效率比（κ-Snap 触发步数 / 总步数）",
       sec13_m5_update: "每步累积更新",
       sec13_metrics_note: "💡 SER 衡量 κ-Snap 门控的触发频率：SER 高说明代理大部分时间处于 PD 稳定模式（接近目标）；SER 低说明代理主要在探索模式。两个全局变量 window._serStats 和 window._episodeStats 跨 step 累积统计，在 clearChartData() 中重置。",
-      footer_line1: "MuJoCo-Bench-IDO v0.5.3 用户手册",
+      footer_line1: "MuJoCo-Bench-IDO v0.5.4 用户手册",
       footer_line2: "最后更新: 2026-07-02",
     },
     en: {
       lang_btn: "中/EN",
-      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.5.3",
+      sidebar_title: "📘 MuJoCo-Bench-IDO<br/>User Manual v0.5.4",
       nav_sec1: "1. Project Overview", nav_sec2: "2. Requirements", nav_sec3: "3. Quick Start",
       nav_sec4: "4. Dashboard Guide", nav_sec5: "5. mjviser 3D Guide",
       nav_sec6: "6. SIP-Bench Mode", nav_sec7: "7. Core Concepts Explained",
       nav_sec8: "8. Benchmark Tasks", nav_sec9: "9. Baseline Comparison",
       nav_sec10: "10. Physics/Math Cheat Sheet", nav_sec11: "11. FAQ & Troubleshooting",
       header_title: "MuJoCo-Bench-IDO User Manual",
-      header_subtitle: "Version v0.5.3 · Last updated 2026-07-02 · IDO/TOMAS Continuous Physics Benchmark",
+      header_subtitle: "Version v0.5.4 · Last updated 2026-07-02 · IDO/TOMAS Continuous Physics Benchmark",
       sec1_title: "1. Project Overview",
       sec1_intro: "<strong>MuJoCo-Bench-IDO</strong> is a benchmark platform that migrates the IDO/TOMAS architecture from discrete symbolic domain (ARC puzzles) to continuous physics control domain (MuJoCo robots).",
       sec1_what_is_ido: "What is IDO/TOMAS?",
@@ -1412,7 +1412,7 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
       sec13_m5_desc: "Snap Efficiency Ratio (κ-Snap triggered steps / total steps)",
       sec13_m5_update: "Accumulated per step",
       sec13_metrics_note: "💡 SER measures κ-Snap gate trigger frequency: high SER means the agent is mostly in PD stabilize mode (near goal); low SER means the agent is primarily in exploration mode. Two global variables window._serStats and window._episodeStats accumulate statistics across steps, reset in clearChartData().",
-      footer_line1: "MuJoCo-Bench-IDO v0.5.3 User Manual",
+      footer_line1: "MuJoCo-Bench-IDO v0.5.4 User Manual",
       footer_line2: "Last updated: 2026-07-02",
     }
   };
