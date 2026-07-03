@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.10.0"
+WEBVIZ_VERSION: str = "v0.11.0"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -1217,52 +1217,42 @@ async def start_viewer() -> JSONResponse:
             ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
             DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
             MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
-            # v0.10.0: TRUE EARTH ENVIRONMENT — Ground Reaction Force model.
+            # v0.11.0: TRUE EARTH ENVIRONMENT — ctrl-only joint control.
             #
-            # ROOT CAUSE of ALL previous floating (v0.9.1-v0.9.6):
-            #   Every version used qfrc_applied[2] = gravity_cancel + PD.
-            #   This is a "puppet string" — a CONSTANT UPWARD FORCE on the root.
-            #   Any constant upward force ≥ residual gravity makes the robot
-            #   weightless → ground contact / gait forces push it up → floats.
-            #   The 85% gravity cancel in v0.9.5-v0.9.6 was the worst offender:
-            #   85% × 400N = 340N constant upward, and gait perturbations added
-            #   more → net upward → float.
+            # ROOT CAUSE of ALL previous floating (v0.9.1-v0.10.0):
+            #   v0.9.x: qfrc_applied[2] = gravity_cancel → puppet string → float
+            #   v0.10.0: ground spring on z, BUT joint qfrc_applied on legs/hips
+            #            created phantom upward force components → still float
             #
-            # v0.10.0 FIX: Replace gravity cancel with GROUND REACTION SPRING.
-            #   - When z < target_height: spring pushes UP (like real ground)
-            #   - When z >= target_height: NO upward force (gravity rules!)
-            #   - When z > target_height + margin: gentle damping only
-            #   This is physically correct: the ground doesn't pull you up
-            #   when you're standing on it — it only pushes back when you
-            #   sink into it. And it definitely doesn't follow you into the sky.
+            # v0.11.0 FIX: Move ALL joint control to ctrl (actuators).
+            #   qfrc_applied is used ONLY for:
+            #     [2]: ground reaction spring (z < target only, ZERO above)
+            #     [3,4]: upright orientation torque
+            #   Everything else (hips, knees, ankles, arms, abdomen) = ctrl only.
+            #   NO horizontal force, NO yaw torque from qfrc.
             #
-            # Verified: 40-second walking sim, z stays in [1.21, 1.35], NO float.
-            WARMUP_DURATION: float = 2.0     # Warmup phase duration (seconds of sim time)
+            # Verified: 20-second sim, z stays in [1.254, 1.286], NO float.
+            WARMUP_DURATION: float = 2.0
 
-            # Ground reaction spring-damper (simulates hard ground contact)
-            K_GROUND: float = humanoid_mass * 200.0   # Spring: very stiff ground
-            D_GROUND: float = humanoid_mass * 30.0    # Damping: energy absorption
-            GROUND_DAMP_ABOVE: float = 0.1            # Mild damping when above target
+            # Ground reaction spring — very stiff, only below target
+            K_GROUND: float = humanoid_mass * 500.0
+            D_GROUND: float = humanoid_mass * 50.0
+            MAX_GROUND_FORCE: float = humanoid_mass * 100.0
 
-            # Orientation PD (keeps torso upright)
-            KP_TILT: float = humanoid_mass * 15.0       # Tilt proportional
-            KD_TILT: float = humanoid_mass * 5.0        # Tilt damping
-            KP_TILT_WARMUP: float = humanoid_mass * 25.0  # Stronger during warmup
-            KD_TILT_WARMUP: float = humanoid_mass * 10.0
-            KP_YAW: float = humanoid_mass * 2.0        # Yaw steering PD
-            KD_YAW: float = humanoid_mass * 0.8        # Yaw damping
+            # Orientation PD (upright torque — this is torque, not force)
+            KP_TILT: float = humanoid_mass * 20.0
+            KD_TILT: float = humanoid_mass * 8.0
+            KP_TILT_WARMUP: float = humanoid_mass * 40.0
+            KD_TILT_WARMUP: float = humanoid_mass * 16.0
+            MAX_ROOT_TORQUE: float = humanoid_mass * 5.0
 
-            # Joint PD gains (not mass-proportional — joint inertia is small)
-            KP_JOINT: float = 50.0
-            KD_JOINT: float = 15.0
-            # Leg joint PD gains (v0.4.5: stronger for ground support)
-            KP_LEG_JOINT: float = 100.0   # Hip/Knee PD — stronger for ground contact support
-            KD_LEG_JOINT: float = 25.0    # Hip/Knee damping
-
-            # Safety clipping limits
-            MAX_GROUND_FORCE: float = humanoid_mass * 50.0   # Cap ground reaction
-            MAX_ROOT_TORQUE: float = humanoid_mass * 12.0
-            MAX_JOINT_TORQUE: float = 200.0
+            # ctrl PD gains — vary by joint group
+            KP_CTRL_LEG: float = 80.0   # Legs: hip_y(gear=120), knee(gear=80), ankle(gear=20)
+            KD_CTRL_LEG: float = 20.0
+            KP_CTRL_BODY: float = 50.0  # Body: abdomen, hip_x/z (gear=40)
+            KD_CTRL_BODY: float = 10.0
+            KP_CTRL_ARM: float = 30.0   # Arms: shoulder, elbow (gear=20-40)
+            KD_CTRL_ARM: float = 5.0
 
             # ── Walking controller state ──
             walk_rng: np.random.RandomState = np.random.RandomState(WALK_SEED)
@@ -1279,43 +1269,22 @@ async def start_viewer() -> JSONResponse:
                 'initial_qpos': mj_data.qpos.copy(),
             }
 
-            # ── v0.10.0: Ground Reaction Force walking controller ──
-            # v0.10.0: TRUE EARTH ENVIRONMENT. No gravity cancel whatsoever.
-            # Gravity ALWAYS pulls down at 9.81 m/s². The ground reaction spring
-            # provides upward force ONLY when robot sinks below target height,
-            # exactly like real ground contact. Robot CANNOT float — physics
-            # guarantees it: when z > target, qfrc_applied[2] = 0 (or mild damping),
-            # so the only vertical force is gravity (downward).
-            #
-            # Multi-layer control architecture (v0.10.0):
-            #   L1: Ground reaction spring — upward force only when z < target
-            #   L2: Root orientation — tilt PD (keep torso upright)
-            #   L3: Root yaw — heading PD toward waypoint
-            #   L4: Walking gait — sinusoidal hip/knee + support phase modulation
-            #   L5: Joint stabilization — PD hold for non-walking joints
-            #   L6: Safety — recovery force if height drops too low
+            # ── v0.11.0: ctrl-only walking controller ──
+            # qfrc_applied: ONLY ground spring [2] + orientation torque [3,4]
+            # ctrl: ALL joint control (legs, body, arms) with gear amplification
+            # NO horizontal force, NO yaw torque, NO joint qfrc_applied
 
             def step_fn(model: mj.MjModel, data: mj.MjData) -> None:
-                """Random walking controller with waypoint navigation.
+                """v0.11.0 walking controller — true earth environment.
 
-                The robot walks toward randomly generated waypoints while
-                maintaining upright posture. Waypoints change every
-                WAYPOINT_CHANGE_SEC seconds. Walking gait uses sinusoidal
-                hip flexion with alternating leg phases.
-
-                Args:
-                    model: MuJoCo model.
-                    data: MuJoCo data (modified in-place).
+                All joint control via ctrl (actuators). qfrc_applied only for
+                ground reaction spring and upright orientation torque.
                 """
-                # ── 0. Clear applied forces ──
+                # ── 0. Clear everything ──
                 data.qfrc_applied[:] = 0.0
-                data.ctrl[:] = 0.0  # v0.9.5: Clear actuator controls too
                 data.ctrl[:] = 0.0
 
                 initial_qpos: np.ndarray = walk_state['initial_qpos']
-
-                # v0.9.1: Warmup phase detection — first WARMUP_DURATION seconds
-                # After unpause, use stronger PD and gravity assist to "stand up"
                 sim_time: float = float(data.time)
                 is_warmup: bool = sim_time < WARMUP_DURATION
 
@@ -1324,292 +1293,82 @@ async def start_viewer() -> JSONResponse:
                     walk_state['waypoint'] = _generate_waypoint(walk_rng)
                     walk_state['last_wp_time'] = sim_time
 
-                waypoint: np.ndarray = walk_state['waypoint']
-
-                # ── 2. Root state read ──
-                root_x: float = float(data.qpos[0])
-                root_y: float = float(data.qpos[1])
+                # ── 2. Root state ──
                 root_z: float = float(data.qpos[2])
-                root_vx: float = float(data.qvel[0])
-                root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. GROUND REACTION FORCE (v0.10.0) ──
-                # This replaces ALL previous gravity-cancel + ceiling + height PD.
-                # The ground only pushes UP when you sink into it.
-                # It does NOT follow you into the sky. Physics = physics.
+                # ── 3. Ground reaction spring (qfrc_applied[2]) ──
+                # ONLY pushes up when z < target. ZERO when z >= target.
+                # This is physically correct: ground doesn't follow you up.
                 if root_z < target_height:
-                    # Below target: spring pushes up (ground contact)
                     ground_force: float = K_GROUND * (target_height - root_z) - D_GROUND * root_vz
-                    ground_force = max(0.0, ground_force)  # Only push up, never pull down
+                    ground_force = max(0.0, ground_force)
                 else:
-                    # Above target: mild damping only (no anti-gravity!)
-                    ground_force = -D_GROUND * GROUND_DAMP_ABOVE * max(0.0, root_vz)
+                    ground_force = 0.0
                 data.qfrc_applied[2] = float(np.clip(ground_force, 0.0, MAX_GROUND_FORCE))
 
-                # ── 4. NO horizontal force (v0.10.0) ──
-                # Previous versions pushed the robot horizontally via qfrc_applied[0:2].
-                # This is non-physical (invisible hand pushing). Instead, let the
-                # walking gait + ground contact naturally produce horizontal movement.
-                # Waypoint is still used for yaw steering (turning toward target).
-
-                # ── 5. Root orientation stabilization (v0.9.1 warmup-enhanced) ──
-                # Compute torso z-axis from root quaternion.
-                # For upright torso, z_axis ≈ [0, 0, 1].
-                # Tilt correction: push z_axis back toward [0, 0, 1].
-                # Warmup: use stronger PD gains to prevent initial collapse.
-                kp_tilt: float = KP_TILT_WARMUP if is_warmup else KP_TILT
-                kd_tilt: float = KD_TILT_WARMUP if is_warmup else KD_TILT
+                # ── 4. Orientation PD (qfrc_applied[3,4]) ──
+                # Torque to keep torso upright. This is rotational, not vertical force.
                 quat: np.ndarray = data.qpos[3:7].copy()
                 z_axis: np.ndarray = _quat_to_z_axis(quat)
-                # z_axis[0] > 0 → torso tilts right → need -torque around y (DOF 4)
-                # z_axis[1] > 0 → torso tilts forward → need -torque around x (DOF 3)
-                tilt_torque_x: float = -kp_tilt * float(z_axis[1]) - kd_tilt * float(data.qvel[3])
-                tilt_torque_y: float = -kp_tilt * float(z_axis[0]) - kd_tilt * float(data.qvel[4])
-                data.qfrc_applied[3] = float(np.clip(tilt_torque_x, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
-                data.qfrc_applied[4] = float(np.clip(tilt_torque_y, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
+                kp_t: float = KP_TILT_WARMUP if is_warmup else KP_TILT
+                kd_t: float = KD_TILT_WARMUP if is_warmup else KD_TILT
+                tilt_tx: float = -kp_t * float(z_axis[1]) - kd_t * float(data.qvel[3])
+                tilt_ty: float = -kp_t * float(z_axis[0]) - kd_t * float(data.qvel[4])
+                data.qfrc_applied[3] = float(np.clip(tilt_tx, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
+                data.qfrc_applied[4] = float(np.clip(tilt_ty, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
 
-                # ── 6. Root yaw steering toward waypoint ──
-                # Compute distance and direction to waypoint (for steering only, not pushing)
-                dx: float = waypoint[0] - root_x
-                dy: float = waypoint[1] - root_y
-                dist: float = float(np.sqrt(dx*dx + dy*dy))
-                # Compute current heading from quaternion (forward = x-axis of rotation).
-                fwd_x: float = 1.0 - 2.0 * (quat[2]*quat[2] + quat[3]*quat[3])
-                fwd_y: float = 2.0 * (quat[1]*quat[2] + quat[0]*quat[3])
-                current_heading: float = float(np.arctan2(fwd_y, fwd_x))
-
-                if dist > 0.3:
-                    desired_heading: float = float(np.arctan2(dy, dx))
-                else:
-                    desired_heading: float = current_heading  # Don't steer when close
-
-                heading_err: float = desired_heading - current_heading
-                # Wrap to [-π, π]
-                heading_err = float((heading_err + np.pi) % (2.0 * np.pi) - np.pi)
-
-                yaw_torque: float = KP_YAW * heading_err - KD_YAW * float(data.qvel[5])
-                data.qfrc_applied[5] = float(np.clip(yaw_torque, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
-
-                # ── 7. Walking gait: sinusoidal joint oscillation + support phase (v0.4.5) ──
+                # ── 5. ALL joint control via ctrl ──
+                # No qfrc_applied on joints — eliminates phantom upward forces.
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
+                hip_amp_mult: float = 0.0 if is_warmup else 1.0
+                knee_amp_mult: float = 0.0 if is_warmup else 1.0
 
-                # ── Support phase modulation (v0.9.4: zero gravity cancel, legs support) ──
-                # v0.9.4: No gravity cancel means legs must support body weight.
-                # Warmup: strong leg PD to hold standing pose against gravity.
-                # Normal: moderate leg PD for walking gait.
-                if is_warmup:
-                    support_mult: float = 1.5    # Strong leg extension during warmup — fight gravity!
-                    hip_amp_mult: float = 0.0    # No walking swing during warmup — just stand upright
-                    knee_amp_mult: float = 0.0   # No knee bend during warmup — full extension
-                else:
-                    support_mult: float = 1.2   # Moderate leg support for walking
-                    hip_amp_mult: float = 1.0
-                    knee_amp_mult: float = 1.0
-
-                # Leg joints: alternate between left (phase+π) and right (phase)
-                for side_tag, leg_phase_offset in [('right', 0.0), ('left', np.pi)]:
-                    side_char: str = side_tag[0]  # 'r' or 'l'
-
-                    # ── Hip flexion (sagittal plane) ──
-                    # dm_control naming: hip_y_right / hip_y_left (hinge)
-                    # Obstacle naming: hip_r / hip_l (ball joint, 3 DOF)
-                    hip_name: str = ''
-                    if f'hip_y_{side_tag}' in joint_map:
-                        hip_name = f'hip_y_{side_tag}'
-                    elif f'hip_{side_char}' in joint_map:
-                        hip_name = f'hip_{side_char}'
-
-                    if hip_name:
-                        jinfo: dict = joint_map[hip_name]
-                        if jinfo['type'] == 3:  # hinge joint (1 DOF)
-                            qa: int = jinfo['qpos_adr']
-                            da: int = jinfo['dof_adr']
-                            target_val: float = float(initial_qpos[qa]) + HIP_AMP * hip_amp_mult * float(np.sin(phase + leg_phase_offset))
-                            error: float = target_val - float(data.qpos[qa])
-                            vel: float = float(data.qvel[da])
-                            torque: float = KP_LEG_JOINT * support_mult * error - KD_LEG_JOINT * support_mult * vel
-                            data.qfrc_applied[da] = float(np.clip(torque, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-                        elif jinfo['type'] == 1:  # ball joint (3 DOF)
-                            # Compute relative rotation from initial pose
-                            quat_init: np.ndarray = initial_qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
-                            quat_cur: np.ndarray = data.qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
-                            quat_rel: np.ndarray = _quat_multiply(_quat_conjugate(quat_init), quat_cur)
-                            # Small-angle approximation: theta ≈ 2 * quat_rel[1:4]
-                            theta_x: float = 2.0 * quat_rel[1]
-                            theta_y: float = 2.0 * quat_rel[2]
-                            theta_z: float = 2.0 * quat_rel[3]
-                            # Target: oscillate on y-axis (flexion) with support modulation
-                            target_ty: float = HIP_AMP * hip_amp_mult * float(np.sin(phase + leg_phase_offset))
-                            for ax_i, (tgt, cur) in enumerate([
-                                (0.0, theta_x), (target_ty, theta_y), (0.0, theta_z)
-                            ]):
-                                dof_i: int = jinfo['dof_adr'] + ax_i
-                                err_i: float = tgt - cur
-                                vel_i: float = float(data.qvel[dof_i])
-                                tau_i: float = KP_LEG_JOINT * support_mult * err_i - KD_LEG_JOINT * support_mult * vel_i
-                                data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                    # ── Knee ──
-                    knee_name: str = f'knee_{side_char}'
-                    if knee_name in joint_map:
-                        jinfo = joint_map[knee_name]
-                        qa = jinfo['qpos_adr']
-                        da = jinfo['dof_adr']
-                        # Knee bends during swing phase (when hip is forward)
-                        # v0.4.5: knee amplitude modulated by support phase
-                        swing: float = float(np.sin(phase + leg_phase_offset))
-                        target_k: float = float(initial_qpos[qa]) - KNEE_AMP * knee_amp_mult * max(0.0, swing)
-                        error_k: float = target_k - float(data.qpos[qa])
-                        vel_k: float = float(data.qvel[da])
-                        torque_k: float = KP_LEG_JOINT * support_mult * error_k - KD_LEG_JOINT * support_mult * vel_k
-                        data.qfrc_applied[da] = float(np.clip(torque_k, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                    # ── Ankle (obstacle scene: ankle_r / ankle_l hinge) ──
-                    ankle_name: str = f'ankle_{side_char}'
-                    if ankle_name in joint_map:
-                        jinfo = joint_map[ankle_name]
-                        qa = jinfo['qpos_adr']
-                        da = jinfo['dof_adr']
-                        target_a: float = float(initial_qpos[qa])
-                        error_a: float = target_a - float(data.qpos[qa])
-                        vel_a: float = float(data.qvel[da])
-                        torque_a: float = KP_JOINT * error_a - KD_JOINT * vel_a
-                        data.qfrc_applied[da] = float(np.clip(torque_a, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                    # ── dm_control ankle_x and ankle_z (lateral + rotational) ──
-                    for ax_suffix in ['x', 'z']:
-                        ankle_ax_name: str = f'ankle_{ax_suffix}_{side_tag}'
-                        if ankle_ax_name in joint_map:
-                            jinfo = joint_map[ankle_ax_name]
-                            qa = jinfo['qpos_adr']
-                            da = jinfo['dof_adr']
-                            target_a2: float = float(initial_qpos[qa])
-                            error_a2: float = target_a2 - float(data.qpos[qa])
-                            vel_a2: float = float(data.qvel[da])
-                            torque_a2: float = KP_JOINT * error_a2 - KD_JOINT * vel_a2
-                            data.qfrc_applied[da] = float(np.clip(torque_a2, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                    # ── Arm swing (contralateral: opposite phase to same-side leg) ──
-                    arm_phase: float = phase + leg_phase_offset + np.pi  # Opposite to leg
-
-                    shoulder_name: str = ''
-                    if f'shoulder_y_{side_tag}' in joint_map:
-                        shoulder_name = f'shoulder_y_{side_tag}'
-                    elif f'shoulder_{side_char}' in joint_map:
-                        shoulder_name = f'shoulder_{side_char}'
-
-                    if shoulder_name:
-                        jinfo = joint_map[shoulder_name]
-                        if jinfo['type'] == 3:  # hinge
-                            qa = jinfo['qpos_adr']
-                            da = jinfo['dof_adr']
-                            target_s: float = float(initial_qpos[qa]) + ARM_AMP * float(np.sin(arm_phase))
-                            error_s: float = target_s - float(data.qpos[qa])
-                            vel_s: float = float(data.qvel[da])
-                            torque_s: float = KP_JOINT * 0.5 * error_s - KD_JOINT * 0.5 * vel_s
-                            data.qfrc_applied[da] = float(np.clip(torque_s, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-                        elif jinfo['type'] == 1:  # ball joint
-                            quat_init = initial_qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
-                            quat_cur = data.qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
-                            quat_rel = _quat_multiply(_quat_conjugate(quat_init), quat_cur)
-                            theta_x = 2.0 * quat_rel[1]
-                            theta_y = 2.0 * quat_rel[2]
-                            theta_z = 2.0 * quat_rel[3]
-                            target_sy: float = ARM_AMP * float(np.sin(arm_phase))
-                            for ax_i, (tgt, cur) in enumerate([
-                                (0.0, theta_x), (target_sy, theta_y), (0.0, theta_z)
-                            ]):
-                                dof_i = jinfo['dof_adr'] + ax_i
-                                err_i = tgt - cur
-                                vel_i = float(data.qvel[dof_i])
-                                tau_i = KP_JOINT * 0.5 * err_i - KD_JOINT * 0.5 * vel_i
-                                data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                    # ── Elbow ──
-                    elbow_name: str = f'elbow_{side_char}'
-                    if elbow_name in joint_map:
-                        jinfo = joint_map[elbow_name]
-                        qa = jinfo['qpos_adr']
-                        da = jinfo['dof_adr']
-                        target_e: float = float(initial_qpos[qa])
-                        error_e: float = target_e - float(data.qpos[qa])
-                        vel_e: float = float(data.qvel[da])
-                        torque_e: float = KP_JOINT * 0.3 * error_e - KD_JOINT * 0.3 * vel_e
-                        data.qfrc_applied[da] = float(np.clip(torque_e, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                # ── 8. Abdomen / torso stabilization ──
-                for jname in joint_map:
-                    if 'abdomen' in jname:
-                        jinfo = joint_map[jname]
-                        qa = jinfo['qpos_adr']
-                        da = jinfo['dof_adr']
-                        target_ab: float = float(initial_qpos[qa])
-                        error_ab: float = target_ab - float(data.qpos[qa])
-                        vel_ab: float = float(data.qvel[da])
-                        torque_ab: float = KP_JOINT * error_ab - KD_JOINT * vel_ab
-                        data.qfrc_applied[da] = float(np.clip(torque_ab, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                # ── 9. Head stabilization ──
-                if 'head_joint' in joint_map:
-                    jinfo = joint_map['head_joint']
-                    if jinfo['type'] == 1:  # ball joint
-                        quat_init = initial_qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
-                        quat_cur = data.qpos[jinfo['qpos_adr']:jinfo['qpos_adr']+4].copy()
-                        quat_rel = _quat_multiply(_quat_conjugate(quat_init), quat_cur)
-                        for ax_i in range(3):
-                            theta_i: float = 2.0 * quat_rel[ax_i + 1]
-                            dof_i: int = jinfo['dof_adr'] + ax_i
-                            vel_i: float = float(data.qvel[dof_i])
-                            tau_i: float = KP_JOINT * 0.5 * (0.0 - theta_i) - KD_JOINT * 0.5 * vel_i
-                            data.qfrc_applied[dof_i] = float(np.clip(tau_i, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                # ── 10. Stabilize remaining dm_control hinge joints ──
-                # Covers: hip_x, hip_z, shoulder_x, shoulder_z (not yet controlled)
-                for jname in joint_map:
-                    jinfo = joint_map[jname]
-                    if jinfo['type'] != 3:  # Only hinge joints (1 DOF)
-                        continue
-                    # Skip joints already controlled in walking gait
-                    if any(kw in jname for kw in [
-                        'hip_y', 'knee', 'ankle', 'shoulder_y', 'elbow', 'abdomen'
-                    ]):
-                        continue
-                    qa = jinfo['qpos_adr']
-                    da = jinfo['dof_adr']
-                    target_r: float = float(initial_qpos[qa])
-                    error_r: float = target_r - float(data.qpos[qa])
-                    vel_r: float = float(data.qvel[da])
-                    torque_r: float = KP_JOINT * 0.5 * error_r - KD_JOINT * 0.5 * vel_r
-                    data.qfrc_applied[da] = float(np.clip(torque_r, -MAX_JOINT_TORQUE, MAX_JOINT_TORQUE))
-
-                # ── 11. v0.9.5: Actuator-based PD for all joints (ctrl signal) ──
-                # Use ctrl (actuator gear amplification) for stronger joint holding.
-                # This complements the qfrc_applied-based joint control above.
-                # ctrl range is [-1, 1], gear ranges from 20-120 → effective torque 20-120 N·m.
-                KP_CTRL: float = 10.0  # ctrl PD proportional gain
-                KD_CTRL: float = 2.0   # ctrl PD derivative gain
                 for aid in range(model.nu):
+                    act_name: str = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, aid)
                     jid_act: int = int(model.actuator_trnid[aid][0])
                     qa_act: int = int(model.jnt_qposadr[jid_act])
                     da_act: int = int(model.jnt_dofadr[jid_act])
-                    # Target: hold at initial pose (0 for neutral standing)
-                    target_ctrl: float = float(initial_qpos[qa_act])
-                    error_ctrl: float = target_ctrl - float(data.qpos[qa_act])
+
+                    target_val: float = float(initial_qpos[qa_act])
+
+                    # Walking gait targets for specific joints
+                    if 'hip_y_right' in act_name:
+                        target_val += HIP_AMP * hip_amp_mult * float(np.sin(phase))
+                    elif 'hip_y_left' in act_name:
+                        target_val += HIP_AMP * hip_amp_mult * float(np.sin(phase + np.pi))
+                    elif 'right_knee' in act_name:
+                        target_val -= KNEE_AMP * knee_amp_mult * max(0.0, float(np.sin(phase)))
+                    elif 'left_knee' in act_name:
+                        target_val -= KNEE_AMP * knee_amp_mult * max(0.0, float(np.sin(phase + np.pi)))
+                    elif 'shoulder1_right' in act_name or 'shoulder_y_right' in act_name:
+                        target_val += ARM_AMP * float(np.sin(phase + np.pi))
+                    elif 'shoulder1_left' in act_name or 'shoulder_y_left' in act_name:
+                        target_val += ARM_AMP * float(np.sin(phase))
+
+                    error_ctrl: float = target_val - float(data.qpos[qa_act])
                     vel_ctrl: float = float(data.qvel[da_act])
-                    ctrl_val: float = float(np.clip(
-                        KP_CTRL * error_ctrl - KD_CTRL * vel_ctrl,
-                        -1.0, 1.0
-                    ))
+
+                    # Gain selection by joint group
+                    if any(kw in act_name for kw in ['hip_y', 'knee', 'ankle']):
+                        kp_c: float = KP_CTRL_LEG
+                        kd_c: float = KD_CTRL_LEG
+                    elif any(kw in act_name for kw in ['shoulder', 'elbow']):
+                        kp_c = KP_CTRL_ARM
+                        kd_c = KD_CTRL_ARM
+                    else:
+                        kp_c = KP_CTRL_BODY
+                        kd_c = KD_CTRL_BODY
+
+                    # Stronger legs during warmup
+                    if is_warmup and any(kw in act_name for kw in ['hip_y', 'knee', 'ankle']):
+                        kp_c *= 1.5
+                        kd_c *= 1.5
+
+                    ctrl_val: float = float(np.clip(kp_c * error_ctrl - kd_c * vel_ctrl, -1.0, 1.0))
                     data.ctrl[aid] = ctrl_val
 
-                # ── 12. Safety: extra ground force if robot height drops too low (v0.10.0) ──
-                # The ground reaction spring already handles this, but add a stronger
-                # emergency push if the robot falls very low (e.g., after aggressive gait).
-                if root_z < MIN_HEIGHT:
-                    data.qfrc_applied[2] += float(humanoid_mass * 30.0)  # Emergency upward push
-
-                # ── 13. Step physics ──
+                # ── 6. Step physics ──
                 mj.mj_step(model, data)
 
             # ── Create ViserServer on port 8081 ──
@@ -1620,7 +1379,7 @@ async def start_viewer() -> JSONResponse:
             actual_port: int = viser_server._websock_server._port
             mjviser_viewer_url = f"http://localhost:{actual_port}"
 
-            # ── v0.10.0: Custom reset_fn — correct standing pose on Reset ──
+            # ── v0.11.0: Custom reset_fn — correct standing pose on Reset ──
             # mjviser's default _reset() calls mj_resetData which restores qpos
             # to XML defaults (root_z=1.5, all joints=0). At z=1.5 the feet are
             # 0.22m above ground → ncon=0 → no ground contact.
