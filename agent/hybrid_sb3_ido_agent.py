@@ -1,5 +1,5 @@
 """
-IDO + SB3 Hybrid Agent — MuJoCo-Bench-IDO v0.8.0
+IDO + SB3 Hybrid Agent — MuJoCo-Bench-IDO v0.8.1
 ===================================================
 
 Combines SB3 trained policy (PPO/SAC) as motor layer with IDO cognitive
@@ -22,13 +22,22 @@ v0.8.0 Upgrade (PreAffect + graded SafeFuse + κ-Snap JSONL + S-Bridge + evidenc
   - U5: S-Bridge MetaQuery 自我归因接口 (可选插件)
   - U2: 证据标记 (_evidence_verified flag)
 
+v0.8.1 Critical Fix (Hybrid locomotion regression):
+  - FIXED: SafeFuse locomotion bypass restored to v0.7.1 hard bypass
+    (skip SafeFuse entirely for locomotion, not just INFO level).
+    v0.8.0 INFO level still triggered graded processing that degraded
+    walker-walk Hybrid-PPO from 1.15x to 0.60x and humanoid-stand
+    Hybrid-SAC from 0.82x to 0.16x.
+  - FIXED: PreAffect GRRR ×1.5 perturbation amplification disabled for
+    locomotion tasks. GRRR amplification destroys gait patterns that
+    need precise timing. Locomotion agents should trust SB3 motor layer.
+
 v0.7.1 Critical Fix (Physics state corruption + SafeFuse locomotion bypass):
   - FIXED: Removed phys.data.ctrl[:] = action from choose_action() —
     env.step() already handles action application, writing ctrl here
     corrupted physics state causing ~5x performance degradation
   - FIXED: prev_data now uses phys.data.copy() instead of reference —
     Noether check was comparing identical data (always ok=True)
-  - FIXED: SafeFuse bypass for locomotion tasks → INFO 级透明路由
 
 v0.7.0 Upgrade (Locomotion-aware hybrid agent):
   - v0.7.0: Locomotion-aware hybrid agent — reduced Creative-Probe
@@ -50,7 +59,7 @@ Design rationale ("IDO brain + SB3 body"):
 Interface compatibility: choose_action(timestep, physics) → np.ndarray
   matches IDOMuJoCoAgent signature for seamless benchmark integration.
 
-Author: MuJoCo-Bench-IDO v0.8.0 — 升级项 U1/U2/U4/U5
+Author: MuJoCo-Bench-IDO v0.8.1 — P0 regression fix
 """
 
 import enum
@@ -87,17 +96,14 @@ class AgentMode(enum.Enum):
 
 
 class HybridSB3IDOAgent:
-    """IDO + SB3 Hybrid Agent for continuous control — v0.8.0.
+    """IDO + SB3 Hybrid Agent for continuous control — v0.8.1.
 
-    Orchestrates SB3 policy as motor layer with IDO cognitive layer
-    (κ-Snap η residual, ψ-Anchor meta-management, Noether conservation
-    gate) as meta-management. Three-mode operation (EXPLOIT / EXPLORE /
-    SAFE) selects action modulation strategy based on η trend and
-    conservation-law status.
+    v0.8.1 Fix: Restored locomotion SafeFuse hard bypass + disabled
+    PreAffect GRRR for locomotion (v0.8.0 graded INFO caused regression).
 
     v0.8.0 新增集成:
       - U4: PreAffect 内在信号 (GRRR/PHEW/NEUTRAL) + Creative-Probe 调幅
-      - U1: SafeFuse 三级渐进约束 (check_graded) + locomotion INFO 级
+      - U1: SafeFuse 三级渐进约束 (check_graded) — NON-locomotion only
       - U3: κ-Snap JSONL 步骤级审计输出
       - U5: S-Bridge MetaQuery 自我归因接口 (可选插件)
       - U2: evidence_verified flag
@@ -827,7 +833,11 @@ class HybridSB3IDOAgent:
             self._eta_history = self._eta_history[-max_window:]
 
         # ── Step 6a: PreAffect 内在信号检测 — v0.8.0 升级项 U4 ──
-        pre_affect: PreAffect = self._compute_pre_affect()
+        # v0.8.1 FIX: Locomotion tasks skip PreAffect — GRRR ×1.5 amplification
+        # destroys gait patterns. Locomotion must trust SB3 motor layer timing.
+        pre_affect: PreAffect = PreAffect.NEUTRAL
+        if not self.is_locomotion:
+            pre_affect = self._compute_pre_affect()
         self._last_pre_affect = pre_affect
 
         # ── PreAffect 调幅因子 ──
@@ -896,29 +906,38 @@ class HybridSB3IDOAgent:
         if self.psi_anchor is not None:
             self.psi_anchor.inject_conservation_anchor(n_ok, n_msg)
 
-        # ── Step 9: SafeFuse 三级渐进约束 — v0.8.0 升级项 U1 ──
-        # 使用 check_graded() 替换原 check()
-        # locomotion → INFO 级 (仅记录日志, 不修改 action)
-        psi_state = self.psi_anchor.get_state() if self.psi_anchor is not None else None
+        # ── Step 9: SafeFuse 三级渐进约束 — v0.8.1 FIX ──
+        # v0.8.1: Locomotion tasks SKIP SafeFuse entirely (v0.7.1 hard bypass).
+        # v0.8.0 INFO level still triggered graded processing that degraded
+        # walker-walk Hybrid-PPO from 1.15x→0.60x and humanoid-stand
+        # Hybrid-SAC from 0.82x→0.16x. SafeFuse designed for manipulation
+        # safety (small torque, gentle contact); locomotion needs full range.
+        if self.is_locomotion:
+            graded_result: FuseGradeResult = FuseGradeResult(
+                level=FuseLevel.NORMAL,
+                reason="locomotion hard bypass — SafeFuse completely skipped",
+            )
+        else:
+            psi_state = self.psi_anchor.get_state() if self.psi_anchor is not None else None
 
-        # 计算 torque_ratio (当前扭矩/最大扭矩)
-        torque_ratio: float = 0.0
-        try:
-            if hasattr(phys, 'data') and hasattr(phys.data, 'qfrc_actuator'):
-                max_torque: float = float(np.max(np.abs(phys.data.qfrc_actuator)))
-                torque_max_limit: float = float(np.max(phys.model.actuator_ctrlrange[:, 1])) if hasattr(phys.model, 'actuator_ctrlrange') else 1.0
-                torque_ratio = max_torque / max(torque_max_limit, 1e-6)
-        except (AttributeError, IndexError, TypeError):
-            torque_ratio = 0.0
+            # 计算 torque_ratio (当前扭矩/最大扭矩)
+            torque_ratio: float = 0.0
+            try:
+                if hasattr(phys, 'data') and hasattr(phys.data, 'qfrc_actuator'):
+                    max_torque: float = float(np.max(np.abs(phys.data.qfrc_actuator)))
+                    torque_max_limit: float = float(np.max(phys.model.actuator_ctrlrange[:, 1])) if hasattr(phys.model, 'actuator_ctrlrange') else 1.0
+                    torque_ratio = max_torque / max(torque_max_limit, 1e-6)
+            except (AttributeError, IndexError, TypeError):
+                torque_ratio = 0.0
 
-        graded_result: FuseGradeResult = self._safe_fuse.check_graded(
-            eta=eta,
-            delta_K=self.kappa_thresh,
-            noether_result=noether_result,
-            psi_anchor_state=psi_state,
-            torque_ratio=torque_ratio,
-            is_locomotion=self.is_locomotion,
-        )
+            graded_result = self._safe_fuse.check_graded(
+                eta=eta,
+                delta_K=self.kappa_thresh,
+                noether_result=noether_result,
+                psi_anchor_state=psi_state,
+                torque_ratio=torque_ratio,
+                is_locomotion=False,  # Non-locomotion — full graded check
+            )
         self._last_fuse_grade = graded_result
 
         # ── Step 10: Mode selection + action modulation ──
@@ -931,13 +950,14 @@ class HybridSB3IDOAgent:
         else:
             action = self._modulate_action(base_action, primary_mode)
 
-        # ── Apply SafeFuse graded degradation ──
-        # 获取 η 趋势用于 WARNING 级自动决策
+        # ── Apply SafeFuse graded degradation — NON-locomotion only ──
+        # v0.8.1 FIX: Locomotion already has graded_result = NORMAL (hard bypass)
+        # so this block naturally skips for locomotion. No additional check needed.
         eta_trend: str = "unknown"
         if self.psi_anchor is not None:
             eta_trend = self.psi_anchor.analyze_eta_trend()
 
-        if graded_result.level != FuseLevel.NORMAL:
+        if graded_result.level != FuseLevel.NORMAL and not self.is_locomotion:
             # BLOCK 级需要 safe_action
             safe_action_for_fuse: Optional[np.ndarray] = None
             if graded_result.level == FuseLevel.BLOCK:
@@ -971,9 +991,9 @@ class HybridSB3IDOAgent:
                              "locomotion_transparency": True},
                 )
 
-        # ── v0.8.0: PreAffect GRRR → Creative-Probe 调幅 ×1.5 ──
-        # 仅在 EXPLORE 模式 + GRRR 信号时叠加 perturbation 调幅
-        if primary_mode == "EXPLORE" and pre_affect == PreAffect.GRRR:
+        # ── v0.8.1 FIX: PreAffect GRRR 调幅仅对非 locomotion 任务 ──
+        # Locomotion 的 gait pattern 需精确时序, perturbation ×1.5 会破坏步态.
+        if primary_mode == "EXPLORE" and pre_affect == PreAffect.GRRR and not self.is_locomotion:
             # 将 perturbation 幅度乘以 ×1.5
             # (Creative-Probe 已在 _modulate_action 中应用)
             # 这里叠加调幅: action = base + (action - base) × probe_multiplier
