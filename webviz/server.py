@@ -42,6 +42,7 @@ if PROJECT_ROOT not in sys.path:
 
 from benchmarks.run_mujoco_bench import (
     TASK_REGISTRY,
+    TASK_SUCCESS_CRITERIA,
     _aggregate_metrics,
     _import_env,
 )
@@ -50,6 +51,7 @@ from agent.psi_anchor import PsiAnchor
 from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
+from core.cq import ConscienceQuotient
 
 WEBVIZ_VERSION: str = "v0.6.1"
 
@@ -167,7 +169,11 @@ def broadcast_sync(data: dict) -> None:
         data: Dict payload to broadcast.
     """
     if _uvicorn_loop is not None and _uvicorn_loop.is_running():
-        asyncio.run_coroutine_threadsafe(broadcast_to_clients(data), _uvicorn_loop)
+        future = asyncio.run_coroutine_threadsafe(broadcast_to_clients(data), _uvicorn_loop)
+        # Log broadcast for debugging
+        print(f"[broadcast_sync] type={data.get('type','?')}, ws_clients={len(run_state.ws_clients)}")
+    else:
+        print(f"[broadcast_sync] WARN: uvicorn loop not available, dropping message type={data.get('type','?')}")
 
 
 # ── Per-step Episode Runner (with WebSocket streaming) ──
@@ -218,6 +224,9 @@ def run_episode_with_streaming(
     success: bool = False
     steps: int = 0
     start_time: float = time.time()
+
+    # v0.6.3: CQ tracker for per-step compliance monitoring
+    cq_tracker = ConscienceQuotient()
 
     # P0-2: per-task success criteria lookup
     success_fn = TASK_SUCCESS_CRITERIA.get(task_name, None) if task_name else None
@@ -286,8 +295,18 @@ def run_episode_with_streaming(
             epiplexity = agent.psi_anchor.epiplexity_score
             delta_k = agent.psi_anchor.adjusted_delta_K
 
-        # Motor IC-Values
-        motor_ic_values: List[float] = [float(m[1]) for m in agent.macros]
+        # v0.6.3: Update CQ tracker with per-step compliance data (after psi_anchor computed)
+        cq_tracker.record_step(noether_ok=noether_ok,
+                               pgate_ok=kappa_snap_triggered,
+                               sentient_ok=(psi_anchor_policy != 'freeze'))
+
+        # Motor IC-Values (handle empty macros gracefully)
+        motor_ic_values: List[float] = []
+        if hasattr(agent, 'macros') and agent.macros and len(agent.macros) > 0:
+            try:
+                motor_ic_values = [float(m[1]) for m in agent.macros]
+            except (TypeError, IndexError):
+                motor_ic_values = []
 
         # End-effector position
         ee_pos: List[float] = []
@@ -305,6 +324,7 @@ def run_episode_with_streaming(
 
         # ── Broadcast step data via WebSocket ──
         step_data: dict = {
+            "type": "step",
             "step": step_idx + 1,
             "episode": episode,
             "eta": float(eta),
@@ -320,26 +340,46 @@ def run_episode_with_streaming(
             "motor_ic_values": motor_ic_values,
             "ee_pos": ee_pos,
             "target": target,
+            # v0.6.3: CQ metrics in step_data
+            "cq": cq_tracker.compute_cq(),
+            "cq_noether": cq_tracker.compute_cq_noether(),
+            "cq_pgate": cq_tracker.compute_cq_pgate(),
+            "cq_sentient": cq_tracker.compute_cq_sentient(),
+            # v0.6.3: Locomotion η target parameters
+            "target_speed": float(getattr(agent.goal, 'target_speed', 0.0)),
+            "target_height": float(getattr(agent.goal, 'target_height', 0.0)),
+            "target_upright": float(getattr(agent.goal, 'target_upright', 0.0)),
         }
 
         # Update run state
         run_state.current_step = step_idx + 1
         run_state.current_episode = episode
 
+        # v0.6.3: Update current_metrics so /api/cq and /api/merkle return live data
+        run_state.current_metrics = {
+            "cq_avg": cq_tracker.compute_cq(),
+            "cq_noether_avg": cq_tracker.compute_cq_noether(),
+            "cq_pgate_avg": cq_tracker.compute_cq_pgate(),
+            "cq_sentient_avg": cq_tracker.compute_cq_sentient(),
+        }
+
         # Broadcast to WebSocket clients
         broadcast_sync(step_data)
 
-        # Goal achievement check
-        ee: Optional[np.ndarray] = None
-        try:
-            ee = env.physics.named.data.xpos['right_hand', :].copy()
-        except (KeyError, IndexError):
-            ee = z_i.get('ee_pos', None)
+        # Goal achievement check — only for point η-mode tasks (reacher/manipulator/humanoid)
+        # Locomotion η-mode tasks (walker/cheetah/hopper) use TASK_SUCCESS_CRITERIA instead
+        if agent.goal.eta_mode != 'locomotion':
+            ee: Optional[np.ndarray] = None
+            try:
+                ee = env.physics.named.data.xpos['right_hand', :].copy()
+            except (KeyError, IndexError):
+                ee = z_i.get('ee_pos', None)
 
-        if ee is not None:
-            dist: float = np.linalg.norm(ee - agent.goal.target_pos)
-            if dist < agent.goal.pos_tol:
-                break
+            if ee is not None:
+                dist: float = np.linalg.norm(ee - agent.goal.target_pos)
+                if dist < agent.goal.pos_tol:
+                    success = True
+                    break
 
         if timestep.last():
             break
@@ -467,6 +507,8 @@ def _run_benchmark_background(request: RunRequest) -> None:
             json.dump({'summary': summary, 'episodes': results}, f, indent=2)
 
     except Exception as e:
+        print(f"[_run_benchmark_background] EXCEPTION: {e}")
+        traceback.print_exc()
         broadcast_sync({
             "type": "error",
             "message": f"Benchmark error: {str(e)}",
@@ -731,6 +773,8 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
             json.dump(sip_result, f, indent=2, default=str)
 
     except Exception as e:
+        print(f"[_run_sip_benchmark_background] EXCEPTION: {e}")
+        traceback.print_exc()
         broadcast_sync({
             "type": "error",
             "message": f"SIP-Bench error: {str(e)}",

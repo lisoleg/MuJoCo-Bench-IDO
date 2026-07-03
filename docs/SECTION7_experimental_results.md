@@ -160,3 +160,78 @@
 **v0.6.3 test status**: 292/292 tests pass (pytest, 7.41s)
 
 No regressions from WalkerWalkPD v0.6.3 refactor, WalkerStandPD index fixes, or one-sided height PD changes.
+
+## 7.12 Triple-Entropy Unification & New IDO Theory Modules (v0.6.4)
+
+**Reference**: 6 articles from 复合体理学 WeChat channel (章锋, 2026-07-03):
+
+| # | Article | Key Concepts Added |
+|---|---------|-------------------|
+| 1 | 具身认知的三熵统一 | Triple-Entropy Loss (η+H+S), 毛睿度量, 卞氏5/6, ψ-锚动态权重, 十二进制优选基 |
+| 2 | 自指的造物主 | κ-流贯自指闭环, RG流 K=11→4, 暗物质=未Snap κ-流, 精细调节=唯一可收束轨道 |
+| 3 | EML-SemZip与卞氏折叠饱和阈值 | 毛睿广义度量形式化, EML-SemZip 5-stage algorithm, 卞氏5/6定理Thm1, 十二进制Thm2 |
+| 4 | 机器意识与人工意识 | P/S/C三层拓扑, 机器意识同构性+分野性, TOMAS-Gödel Agent伪代码 |
+| 5 | 具身智能的数据炼金术 | 四层数据金字塔IDO重构, GaussEx Gap Filter, IDO-Augmented Data Flywheel |
+| 6 | VISReg/表征坍缩 | 坍缩即IC退化, SWD⇔Max-IC, VISReg梯度反调=GaussEx动力学同构 |
+
+### New Core Modules (4 files, v0.6.4)
+
+| Module | File | Purpose |
+|--------|------|---------|
+| **MaoRuiMetric** | core/mao_rui_metric.py | 毛睿广义度量空间: d_sem = 1/(ℐ+ε)×w×f_dir, 准度量+松弛三角+伪度量 |
+| **BianSaturation** | core/bian_saturation.py | 卞氏5/6折叠饱和: C(n)=n/(n+1), SR(5)=5/6, 边际收益R_5=1/30 |
+| **TripleEntropyLoss** | core/triple_entropy.py | 三熵统一损失: 𝓛=α'η+β'S+γ'H-log(SCR), ψ-锚动态权重调整 |
+| **DuodecimalBase** | core/duodecimal_base.py | 十二进制优选基: Q_circ零残差表示, 防IEEE-754污染d_sem |
+
+### Triple-Entropy Loss Verification
+
+```python
+from core.triple_entropy import TripleEntropyLoss
+tel = TripleEntropyLoss()
+result = tel.compute(eta=0.8765, energy_joules=0.1, logits=[0.5,-0.3,0.1], tau=0.02, SCR=156.7)
+# L_total = -4.03, η=0.88, S=0.0003, H=1.51, α'=1.0, β'=0.3, γ'=0.1
+```
+
+### Mao Rui Metric Verification
+
+```python
+from core.mao_rui_metric import MaoRuiMetric, HyperEdge
+mr = MaoRuiMetric()
+edges = [HyperEdge('e1','grasp',0.8), HyperEdge('e2','walk',0.5,dir_factor=1.5)]
+kernel, metrics = mr.full_compress(edges)
+# SCR = 3.0, kernel selects top-ℐ edges
+```
+
+### Bian 5/6 Saturation Verification
+
+```python
+from core.bian_saturation import BianSaturation
+bian = BianSaturation()
+bian.compute_saturation_ratio(5)  # = 0.833 = 5/6
+bian.is_saturated(5)              # = True
+bian.compute_marginal_gain(5)     # = 0.033 = 1/30
+```
+
+### Duodecimal Base Verification
+
+```python
+from core.duodecimal_base import DuodecimalBase
+from fractions import Fraction
+duo = DuodecimalBase()
+duo.from_fraction(Fraction(1,3))  # = "0.4" (exact in Base-12!)
+duo.is_exact_in_base12(Fraction(1,3))  # = True
+```
+
+### Theoretical Integration Map
+
+| IDO Layer | Existing Module | New Integration |
+|-----------|----------------|-----------------|
+| P-Layer (η) | core/kappa_snap_mj.py | → TripleEntropyLoss.η (cognitive weight) |
+| S-Layer (MetaQuery) | core/kappa_snap_logger.py | → MaoRuiMetric.d_sem (semantic distance) |
+| C-Layer (ψ-锚) | core/pg_gate.py | → PsiAnchorGate (dynamic α/β/γ weights) |
+| Noether Check | core/noether_check_mj.py | → ThermodynamicEntropy (metabolic weight) |
+| CQ Audit | core/cq.py | → TripleEntropyLoss.violation flags |
+| κ-Snap Selection | core/kappa_snap_schema.py | → BianSaturation pruning trigger |
+| Numerical Precision | (none) | → DuodecimalBase (zero-residual encoding) |
+
+**QA status**: 292/292 tests pass (no regressions from v0.6.4 additions).

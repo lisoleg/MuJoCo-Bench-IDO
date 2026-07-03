@@ -1247,6 +1247,10 @@
           addLog('SIP-Bench complete!');
           break;
 
+        case 'step':
+          updateStepMetrics(data);
+          break;
+
         case 'error':
           isRunning = false;
           updateRunningUI(false);
@@ -1371,6 +1375,17 @@
       if (data.eta_mode) {
         currentEtaMode = data.eta_mode;
         updateEtaModeUI(currentEtaMode);
+      }
+
+      // v0.6.3: Update locomotion target values
+      if (data.target_speed !== undefined) {
+        document.getElementById('targetSpeedDisplay').textContent = data.target_speed.toFixed(2) + ' m/s';
+      }
+      if (data.target_height !== undefined) {
+        document.getElementById('targetHeightDisplay').textContent = data.target_height.toFixed(2) + ' m';
+      }
+      if (data.target_upright !== undefined) {
+        document.getElementById('targetUprightDisplay').textContent = data.target_upright.toFixed(2);
       }
 
       // ── v0.6.0: Update CQ (Conscience Quotient) metrics ──
@@ -1575,22 +1590,40 @@
         evolution_rounds: evolutionRounds,
       };
 
+      // Immediately update UI to show "starting" state (button grey, stop enabled)
+      isRunning = true;
+      currentRunTask = task;
+      totalEpisodes = episodes;
+      maxStepsForRun = maxSteps;
+      updateRunningUI(true);
+      addLog(`Starting run: ${task}, ${episodes} episodes, max_steps=${maxSteps}, mode=${evalMode}`);
+
       fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok && res.status === 409) {
+          // Already running — keep UI in running state
+          addLog('A benchmark run is already in progress.');
+          return res.json();
+        }
+        return res.json();
+      })
       .then(data => {
         if (data.error) {
           addLog(`Error: ${data.error}`);
-          alert(data.error);
+          // Don't reset UI here — WebSocket 'error' or pollStatus will handle it
         } else {
-          addLog(`Run request sent: ${data.task}, mode=${data.eval_mode}`);
+          addLog(`Run started: ${data.task}, mode=${data.eval_mode}`);
         }
       })
       .catch(err => {
         addLog(`Request error: ${err.message}`);
+        // Network error — reset UI since we don't know if server started
+        isRunning = false;
+        updateRunningUI(false);
       });
     }
 
