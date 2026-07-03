@@ -1,0 +1,86 @@
+sequenceDiagram
+    participant Agent as HybridSB3IDOAgent
+    participant EML as κ-Snap η (gauss_ex_residual)
+    participant SB3 as SB3 Adapter
+    participant PsiAnchor as ψ-Anchor
+    participant PreAffect as PreAffectDetector
+    participant Noether as Noether4Gate
+    participant SafeFuse as SafeFuse (graded)
+    participant PGGate as PG-Gate
+    participant JSONL as KappaSnapJSONLWriter
+    participant SBridge as SBridge (可选)
+    participant CQ as ConscienceQuotient
+
+    %% Step 1-2: η 计算 + SB3 action
+    Agent->>EML: compute η (κ-Snap residual)
+    Agent->>SB3: get base_action
+
+    %% Step 3: ψ-Anchor 更新
+    Agent->>PsiAnchor: update_eta_history(η)
+    PsiAnchor-->>Agent: adjusted δ_K, evo_policy
+
+    %% Step 4: Pre-Affect 检测 [U4]
+    Agent->>PreAffect: detect(eta_history)
+    PreAffect-->>Agent: GRRR/PHEW/NEUTRAL + probe_multiplier/stall_extension
+    Note over Agent: GRRR → Creative-Probe ×1.5<br/>PHEW → EXPLOIT max_stall ×1.5
+
+    %% Step 5: η stagnation → primary_mode
+    Agent->>Agent: detect_eta_stagnation → EXPLOIT/EXPLORE/SAFE
+
+    %% Step 6: Noether 4-gate
+    Agent->>Noether: predictive_check(prev_data, cur_data)
+    Noether-->>Agent: ok/no_ok + mode override
+
+    %% Step 7: ψ-Anchor conservation anchor
+    Agent->>PsiAnchor: inject_conservation_anchor(noether_ok, msg)
+
+    %% Step 8: SafeFuse graded check [U1]
+    Agent->>SafeFuse: check_graded(η, δ_K, noether_result, psi_state, torque_ratio)
+    SafeFuse-->>Agent: FuseGradeResult (WARNING/BLOCK/INFO/NORMAL)
+    Note over SafeFuse,Agent: WARNING → 三选项自动决策<br/>BLOCK → safe_action 替代<br/>INFO → locomotion 仅记录日志
+
+    %% Step 9-11: Mode selection + action modulation + sentient + PG-Gate
+    Agent->>Agent: modulate_action (含 PreAffect 调幅)
+    Agent->>PsiAnchor: check_sentient_finger_limit(action, physics)
+    Agent->>PGGate: gate(action, physics)
+
+    %% Step 12: κ-Snap JSONL 步骤级记录 [U3]
+    Agent->>JSONL: write_step(η, mode, fuse_level, pre_affect, noether_result, evidence_verified)
+    Note over JSONL: HermesTranslator: 私有标签→人可读
+
+    %% Step 13-14: CQ + Probe eval
+    Agent->>CQ: record_step(noether_ok, pgate_ok, sentient_ok)
+    Agent->>Agent: evaluate_probe(η) (含 PreAffect 调幅反馈)
+
+    %% Step 15: S-Bridge record [U5]
+    Agent->>SBridge: _record_step (可选,仅当 s_bridge≠None)
+
+    %% Step 16: Update state
+    Agent->>Agent: prev_data = phys.data.copy(), _last_eta = η
+
+    %% ===== P-Layer Evidence Check Flow [U2] =====
+    Note over Agent: ──── P-Layer 证据自校验流程 ────
+    
+    participant BenchVerify as hybrid_benchmark_verify
+    participant Schema as KappaSnapSchema
+
+    BenchVerify->>Agent: run benchmark episodes → η results
+    BenchVerify->>BenchVerify: evidence_verified = pytest/benchmark_result ≥ threshold
+    BenchVerify->>Schema: EVIDENCE_CHECK event (benchmark_name, test_result, evidence_verified)
+    Note over BenchVerify: η 完成 → 需外部验证才算完成<br/>不是 agent self-report<br/>而是 benchmark/pytest 客观证据
+
+    %% ===== EML-SemZip Dead-Zero Flow [U6] =====
+    Note over Agent: ──── EML-SemZip Dead-Zero 过滤流程 ────
+
+    participant IC as EMLSemZipIC
+
+    BenchVerify->>IC: compute_ic(trajectory_states) → IC 值
+    IC-->>BenchVerify: IC per episode
+    BenchVerify->>IC: is_dead_zero(IC, θ_dead=0.45)
+    IC-->>BenchVerify: Dead-Zero flag (IC < 0.45 → 剔除)
+    BenchVerify->>IC: filter_episodes(episodes_data) → filtered
+    BenchVerify->>IC: oversample_high_ic(filtered, top_pct=0.05, factor=3)
+    IC-->>BenchVerify: oversampled (Top 5% × 3)
+    BenchVerify->>IC: reweight_mao_rui(ic_values, power=1.0)
+    IC-->>BenchVerify: weights (采样概率 ∝ IC^power)
+    Note over BenchVerify: 基准结果剔除低 IC episode<br/>毛睿度量重加权采样

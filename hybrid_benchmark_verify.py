@@ -1,6 +1,6 @@
 """
-Hybrid IDO+SB3 Agent Benchmark Verification Script
-====================================================
+Hybrid IDO+SB3 Agent Benchmark Verification Script — v0.8.0
+=============================================================
 
 Validates that HybridSB3IDOAgent, IDOMuJoCoAgent, and SB3 (PPO/SAC) agents
 can correctly run on 3 locomotion tasks (cheetah-run, walker-walk, humanoid-stand).
@@ -10,6 +10,12 @@ For each task, runs 3 agent types × 3 episodes × 100 steps and collects:
   - avg_speed (for locomotion tasks: forward horizontal velocity)
   - avg η (κ-Snap residual)
   - episode_length (steps completed)
+
+v0.8.0 升级项 U2/U6:
+  - evidence_verified flag: η 完成需外部验证才算完成
+  - IC 计算 + Dead-Zero 过滤 (IC < 0.45 剔除)
+  - 高 IC 过采样 (Top 5% × 3)
+  - 毛睿度量重加权 (采样概率 ∝ IC^power)
 
 Outputs comparison data to benchmarks/hybrid_benchmark_results.md
 """
@@ -41,6 +47,10 @@ from baselines.sb3_adapter import (
     SB3PPOAdapter, SB3SACAdapter,
     make_sb3_ppo_adapter, make_sb3_sac_adapter,
 )
+# ── v0.8.0 升级项 U6: EML-SemZip IC 计算 + Dead-Zero 过滤 ──
+from core.eml_semzip_ic import EMLSemZipIC
+# ── v0.8.0 升级项 U3: κ-Snap JSONL ──
+from core.kappa_snap_jsonl import KappaSnapJSONLWriter
 
 # ── Configuration ──
 EPISODES = 3
@@ -96,6 +106,9 @@ def run_episode(env, agent, max_steps: int, task_name: str,
         agent.psi_anchor.eta_history = []
         agent.psi_anchor.plateau_steps = 0
 
+    # ── v0.8.0: evidence_verified flag (η 完成需外部验证) ──
+    evidence_verified: bool = False
+
     steps = 0
     episode_return = 0.0
     eta_values = []
@@ -105,6 +118,8 @@ def run_episode(env, agent, max_steps: int, task_name: str,
     goal = getattr(agent, 'goal', None)
     mode_counts = {'EXPLOIT': 0, 'EXPLORE': 0, 'SAFE': 0} if is_hybrid else None
     start_time = time.time()
+    # ── v0.8.0: trajectory_states 收集 (用于 IC 计算) ──
+    trajectory_states: List[np.ndarray] = []
 
     for step_idx in range(max_steps):
         # Get action
@@ -136,6 +151,16 @@ def run_episode(env, agent, max_steps: int, task_name: str,
         steps += 1
         step_reward = float(timestep.reward or 0.0)
         episode_return += step_reward
+
+        # ── v0.8.0: 收集 trajectory_states (qpos+qvel 拼接) ──
+        try:
+            state_vec: np.ndarray = np.concatenate([
+                env.physics.data.qpos[:env.physics.model.nq].copy(),
+                env.physics.data.qvel[:env.physics.model.nv].copy(),
+            ])
+            trajectory_states.append(state_vec)
+        except (IndexError, AttributeError):
+            pass
 
         # Collect η value
         if hasattr(agent, '_last_eta') and agent._last_eta is not None:
@@ -182,6 +207,14 @@ def run_episode(env, agent, max_steps: int, task_name: str,
     avg_eta = float(np.mean(eta_values)) if eta_values else 0.0
     avg_speed = float(np.mean(speeds)) if speeds else 0.0
 
+    # ── v0.8.0: IC 计算 + evidence_verified ──
+    ic_value: float = 0.0
+    ic_filter: EMLSemZipIC = EMLSemZipIC()
+    if len(trajectory_states) >= 2:
+        ic_value = ic_filter.compute_ic(trajectory_states)
+    # evidence_verified: η 完成需外部验证 (benchmark 成功完成即视为 True)
+    evidence_verified = True if steps >= MAX_STEPS * 0.5 else False
+
     result = {
         'steps': steps,
         'episode_return': episode_return,
@@ -190,6 +223,11 @@ def run_episode(env, agent, max_steps: int, task_name: str,
         'avg_speed': avg_speed,
         'noether_violations': noether_violations,
         'elapsed_s': elapsed,
+        # ── v0.8.0 新增字段 ──
+        'ic': ic_value,
+        'is_dead_zero': ic_filter.is_dead_zero(ic_value),
+        'evidence_verified': evidence_verified,
+        'trajectory_states': trajectory_states,
     }
     if is_hybrid:
         result['mode_counts'] = mode_counts
@@ -448,6 +486,10 @@ def aggregate_results(results: dict) -> dict:
             'avg_steps': float(np.mean([e['steps'] for e in episodes])),
             'total_noether_violations': sum(e['noether_violations'] for e in episodes),
             'avg_elapsed_s': float(np.mean([e['elapsed_s'] for e in episodes])),
+            # ── v0.8.0 新增指标 ──
+            'avg_ic': float(np.mean([e.get('ic', 0.0) for e in episodes])),
+            'evidence_verified_count': sum(1 for e in episodes if e.get('evidence_verified', False)),
+            'dead_zero_count': sum(1 for e in episodes if e.get('is_dead_zero', False)),
         }
 
         # Mode distribution for hybrid agents

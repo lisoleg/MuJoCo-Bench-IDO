@@ -1,0 +1,148 @@
+classDiagram
+    direction TB
+
+    %% ===== P-Layer 核心计算模块 =====
+    class PreAffect {
+        <<enumeration>>
+        GRRR
+        PHEW
+        NEUTRAL
+    }
+
+    class PreAffectDetector {
+        +detect(eta_history, window_grrr, window_phew, phew_threshold_pct) PreAffect
+        +probe_multiplier(affect) float
+        +stall_extension(affect) int
+        -_eta_history List~float~
+        -_last_affect PreAffect
+    }
+
+    class KappaSnapJSONLWriter {
+        +open(file_path) None
+        +write_step(eta, mode, fuse_level, pre_affect, noether_result, evidence_verified) str
+        +flush() None
+        +close() None
+        +query(snap_id) Dict
+        -_file_path Path
+        -_hermes HermesTranslator
+        -_file_handle IO
+    }
+
+    class HermesTranslator {
+        +translate(private_label) str
+        +add_mapping(private, human) None
+        -PRIVATE_MAP Dict~str,str~
+    }
+
+    class EMLSemZipIC {
+        +compute_ic(trajectory_states) float
+        +compute_ic_single(episode_trajectory) float
+        +is_dead_zero(ic, theta_dead) bool
+        +filter_episodes(episodes_data) filtered
+        +oversample_high_ic(filtered, top_pct, factor) oversampled
+        +reweight_mao_rui(ic_values, power) weights
+        -theta_dead float = 0.45
+        -oversample_top_pct float = 0.05
+        -oversample_factor int = 3
+        -mao_rui_power float = 1.0
+    }
+
+    %% ===== M-Layer SafeFuse 三级渐进 =====
+    class FuseLevel {
+        <<enumeration>>
+        WARNING
+        BLOCK
+        INFO
+        NORMAL
+    }
+
+    class FuseGradeResult {
+        level FuseLevel
+        reason str
+        options List~FuseOption~
+        safe_action Optional~ndarray~
+        log_message str
+    }
+
+    class FuseOption {
+        name str
+        action_modifier Callable
+        description str
+    }
+
+    class SafeFuse {
+        +check(eta, delta_K, noether_result, psi_anchor_state) Tuple
+        +check_graded(eta, delta_K, noether_result, psi_anchor_state, torque_ratio) FuseGradeResult
+        +apply_fuse(action, fuse_level, safe_action) ndarray
+        +apply_fuse_graded(action, grade_result) ndarray
+        +reset() None
+        -FUSE_LEVELS Dict
+        -_consecutive_noether_thresh int
+        -_consecutive_noether_count int
+    }
+
+    %% ===== S-Layer S-Bridge + Hybrid Agent =====
+    class SBridge {
+        +why_this_action(state, action, eta) str
+        +audit_snap(snap_id) Dict
+        +learn_skill(episodes) SkillEntry
+        +journey_timeline(since) List~Dict~
+        -_agent HybridSB3IDOAgent
+        -_jsonl KappaSnapJSONLWriter
+        -_skill_bank Dict~str,SkillEntry~
+    }
+
+    class SkillEntry {
+        name str
+        task str
+        avg_eta float
+        avg_cq float
+        ic float
+        pattern Dict
+        created_at float
+    }
+
+    class HybridSB3IDOAgent {
+        +choose_action(timestep, physics) ndarray
+        +reset() None
+        +get_cq_report() Dict
+        +get_merkle_chain() List
+        -_compute_eta(physics, timestep) float
+        -_compute_pre_affect(eta_history) PreAffect
+        -_safe_fuse SafeFuse
+        -_s_bridge Optional~SBridge~
+        -_jsonl_writer KappaSnapJSONLWriter
+        -_logger KappaSnapLogger
+        -_cq ConscienceQuotient
+        -_pg_gate PGGate
+        -_probe_type str
+        -_probe_params Dict
+        -_pre_affect_detector PreAffectDetector
+        -_evidence_verified bool
+    }
+
+    %% ===== κ-Snap Schema 扩展 =====
+    class KappaSnapSchema {
+        +validate(event_dict) bool
+        +create_event(event_type, level, eta, decision, snap_id, prev_snap_id, details) Dict
+        +get_schema() Dict
+        +get_event_types() Dict
+        -_event_types Dict
+        -_schema Dict
+    }
+
+    %% ===== 关系 =====
+    PreAffectDetector --> PreAffect : 产生
+    HybridSB3IDOAgent --> PreAffectDetector : 使用
+    HybridSB3IDOAgent --> SafeFuse : 使用graded
+    HybridSB3IDOAgent --> SBridge : 可选插件
+    HybridSB3IDOAgent --> KappaSnapJSONLWriter : 步骤级输出
+    HybridSB3IDOAgent --> KappaSnapSchema : 事件验证
+    SafeFuse --> FuseLevel : 返回
+    SafeFuse --> FuseGradeResult : 返回
+    FuseGradeResult --> FuseOption : 包含
+    FuseGradeResult --> FuseLevel : 标记
+    KappaSnapJSONLWriter --> HermesTranslator : 翻译
+    SBridge --> SkillEntry : 提炼
+    SBridge --> KappaSnapJSONLWriter : 查询日志
+    EMLSemZipIC --> EMLSemZipIC : 过滤+重加权

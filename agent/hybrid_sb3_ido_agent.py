@@ -1,5 +1,5 @@
 """
-IDO + SB3 Hybrid Agent — MuJoCo-Bench-IDO Phase 3
+IDO + SB3 Hybrid Agent — MuJoCo-Bench-IDO v0.8.0
 ===================================================
 
 Combines SB3 trained policy (PPO/SAC) as motor layer with IDO cognitive
@@ -13,7 +13,14 @@ operation:
 η-aware decision loop:
   inflow → SB3 base_action → κ-Snap η → ψ-Anchor monitoring →
   FlowMatching η prediction → mode selection → Noether 4-gate →
-  SafeFuse L1-L4 → ψ-sentient → PG-Gate → Merkle → CQ → ctrl赋值
+  SafeFuse graded → ψ-sentient → PG-Gate → Merkle → CQ → ctrl赋值
+
+v0.8.0 Upgrade (PreAffect + graded SafeFuse + κ-Snap JSONL + S-Bridge + evidence):
+  - U4: PreAffect 内在信号检测 (GRRR/PHEW/NEUTRAL) + Creative-Probe ×1.5 调幅
+  - U1: SafeFuse 三级渐进约束 (check_graded 替换 check) + locomotion INFO 级
+  - U3: κ-Snap JSONL 步骤级审计输出 (每步 write_step)
+  - U5: S-Bridge MetaQuery 自我归因接口 (可选插件)
+  - U2: 证据标记 (_evidence_verified flag)
 
 v0.7.1 Critical Fix (Physics state corruption + SafeFuse locomotion bypass):
   - FIXED: Removed phys.data.ctrl[:] = action from choose_action() —
@@ -21,10 +28,7 @@ v0.7.1 Critical Fix (Physics state corruption + SafeFuse locomotion bypass):
     corrupted physics state causing ~5x performance degradation
   - FIXED: prev_data now uses phys.data.copy() instead of reference —
     Noether check was comparing identical data (always ok=True)
-  - FIXED: SafeFuse bypass for locomotion tasks — ψ-Anchor evolution_triggered
-    flag caused L3_hard fuse (action×0.1) on locomotion tasks, destroying
-    gait. Locomotion needs full torque range; SafeFuse designed for manipulation.
-    Result: Hybrid/PPO ratio 0.18x → 1.04x on cheetah-run
+  - FIXED: SafeFuse bypass for locomotion tasks → INFO 级透明路由
 
 v0.7.0 Upgrade (Locomotion-aware hybrid agent):
   - v0.7.0: Locomotion-aware hybrid agent — reduced Creative-Probe
@@ -46,12 +50,12 @@ Design rationale ("IDO brain + SB3 body"):
 Interface compatibility: choose_action(timestep, physics) → np.ndarray
   matches IDOMuJoCoAgent signature for seamless benchmark integration.
 
-Author: MuJoCo-Bench-IDO v0.7.0 Phase 3 hybrid architecture
+Author: MuJoCo-Bench-IDO v0.8.0 — 升级项 U1/U2/U4/U5
 """
 
 import enum
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
@@ -60,10 +64,14 @@ from core.pg_gate import PGGate
 from core.kappa_snap_logger import KappaSnapLogger
 from core.cq import ConscienceQuotient
 from agent.psi_anchor import PsiAnchor
-from agent.safe_fuse import SafeFuse
+from agent.safe_fuse import SafeFuse, FuseLevel, FuseGradeResult
 from agent.task_pd_controllers import (
     TaskPDController, get_controller_for_task,
 )
+# ── v0.8.0 升级项 U4: PreAffect 内在信号 ──
+from core.pre_affect import PreAffect, detect, probe_multiplier, stall_extension
+# ── v0.8.0 升级项 U3: κ-Snap JSONL ──
+from core.kappa_snap_jsonl import KappaSnapJSONLWriter
 
 
 class AgentMode(enum.Enum):
@@ -79,7 +87,7 @@ class AgentMode(enum.Enum):
 
 
 class HybridSB3IDOAgent:
-    """IDO + SB3 Hybrid Agent for continuous control.
+    """IDO + SB3 Hybrid Agent for continuous control — v0.8.0.
 
     Orchestrates SB3 policy as motor layer with IDO cognitive layer
     (κ-Snap η residual, ψ-Anchor meta-management, Noether conservation
@@ -87,16 +95,22 @@ class HybridSB3IDOAgent:
     SAFE) selects action modulation strategy based on η trend and
     conservation-law status.
 
+    v0.8.0 新增集成:
+      - U4: PreAffect 内在信号 (GRRR/PHEW/NEUTRAL) + Creative-Probe 调幅
+      - U1: SafeFuse 三级渐进约束 (check_graded) + locomotion INFO 级
+      - U3: κ-Snap JSONL 步骤级审计输出
+      - U5: S-Bridge MetaQuery 自我归因接口 (可选插件)
+      - U2: evidence_verified flag
+
     Attributes:
         sb3_adapter: SB3PPOAdapter or SB3SACAdapter instance (motor layer).
         goal: GoalEML defining task invariants and tolerances.
         task_name: Task identifier string (e.g., 'humanoid-stand').
         kappa_thresh: Threshold for η — below this, EXPLOIT mode dominates.
         max_stall: Maximum consecutive stagnation steps before EXPLORE mode.
-        psi_anchor: PsiAnchor instance for meta-management (dynamic δ_K,
-                    evolution policy, epiplexity passthrough).
+        psi_anchor: PsiAnchor instance for meta-management.
         flow_predictor: FlowMatchingEtaPredictor for forward-looking η prediction.
-        task_controller: TaskPDController for SAFE mode fallback (compute_safe_action).
+        task_controller: TaskPDController for SAFE mode fallback.
         prev_data: Previous MuJoCo data for Noether comparison.
         _step_counter: Decision-step index for familiarity decay.
         _last_eta: Most recent κ-Snap residual value.
@@ -104,6 +118,11 @@ class HybridSB3IDOAgent:
         _mode: Current AgentMode (EXPLOIT / EXPLORE / SAFE).
         _probe_type: Current Creative-Probe perturbation type.
         _probe_params: Current Creative-Probe perturbation parameters.
+        _s_bridge: S-Bridge MetaQuery 可选插件 (U5).
+        _jsonl_enabled: κ-Snap JSONL 是否启用 (U3).
+        _evidence_verified: 证据校验标记 (U2).
+        _last_pre_affect: 最近 PreAffect 信号 (U4).
+        _last_fuse_grade: 最近 FuseGradeResult (U1).
     """
 
     # ── Domain-specific body name map for ee_pos extraction ──
@@ -125,8 +144,10 @@ class HybridSB3IDOAgent:
                  max_stall: int = 30,
                  psi_anchor: Optional[PsiAnchor] = None,
                  flow_predictor: Optional[FlowMatchingEtaPredictor] = None,
-                 task_controller: Optional[TaskPDController] = None) -> None:
-        """Initialize the Hybrid SB3+IDO Agent.
+                 task_controller: Optional[TaskPDController] = None,
+                 s_bridge: Optional[Any] = None,
+                 jsonl_enabled: bool = False) -> None:
+        """Initialize the Hybrid SB3+IDO Agent — v0.8.0.
 
         Args:
             sb3_adapter: SB3PPOAdapter or SB3SACAdapter instance providing
@@ -140,6 +161,8 @@ class HybridSB3IDOAgent:
                            If None, auto-created with default window_size=10.
             task_controller: Optional TaskPDController for SAFE mode fallback.
                             If None, auto-selected via get_controller_for_task().
+            s_bridge: Optional SBridge MetaQuery 插件 (U5). 默认 None → 不启用.
+            jsonl_enabled: 是否启用 κ-Snap JSONL 步骤级审计 (U3). 默认 False.
         """
         self.sb3_adapter = sb3_adapter
         self.goal = goal_eml
@@ -152,8 +175,6 @@ class HybridSB3IDOAgent:
         self.is_locomotion: bool = self.eta_mode == 'locomotion'
 
         # Locomotion η has different scale (typically 0.5-10) vs point η (0-1).
-        # Use higher threshold before entering EXPLORE mode for locomotion,
-        # because locomotion η naturally starts higher.
         if self.is_locomotion:
             self.kappa_thresh = max(self.kappa_thresh, 2.0)
 
@@ -172,9 +193,24 @@ class HybridSB3IDOAgent:
         self._safe_fuse: SafeFuse = SafeFuse()
 
         # ── Creative-Probe state ──
-        self._probe_type: str = 'none'  # 'noise', 'phase_offset', 'gain_multiplier', or 'none'
+        self._probe_type: str = 'none'
         self._probe_params: Dict[str, float] = {}
         self._probe_noise_vec: Optional[np.ndarray] = None
+
+        # ── v0.8.0 升级项 U4: PreAffect 内在信号 ──
+        self._last_pre_affect: PreAffect = PreAffect.NEUTRAL
+
+        # ── v0.8.0 升级项 U1: graded SafeFuse ──
+        self._last_fuse_grade: Optional[FuseGradeResult] = None
+
+        # ── v0.8.0 升级项 U5: S-Bridge MetaQuery 插件 ──
+        self._s_bridge: Optional[Any] = s_bridge  # 可选插件, 默认不启用
+
+        # ── v0.8.0 升级项 U3: κ-Snap JSONL ──
+        self._jsonl_enabled: bool = jsonl_enabled  # 默认不输出
+
+        # ── v0.8.0 升级项 U2: 证据标记 ──
+        self._evidence_verified: bool = False
 
         # ── Cognitive layer (IDO brain) ──
         self.psi_anchor: PsiAnchor = psi_anchor if psi_anchor is not None else PsiAnchor(goal_eml)
@@ -183,7 +219,6 @@ class HybridSB3IDOAgent:
         )
 
         # ── Motor layer (SB3 body) ──
-        # TaskPDController for SAFE mode fallback (compute_safe_action)
         self.task_controller: TaskPDController = (
             task_controller if task_controller is not None
             else get_controller_for_task(task_name, None)
@@ -378,6 +413,23 @@ class HybridSB3IDOAgent:
             epiplexity=epiplexity,
         )
         return eta
+
+    # ──────────────────────────────────────────────────────────────
+    #  Pre-Affect 内在信号检测 — v0.8.0 升级项 U4
+    # ──────────────────────────────────────────────────────────────
+
+    def _compute_pre_affect(self) -> PreAffect:
+        """计算当前 Pre-Affect 内在信号 — v0.8.0 升级项 U4.
+
+        使用 η 历史窗口检测内在情绪状态:
+          GRRR: η 连续停滞焦虑 → 加强 Creative-Probe ×1.5
+          PHEW: η 连续突破释然 → 延伸 EXPLOIT max_stall ×1.5
+          NEUTRAL: 无特殊信号 → 正常操作
+
+        Returns:
+            PreAffect 枚举值 (GRRR / PHEW / NEUTRAL).
+        """
+        return detect(self._eta_history)
 
     # ──────────────────────────────────────────────────────────────
     #  η stagnation detection
@@ -774,6 +826,16 @@ class HybridSB3IDOAgent:
         if len(self._eta_history) > max_window:
             self._eta_history = self._eta_history[-max_window:]
 
+        # ── Step 6a: PreAffect 内在信号检测 — v0.8.0 升级项 U4 ──
+        pre_affect: PreAffect = self._compute_pre_affect()
+        self._last_pre_affect = pre_affect
+
+        # ── PreAffect 调幅因子 ──
+        # GRRR → Creative-Probe perturbation ×1.5
+        # PHEW → EXPLOIT max_stall ×1.5
+        affect_probe_multiplier: float = probe_multiplier(pre_affect)
+        affect_stall_extension: float = stall_extension(pre_affect)
+
         stagnation_detected: bool = self._detect_eta_stagnation(self._eta_history)
 
         if eta < self.kappa_thresh:
@@ -781,7 +843,6 @@ class HybridSB3IDOAgent:
             self._stall_count = 0
         elif stagnation_detected:
             # v0.7.0: For locomotion, if η is descending, force EXPLOIT
-            # even under stagnation — perturbation destroys gait patterns
             if self.is_locomotion and self.psi_anchor is not None:
                 trend: str = self.psi_anchor.analyze_eta_trend()
                 if trend == 'descending':
@@ -796,9 +857,6 @@ class HybridSB3IDOAgent:
                 if trend in ('descending', 'unknown'):
                     primary_mode = "EXPLOIT"
                 else:
-                    # v0.7.0: For locomotion, always use EXPLOIT when η
-                    # is descending — never switch to EXPLORE based on
-                    # stagnation alone
                     if self.is_locomotion:
                         primary_mode = "EXPLOIT"
                     else:
@@ -811,9 +869,10 @@ class HybridSB3IDOAgent:
             else:
                 self._stall_count = 0
 
-            # v0.7.0: Locomotion requires 2x higher stall threshold
-            # before switching to EXPLORE (perturbation is costly for gait)
-            effective_max_stall: int = self.max_stall * 2 if self.is_locomotion else self.max_stall
+            # v0.8.0: PHEW 延伸 max_stall ×1.5
+            effective_max_stall: int = int(self.max_stall * affect_stall_extension)
+            if self.is_locomotion:
+                effective_max_stall = int(effective_max_stall * 2)
             if self._stall_count >= effective_max_stall:
                 primary_mode = "EXPLORE"
 
@@ -825,7 +884,6 @@ class HybridSB3IDOAgent:
         if self.prev_data is not None:
             n_ok, n_msg, noether_mode_override = self._noether_predictive_check(
                 self.prev_data, phys.data)
-            # Also get full Noether result dict for SafeFuse
             noether_result = noether_check_mj(
                 self.prev_data, phys.data, self.goal,
                 collide_thresh=self.goal.collide_thresh,
@@ -838,23 +896,33 @@ class HybridSB3IDOAgent:
         if self.psi_anchor is not None:
             self.psi_anchor.inject_conservation_anchor(n_ok, n_msg)
 
-        # ── Step 9: SafeFuse check (L1-L4 degradation) ──
-        # v0.7.1: Skip SafeFuse for locomotion tasks — the fuse was designed
-        # for manipulation safety (small torques, gentle contact). Locomotion
-        # requires large torques and fast movements that legitimately trigger
-        # ψ-Anchor evolution flags and energy drift, causing L3_hard fuse
-        # which reduces action to 10% magnitude, completely destroying gait.
+        # ── Step 9: SafeFuse 三级渐进约束 — v0.8.0 升级项 U1 ──
+        # 使用 check_graded() 替换原 check()
+        # locomotion → INFO 级 (仅记录日志, 不修改 action)
         psi_state = self.psi_anchor.get_state() if self.psi_anchor is not None else None
-        fuse_level, _ = self._safe_fuse.check(
+
+        # 计算 torque_ratio (当前扭矩/最大扭矩)
+        torque_ratio: float = 0.0
+        try:
+            if hasattr(phys, 'data') and hasattr(phys.data, 'qfrc_actuator'):
+                max_torque: float = float(np.max(np.abs(phys.data.qfrc_actuator)))
+                torque_max_limit: float = float(np.max(phys.model.actuator_ctrlrange[:, 1])) if hasattr(phys.model, 'actuator_ctrlrange') else 1.0
+                torque_ratio = max_torque / max(torque_max_limit, 1e-6)
+        except (AttributeError, IndexError, TypeError):
+            torque_ratio = 0.0
+
+        graded_result: FuseGradeResult = self._safe_fuse.check_graded(
             eta=eta,
             delta_K=self.kappa_thresh,
             noether_result=noether_result,
             psi_anchor_state=psi_state,
+            torque_ratio=torque_ratio,
+            is_locomotion=self.is_locomotion,
         )
-        if self.is_locomotion:
-            fuse_level = "normal"  # Override: locomotion needs full torque
+        self._last_fuse_grade = graded_result
 
         # ── Step 10: Mode selection + action modulation ──
+        # v0.8.0: PreAffect GRRR → Creative-Probe perturbation ×1.5
         self._mode = AgentMode(primary_mode.split('_')[0])
 
         if primary_mode == "SAFE_PD":
@@ -863,21 +931,55 @@ class HybridSB3IDOAgent:
         else:
             action = self._modulate_action(base_action, primary_mode)
 
-        # Apply SafeFuse degradation (skipped for locomotion — see v0.7.1 note above)
-        if fuse_level != "normal":
-            # Get safe_action for L3 Hard if needed
-            safe_action_for_fuse: Optional[np.ndarray] = None
-            if fuse_level == "L3_hard":
-                safe_action_for_fuse = self.task_controller.compute_safe_action(timestep, phys)
-            action = self._safe_fuse.apply_fuse(action, fuse_level, safe_action_for_fuse)
+        # ── Apply SafeFuse graded degradation ──
+        # 获取 η 趋势用于 WARNING 级自动决策
+        eta_trend: str = "unknown"
+        if self.psi_anchor is not None:
+            eta_trend = self.psi_anchor.analyze_eta_trend()
 
-            # Log fuse event
-            self._logger.log(
-                "SAFE_STOP" if fuse_level == "L4_fatal" else "CREATIVE_PROBE",
-                "L0" if fuse_level == "L4_fatal" else "L4",
-                eta, f"fuse_{fuse_level}",
-                details={"fuse_level": fuse_level, "trigger_reason": noether_result.get("message", "")},
+        if graded_result.level != FuseLevel.NORMAL:
+            # BLOCK 级需要 safe_action
+            safe_action_for_fuse: Optional[np.ndarray] = None
+            if graded_result.level == FuseLevel.BLOCK:
+                safe_action_for_fuse = self.task_controller.compute_safe_action(timestep, phys)
+            action = self._safe_fuse.apply_graded(
+                action, graded_result,
+                safe_action=safe_action_for_fuse,
+                eta_trend=eta_trend,
             )
+
+            # Log fuse event — 使用 κ-Snap 新事件类型
+            if graded_result.level == FuseLevel.WARNING:
+                self._logger.log(
+                    "FUSE_WARNING", "L4", eta, f"fuse_WARNING",
+                    details={"fuse_level": graded_result.level.value,
+                             "options": [o.name for o in graded_result.options],
+                             "auto_decision": f"eta_trend={eta_trend}",
+                             "reason": graded_result.reason},
+                )
+            elif graded_result.level == FuseLevel.BLOCK:
+                self._logger.log(
+                    "SAFE_STOP", "L0", eta, f"fuse_BLOCK",
+                    details={"fuse_level": graded_result.level.value,
+                             "trigger_reason": graded_result.reason},
+                )
+            elif graded_result.level == FuseLevel.INFO:
+                self._logger.log(
+                    "FUSE_INFO", "L4", eta, f"fuse_INFO",
+                    details={"fuse_level": graded_result.level.value,
+                             "reason": graded_result.reason,
+                             "locomotion_transparency": True},
+                )
+
+        # ── v0.8.0: PreAffect GRRR → Creative-Probe 调幅 ×1.5 ──
+        # 仅在 EXPLORE 模式 + GRRR 信号时叠加 perturbation 调幅
+        if primary_mode == "EXPLORE" and pre_affect == PreAffect.GRRR:
+            # 将 perturbation 幅度乘以 ×1.5
+            # (Creative-Probe 已在 _modulate_action 中应用)
+            # 这里叠加调幅: action = base + (action - base) × probe_multiplier
+            # 但 action 已经是 perturbed, 所以直接放大 perturbation 部分
+            perturbation: np.ndarray = action - np.clip(base_action, -1.0, 1.0)
+            action = np.clip(base_action + perturbation * affect_probe_multiplier, -1.0, 1.0)
 
         # ── Step 11: ψ-Anchor sentient finger limit check ──
         sentient_result: dict = self.psi_anchor.check_sentient_finger_limit(action, phys) if self.psi_anchor is not None else {"ok": True, "clamped_action": action}
@@ -907,6 +1009,29 @@ class HybridSB3IDOAgent:
             eta, primary_mode,
         )
 
+        # ── Step 13a: κ-Snap JSONL 步骤级记录 — v0.8.0 升级项 U3 ──
+        # 默认不输出 — 需显式启用 (jsonl_enabled=True)
+        fuse_level_str: str = graded_result.level.value if graded_result is not None else "NORMAL"
+        pre_affect_str: str = pre_affect.value if pre_affect is not None else "NEUTRAL"
+        self._logger.log_to_jsonl(
+            eta=eta,
+            mode=primary_mode,
+            fuse_level=fuse_level_str,
+            pre_affect=pre_affect_str,
+            noether_result=noether_result,
+            evidence_verified=self._evidence_verified,
+        )
+
+        # ── Step 13b: PreAffect 信号 κ-Snap 事件 — v0.8.0 升级项 U4 ──
+        if pre_affect != PreAffect.NEUTRAL:
+            self._logger.log(
+                "PRE_AFFECT_SIGNAL", "L4", eta,
+                f"pre_affect_{pre_affect.value}",
+                details={"affect_type": pre_affect.value,
+                         "eta_trend": eta_trend,
+                         "modifier": affect_probe_multiplier if pre_affect == PreAffect.GRRR else affect_stall_extension},
+            )
+
         # ── Step 14: CQ compliance recording ──
         self._cq.record_step(
             noether_ok=n_ok,
@@ -917,6 +1042,23 @@ class HybridSB3IDOAgent:
         # ── Step 15: Evaluate Creative-Probe effectiveness ──
         if self._probe_type != 'none' and self._last_eta is not None:
             self._evaluate_probe(eta)
+
+        # ── Step 15a: S-Bridge _record_step — v0.8.0 升级项 U5 ──
+        # S-Bridge 可选插件, 不侵入主循环 (仅在末尾 _record_step)
+        if self._s_bridge is not None:
+            try:
+                self._s_bridge._record_step(
+                    state=self._extract_eml_obs(phys, timestep),
+                    action=action,
+                    eta=eta,
+                    mode=primary_mode,
+                    fuse_level=fuse_level_str,
+                    pre_affect=pre_affect_str,
+                    noether_result=noether_result,
+                    evidence_verified=self._evidence_verified,
+                )
+            except Exception:
+                pass  # S-Bridge 失败不影响主循环
 
         # ── Step 16: Post-check: update state variables ──
         # NOTE: Must copy() phys.data — dm_control reuses the same mjData
@@ -937,12 +1079,13 @@ class HybridSB3IDOAgent:
     # ──────────────────────────────────────────────────────────────
 
     def reset(self) -> None:
-        """Reset agent state for a new episode.
+        """Reset agent state for a new episode — v0.8.0.
 
         Clears all internal state variables: prev_data, step counter,
         η history, stall count, mode, Creative-Probe state, and
         cognitive layer buffers (ψ-Anchor, FlowMatching).
         v0.6.0: Also resets SafeFuse, KappaSnapLogger, CQ.
+        v0.8.0: Also resets PreAffect, FuseGradeResult, evidence_verified, S-Bridge.
         """
         self.prev_data = None
         self._step_counter = 0
@@ -958,6 +1101,11 @@ class HybridSB3IDOAgent:
         self._safe_fuse.reset()
         self._logger.reset()
         self._cq.reset()
+
+        # ── v0.8.0: 重置新增状态变量 ──
+        self._last_pre_affect = PreAffect.NEUTRAL
+        self._last_fuse_grade = None
+        self._evidence_verified = False
 
         # Reset cognitive layer
         if self.psi_anchor is not None:

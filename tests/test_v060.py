@@ -48,7 +48,7 @@ class TestKappaSnapSchema(unittest.TestCase):
         ]
         for et in expected_types:
             self.assertIn(et, EVENT_TYPES, f"Missing event type: {et}")
-        self.assertEqual(len(EVENT_TYPES), 20)
+        self.assertEqual(len(EVENT_TYPES), 24)  # v0.8.0: 20 原始 + 4 新增 (EVIDENCE_CHECK, FUSE_WARNING, FUSE_INFO, PRE_AFFECT_SIGNAL)
 
     def test_create_event_valid_type(self):
         """Test creating events with valid event types."""

@@ -2,7 +2,7 @@
 κ-Snap Logger — L0~L6 Audit Level Classification + MerkleChain Integration
 ============================================================================
 
-Provides categorized logging for the Machine Conscience Audit Framework (v0.6.0).
+Provides categorized logging for the Machine Conscience Audit Framework (v0.6.0 → v0.8.0).
 
 Each κ-Snap event is validated by KappaSnapSchema, then appended to the
 embedded MerkleChain for tamper-proof audit trail. Events are classified
@@ -13,7 +13,11 @@ into 7 audit levels:
 The MerkleChain ensures immutability:
   snap_id = prev_snap_id + sha256(prev_snap_id + str(η) + str(decision))[:16]
 
-Author: MuJoCo-Bench-IDO v0.6.0 — Machine Conscience Audit Framework
+v0.8.0 升级项 U3: 新增 log_to_jsonl() 方法
+  - 调用 KappaSnapJSONLWriter 将事件写入 JSONL 文件
+  - Hermes 翻译层处理私有标签 → 人可读映射
+
+Author: MuJoCo-Bench-IDO v0.8.0 — Machine Conscience Audit Framework
 """
 
 import hashlib
@@ -21,8 +25,9 @@ import time
 from typing import Any, Dict, List, Optional
 
 from core.kappa_snap_schema import KappaSnapSchema
+from core.kappa_snap_jsonl import KappaSnapJSONLWriter, HermesTranslator
 
-IDO_KAPPA_SNAP_LOGGER_VERSION: str = "v0.1.0"
+IDO_KAPPA_SNAP_LOGGER_VERSION: str = "v0.2.0"
 
 
 # ── Audit Level Definitions ──
@@ -203,6 +208,9 @@ class KappaSnapLogger:
         self._schema: KappaSnapSchema = schema if schema is not None else KappaSnapSchema()
         self._merkle: MerkleChain = MerkleChain()
         self._log_buffer: List[Dict[str, Any]] = []
+        # ── v0.8.0 升级项 U3: JSONL 步骤级审计输出 ──
+        # 默认不启用 — 需显式调用 enable_jsonl() 或 log_to_jsonl()
+        self._jsonl_writer: Optional[KappaSnapJSONLWriter] = None
 
     def log(self,
             event_type: str,
@@ -290,10 +298,71 @@ class KappaSnapLogger:
         """
         return list(self._log_buffer)
 
+    def enable_jsonl(self, file_path: str) -> None:
+        """启用 JSONL 步骤级审计输出 — v0.8.0 升级项 U3.
+
+        打开 JSONL 文件, 开始将每步事件写入 JSONL 文件.
+        默认不启用 — 需显式调用此方法.
+
+        Args:
+            file_path: JSONL 文件路径 (如 "logs/kappa_snap_cheetah-run_ep0.jsonl").
+        """
+        self._jsonl_writer = KappaSnapJSONLWriter()
+        self._jsonl_writer.open(file_path)
+
+    def log_to_jsonl(self,
+                     eta: float,
+                     mode: str,
+                     fuse_level: str,
+                     pre_affect: str,
+                     noether_result: Optional[Dict[str, Any]] = None,
+                     evidence_verified: Optional[bool] = None) -> str:
+        """将一步事件写入 JSONL 文件 — v0.8.0 升级项 U3.
+
+        调用 KappaSnapJSONLWriter.write_step() 将当前步骤的审计
+        记录写入 JSONL 文件, 包含 η, mode, fuse_level, pre_affect 等字段.
+
+        若 JSONL 输出未启用 (未调用 enable_jsonl), 则仅返回空字符串.
+
+        Args:
+            eta: κ-Snap 残差 η 值.
+            mode: Agent 模式 (EXPLOIT/EXPLORE/SAFE).
+            fuse_level: SafeFuse 级别.
+            pre_affect: PreAffect 信号 (GRRR/PHEW/NEUTRAL).
+            noether_result: Noether 检查结果 Dict.
+            evidence_verified: 证据校验标记 (可选).
+
+        Returns:
+            本步 snap_id 字符串. 若未启用 JSONL, 返回空字符串.
+        """
+        if self._jsonl_writer is None:
+            return ""
+        snap_id: str = self._jsonl_writer.write_step(
+            eta=eta,
+            mode=mode,
+            fuse_level=fuse_level,
+            pre_affect=pre_affect,
+            noether_result=noether_result,
+            evidence_verified=evidence_verified,
+        )
+        return snap_id
+
+    def get_jsonl_writer(self) -> Optional[KappaSnapJSONLWriter]:
+        """返回 JSONL 写入器实例 — v0.8.0 升级项 U3.
+
+        Returns:
+            KappaSnapJSONLWriter 实例, 或 None (未启用).
+        """
+        return self._jsonl_writer
+
     def reset(self) -> None:
         """Reset logger state (MerkleChain + log buffer) for a new episode."""
         self._merkle.reset()
         self._log_buffer = []
+        # ── v0.8.0 升级项 U3: 重置 JSONL 写入器 ──
+        if self._jsonl_writer is not None:
+            self._jsonl_writer.reset()
+            self._jsonl_writer = None
 
     def _format_event(self,
                       event_type: str,

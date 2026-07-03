@@ -1648,32 +1648,40 @@ class HopperHopPD(TaskPDController):
     Actuator sign conventions (empirically verified via diagnostic tests):
     - ctrl[0] (waist, gear=30): POSITIVE → rooty DECREASES (torso leans backward)
       → For upright stabilization: ctrl[0] ∝ +rooty (NOT -rooty!)
+      → For forward lean target: ctrl[0] = Kp*rooty + Kd*rooty_vel - Kp*lean_target
     - ctrl[1] (hip, gear=40): POSITIVE → hip angle INCREASES (thigh swings forward)
       → Reaction torque also pushes rooty negative (torso backward)
     - ctrl[2] (knee, gear=30): POSITIVE → knee angle INCREASES (knee BENDS more)
       → Leg SHORTENS → height DECREASES
       → For push-up: ctrl[2] NEGATIVE (straighten knee to extend leg)
-    - ctrl[3] (ankle, gear=10): assumed POSITIVE → ankle extends (pushes foot down)
+    - ctrl[3] (ankle, gear=10): POSITIVE → ankle extends (pushes foot down)
 
     dm_control hopper-hop reward:
     - standing = tolerance(height, bounds=(0.6, 2)) where height = torso_z - foot_z
     - hopping = tolerance(speed, bounds=(2, inf), margin=1, sigmoid='linear')
+      speed >= 2 → 1.0; speed in [1, 2] → 0.5-1.0; speed < 1 → 0
     - reward = standing * hopping
 
-    Three operating modes based on |rooty|:
-    1. RECOVERY (|rooty| > 1.0): Maximum waist torque to flip upright, retract leg
-    2. STANDING (|rooty| < 1.0, height < 0.6): Extend leg (negative ctrl[2]) to push up
-    3. HOPPING (|rooty| < 0.5, height >= 0.6): Rhythmic hop + forward lean
+    Key insight: reward requires BOTH height >= 0.6 AND speed >= 1.0 simultaneously.
+    Previous versions could stand briefly but never achieved forward speed while
+    standing. The forward lean bias was too small (0.03-0.05 ctrl units).
 
-    v0.8.0: Complete rewrite fixing the fundamental waist sign bug.
-    Old code used ctrl[0] ∝ -rooty (wrong!), causing rooty to diverge.
-    New code uses ctrl[0] ∝ +rooty (correct, pushes rooty toward 0).
+    v1.0.0: Major overhaul with ground contact detection via physics.touch().
+    - Speed-adaptive forward lean: lean_target = max(0.1, 0.25 - speed*0.05)
+    - Ground-contact-aware push/retract timing
+    - Much stronger PD gains for height maintenance under lean
+    - Aggressive hip forward swing during stance for propulsion
+
+    Three operating modes:
+    1. RECOVERY (|rooty| > 1.0): Maximum waist torque to flip upright, retract leg
+    2. STANDING (|rooty| < 1.0, height < 0.4): Extend leg + forward lean to push up
+    3. HOPPING (|rooty| < 1.0, height >= 0.4): Ground-contact push + forward propulsion
 
     Output: ctrl[0:4] clipped to [-1, 1].
     """
 
     def __init__(self, physics) -> None:
-        """Initialize HopperHopPD with verified gains and sign conventions.
+        """Initialize HopperHopPD v1.0.0 with aggressive forward propulsion gains.
 
         Args:
             physics: dm_control Physics instance (hopper.Physics).
@@ -1682,48 +1690,80 @@ class HopperHopPD(TaskPDController):
 
         # ── Target parameters ──
         self.target_speed: float = 2.0       # dm_control _HOP_SPEED threshold
-        self.target_height: float = 1.0      # torso_z - foot_z in [0.6, 2]
-        self.target_knee_stand: float = 0.5  # knee angle for standing (slight bend)
-        self.target_hip_stand: float = -0.1  # hip angle for standing (slightly behind vertical)
+        self.target_height: float = 1.0      # desired torso_z - foot_z
+        self.target_knee_stand: float = 0.3  # knee angle for standing (more extended)
+        self.target_hip_stand: float = -0.15 # hip angle for standing (behind vertical)
 
         # ── Waist (upright) PD gains ──
-        # CRITICAL: Both proportional AND damping signs are inverted vs standard PD
-        # because positive ctrl[0] makes rooty DECREASE.
-        # Correct formula: ctrl[0] = Kp * rooty + Kd * rooty_vel
-        #   - rooty > 0 → ctrl > 0 → rooty decreases (correct)
-        #   - rooty < 0 → ctrl < 0 → rooty increases (correct)
-        #   - rooty_vel < 0 (falling backward) → Kd*vel < 0 → ctrl more negative → rooty increases (correct damping)
-        #   - rooty_vel > 0 (falling forward) → Kd*vel > 0 → ctrl more positive → rooty decreases (correct damping)
-        self.upright_kp: float = 1.2      # proportional gain on rooty
-        self.upright_kd: float = 0.15     # damping on rooty angular velocity
-        self.upright_kp_recovery: float = 0.7  # recovery (already saturates at ctrl=1)
-        self.upright_kd_recovery: float = 0.15
+        # CRITICAL: Both proportional AND damping signs inverted vs standard PD.
+        # Correct formula: ctrl[0] = Kp * rooty + Kd * rooty_vel - Kp * lean_target
+        # This stabilizes rooty at lean_target instead of 0.
+        # - rooty > lean_target → ctrl > 0 → rooty decreases (correct)
+        # - rooty < lean_target → ctrl < 0 → rooty increases (correct)
+        self.upright_kp: float = 1.5
+        self.upright_kd: float = 0.3
+        self.upright_kp_recovery: float = 1.0
+        self.upright_kd_recovery: float = 0.2
+
+        # ── Forward lean parameters ──
+        # lean_target is the desired rooty angle (rad) for forward motion.
+        # ctrl[0] = Kp*(rooty - lean_target) + Kd*rooty_vel [inverted actuator form]
+        # = Kp*rooty + Kd*rooty_vel - Kp*lean_target
+        # lean_bias = Kp * lean_target is subtracted from ctrl[0]
+        self.lean_target_standing: float = 0.18   # ~10.3° forward lean when standing
+        self.lean_target_hopping_base: float = 0.28  # ~16.0° forward lean when hopping (base)
+        self.lean_target_speed_coeff: float = 0.06  # reduce lean as speed increases
 
         # ── Hip PD gains ──
-        self.hip_kp: float = 0.3
-        self.hip_kd: float = 0.08
+        self.hip_kp: float = 0.5
+        self.hip_kd: float = 0.1
 
         # ── Knee PD gains ──
-        # ctrl[2] = Kp * (knee_target - knee_pos) + Kd * (-knee_vel)
-        # Negative ctrl[2] when knee > target → knee straightens → push up
-        self.knee_kp: float = 0.5
-        self.knee_kd: float = 0.1
+        self.knee_kp: float = 0.8
+        self.knee_kd: float = 0.15
 
         # ── Ankle PD gains ──
-        self.ankle_kp: float = 0.2
-        self.ankle_kd: float = 0.05
+        self.ankle_kp: float = 0.3
+        self.ankle_kd: float = 0.08
 
         # ── Hopping parameters ──
-        self.hop_freq: float = 2.5       # Hz, hopping cycle frequency
+        self.hop_freq: float = 3.0       # Hz, hopping cycle frequency
         self.hop_dt: float = 0.02        # control timestep
+        self.push_knee_offset: float = 0.5   # how much to lower knee target during push
+        self.retract_knee_offset: float = 0.6  # how much to raise knee target during retract
+        self.hip_swing_during_push: float = 0.18  # backward hip swing for propulsion
+        self.ankle_push_bias: float = 0.3     # ankle push during ground contact
+
+        # ── Thresholds ──
+        self.recovery_rooty_thresh: float = 1.0   # |rooty| above this → recovery mode
+        self.standing_height_thresh: float = 0.4   # height below this → standing mode
+        self.touch_ground_thresh: float = 0.5      # touch sensor threshold for ground contact
+
+    def _is_on_ground(self, physics) -> bool:
+        """Check if foot is touching the ground using touch sensors.
+
+        Args:
+            physics: dm_control Physics instance.
+
+        Returns:
+            True if either toe or heel touch sensor indicates ground contact.
+        """
+        try:
+            touch_vals: np.ndarray = physics.touch()
+            return float(np.max(touch_vals)) > self.touch_ground_thresh
+        except (AttributeError, TypeError):
+            # Fallback: estimate from height and vertical velocity
+            height: float = float(physics.height())
+            root_vz: float = float(physics.data.qvel[1])
+            return height < 1.5 and root_vz <= 0.1
 
     def compute_action(self, timestep, physics) -> np.ndarray:
         """Compute recovery→stand→hop control for hopper.
 
-        Three modes based on torso lean angle (rooty):
+        Three modes based on torso lean angle (rooty) and height:
         1. RECOVERY: |rooty| > 1.0 → flip upright via waist, retract leg
-        2. STANDING: |rooty| < 1.0, height < 0.6 → extend leg to push up
-        3. HOPPING: |rooty| < 0.5, height >= 0.6 → rhythmic hop + forward
+        2. STANDING: |rooty| < 1.0, height < 0.4 → extend leg + forward lean
+        3. HOPPING: |rooty| < 1.0, height >= 0.4 → ground-contact push + forward
 
         Args:
             timestep: dm_control TimeStep.
@@ -1754,11 +1794,12 @@ class HopperHopPD(TaskPDController):
         ankle_vel: float = float(phys.data.qvel[6])
 
         abs_rooty: float = abs(rooty)
+        on_ground: bool = self._is_on_ground(phys)
 
         # ── MODE 1: RECOVERY (|rooty| > 1.0) ──
-        # Priority: flip upright using waist only (hip interferes with leg).
+        # Priority: flip upright using waist torque (saturates at ctrl=1).
         # Waist: ctrl[0] = +rooty * K + rooty_vel * Kd (inverted actuator sign)
-        if abs_rooty > 1.0:
+        if abs_rooty > self.recovery_rooty_thresh:
             ctrl[0] = np.clip(
                 rooty * self.upright_kp_recovery
                 + rooty_vel * self.upright_kd_recovery,
@@ -1769,94 +1810,119 @@ class HopperHopPD(TaskPDController):
             ctrl[1] = np.clip(hip_error * 0.15, -0.5, 0.5)
 
             # Retract leg: bend knee to avoid pushing wrong direction
-            knee_retract_error: float = 1.5 - knee_pos  # target 1.5 rad (bent)
-            ctrl[2] = np.clip(
-                knee_retract_error * 0.3,
-                -0.5, 0.8)
+            knee_retract_error: float = 1.5 - knee_pos
+            ctrl[2] = np.clip(knee_retract_error * 0.3, -0.5, 0.8)
 
             # Ankle neutral
             ctrl[3] = 0.0
 
             return self._clip_ctrl(ctrl)
 
-        # ── MODE 2 & 3: Upright enough to try standing/hopping ──
-        # Upright correction (always on when |rooty| < 1.0)
-        # ctrl[0] = Kp * rooty + Kd * rooty_vel (both signs inverted vs standard PD)
-        ctrl[0] = np.clip(
-            rooty * self.upright_kp + rooty_vel * self.upright_kd,
-            -1.0, 1.0)
+        # ── MODE 2 & 3: Upright enough for standing/hopping ──
+        # Compute speed-adaptive lean target
+        # More lean when slow (to build speed), less lean when fast (to stay stable)
+        lean_target: float = max(
+            0.1,
+            self.lean_target_hopping_base - speed * self.lean_target_speed_coeff)
 
-        if height < 0.5:
+        # Upright stabilization with forward lean target:
+        # ctrl[0] = Kp * (rooty - lean_target) + Kd * rooty_vel [inverted actuator]
+        # = Kp * rooty + Kd * rooty_vel - Kp * lean_target
+        lean_bias: float = self.upright_kp * lean_target
+
+        if height < self.standing_height_thresh:
             # ── MODE 2: STANDING (push up to standing height) ──
+            # Use standing lean target (slightly less than hopping)
+            stand_lean_bias: float = self.upright_kp * self.lean_target_standing
+            ctrl[0] = np.clip(
+                rooty * self.upright_kp + rooty_vel * self.upright_kd
+                - stand_lean_bias,
+                -1.0, 1.0)
+
             # Knee: extend (straighten) to push torso up
-            # ctrl[2] = Kp * (target - knee_pos) + Kd * (-knee_vel)
-            # When knee_pos > target: error < 0 → ctrl[2] < 0 → knee decreases → extends
             knee_error: float = self.target_knee_stand - knee_pos
             ctrl[2] = np.clip(
                 knee_error * self.knee_kp - knee_vel * self.knee_kd,
                 -1.0, 1.0)
 
-            # Hip: PD toward standing position (slightly behind vertical)
-            hip_error = self.target_hip_stand - hip_pos
+            # Hip: backward swing for forward propulsion when on ground
+            # ctrl[1] negative → thigh backward → body forward (propulsion)
+            # More backward when slow, less when fast
+            speed_error: float = self.target_speed - speed
+            hip_propulsion: float = -speed_error * 0.05  # backward swing proportional to need
+            hip_target: float = self.target_hip_stand + hip_propulsion
+            hip_error = hip_target - hip_pos
             ctrl[1] = np.clip(
                 hip_error * self.hip_kp - hip_vel * self.hip_kd,
                 -1.0, 1.0)
 
-            # Ankle: PD toward flat foot
-            ctrl[3] = np.clip(
-                -ankle_pos * self.ankle_kp - ankle_vel * self.ankle_kd,
-                -1.0, 1.0)
-
-            # Add small forward lean bias to build speed (positive rooty = forward)
-            # Subtract from ctrl[0] to increase rooty (forward lean)
-            ctrl[0] = np.clip(ctrl[0] - 0.03, -1.0, 1.0)
+            # Ankle: PD toward flat foot + push if on ground
+            ankle_base: float = -ankle_pos * self.ankle_kp - ankle_vel * self.ankle_kd
+            if on_ground:
+                ankle_base += 0.2  # push down during ground contact
+            ctrl[3] = np.clip(ankle_base, -1.0, 1.0)
 
             # Emergency push: if very low and falling, extend harder
-            if height < 0.3 and root_vz < -0.3:
-                ctrl[2] = np.clip(ctrl[2] - 0.5, -1.0, 1.0)
+            if height < 0.25 and root_vz < -0.5:
+                ctrl[2] = np.clip(ctrl[2] - 0.8, -1.0, 1.0)
+                ctrl[3] = np.clip(ctrl[3] + 0.3, -1.0, 1.0)
 
             return self._clip_ctrl(ctrl)
 
         # ── MODE 3: HOPPING (upright and height OK) ──
-        # Add forward lean + rhythmic hop
-
-        # Hop phase (sinusoidal modulation)
-        hop_t: float = step * self.hop_dt * self.hop_freq
-        hop_mod: float = np.sin(2.0 * np.pi * hop_t)
-        push_phase: float = max(0.0, hop_mod)   # push during first half of cycle
-        retract_phase: float = max(0.0, -hop_mod)  # retract during second half
-
-        # ── Waist: upright + slight forward lean for speed ──
-        speed_error: float = self.target_speed - speed
-        lean_bias: float = 0.05  # slight forward lean (positive rooty = forward)
-        # Note: positive ctrl[0] makes rooty decrease, so to add forward lean
-        # (increase rooty), we subtract from ctrl[0]
-        # Both Kp and Kd use inverted signs (see __init__ comment)
+        # Ground-contact-aware push/retract with forward propulsion
         ctrl[0] = np.clip(
-            rooty * self.upright_kp + rooty_vel * self.upright_kd - lean_bias,
+            rooty * self.upright_kp + rooty_vel * self.upright_kd
+            - lean_bias,
             -1.0, 1.0)
 
-        # ── Hip: PD + forward propulsion ──
-        hip_target: float = self.target_hip_stand + speed_error * 0.03
-        hip_error = hip_target - hip_pos
-        ctrl[1] = np.clip(
-            hip_error * self.hip_kp - hip_vel * self.hip_kd,
-            -1.0, 1.0)
+        if on_ground:
+            # ── PUSH phase (foot on ground): extend leg + backward hip swing ──
+            # Knee: extend more aggressively to push off
+            knee_target_push: float = self.target_knee_stand - self.push_knee_offset
+            knee_error = knee_target_push - knee_pos
+            ctrl[2] = np.clip(
+                knee_error * self.knee_kp - knee_vel * self.knee_kd,
+                -1.0, 1.0)
 
-        # ── Knee: hop rhythm ──
-        # Push phase: extend knee (lower target → negative ctrl → straighten)
-        # Retract phase: bend knee (higher target → positive ctrl → bend)
-        knee_target: float = self.target_knee_stand - push_phase * 0.3 + retract_phase * 0.4
-        knee_error = knee_target - knee_pos
-        ctrl[2] = np.clip(
-            knee_error * self.knee_kp - knee_vel * self.knee_kd,
-            -1.0, 1.0)
+            # Hip: BACKWARD swing for forward propulsion during stance
+            # ctrl[1] negative → hip angle decreases → thigh backward → body forward
+            # More backward swing when slow (larger speed_error), less when fast
+            speed_error = self.target_speed - speed
+            hip_target: float = self.target_hip_stand - self.hip_swing_during_push \
+                                - speed_error * 0.05
+            hip_error = hip_target - hip_pos
+            ctrl[1] = np.clip(
+                hip_error * self.hip_kp - hip_vel * self.hip_kd,
+                -1.0, 1.0)
 
-        # ── Ankle: push during stance ──
-        ctrl[3] = np.clip(
-            -ankle_pos * self.ankle_kp - ankle_vel * self.ankle_kd
-            + push_phase * 0.2,
-            -1.0, 1.0)
+            # Ankle: push down during stance
+            ctrl[3] = np.clip(
+                -ankle_pos * self.ankle_kp - ankle_vel * self.ankle_kd
+                + self.ankle_push_bias,
+                -1.0, 1.0)
+
+        else:
+            # ── FLIGHT/RETRACT phase (foot off ground): retract leg + forward hip ──
+            # Knee: retract (bend) to prepare for next push
+            knee_target_retract: float = self.target_knee_stand + self.retract_knee_offset
+            knee_error = knee_target_retract - knee_pos
+            ctrl[2] = np.clip(
+                knee_error * self.knee_kp - knee_vel * self.knee_kd,
+                -1.0, 1.0)
+
+            # Hip: FORWARD swing during flight to prepare for next backward push
+            # ctrl[1] positive → hip increases → thigh forward → ready to push back on landing
+            hip_target_flight: float = self.target_hip_stand + self.hip_swing_during_push
+            hip_error = hip_target_flight - hip_pos
+            ctrl[1] = np.clip(
+                hip_error * self.hip_kp - hip_vel * self.hip_kd,
+                -1.0, 1.0)
+
+            # Ankle: neutral during flight
+            ctrl[3] = np.clip(
+                -ankle_pos * self.ankle_kp - ankle_vel * self.ankle_kd,
+                -1.0, 1.0)
 
         return self._clip_ctrl(ctrl)
 

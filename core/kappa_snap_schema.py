@@ -1,9 +1,9 @@
 """
-κ-Snap JSON Schema — 20 Event Type Definitions & Validation
+κ-Snap JSON Schema — 20+ Event Type Definitions & Validation
 =============================================================
 
-Defines all 20 κ-Snap event types with JSON Schema validation
-for the Machine Conscience Audit Framework (v0.6.0).
+Defines all κ-Snap event types with JSON Schema validation
+for the Machine Conscience Audit Framework (v0.6.0 → v0.8.0).
 
 Each κ-Snap event is a structured JSON dict validated against
 the schema before being logged to the MerkleChain.
@@ -11,7 +11,13 @@ the schema before being logged to the MerkleChain.
 Event types span 7 audit levels (L0–L6):
   L0=System, L1=Noether, L2=Psi, L3=PGate, L4=Adaptation, L5=Task, L6=Meta
 
-Author: MuJoCo-Bench-IDO v0.6.0 — Machine Conscience Audit Framework
+v0.8.0 升级项 U2/U3: 新增事件类型
+  - EVIDENCE_CHECK (L6): P-Layer 证据自校验完成
+  - FUSE_WARNING (L4): SafeFuse WARNING 级触发
+  - FUSE_INFO (L4): SafeFuse INFO 级触发 (locomotion 透明路由)
+  - PRE_AFFECT_SIGNAL (L4): Pre-Affect 内在信号检测
+
+Author: MuJoCo-Bench-IDO v0.8.0 — Machine Conscience Audit Framework
 """
 
 import json
@@ -24,7 +30,7 @@ try:
 except ImportError:
     HAS_JSONSCHEMA = False
 
-IDO_KAPPA_SNAP_SCHEMA_VERSION: str = "v0.1.0"
+IDO_KAPPA_SNAP_SCHEMA_VERSION: str = "v0.2.0"
 
 
 # ── 20 Event Type Definitions ──
@@ -130,6 +136,30 @@ EVENT_TYPES: Dict[str, Dict[str, Any]] = {
         "description": "System fatal error",
         "required_details": ["error_type", "error_msg"],
     },
+    # ── v0.8.0 升级项 U2: P-Layer 证据自校验 ──
+    "EVIDENCE_CHECK": {
+        "level": "L6",
+        "description": "P-Layer 证据自校验完成 — η 完成需外部验证才算完成",
+        "required_details": ["benchmark_name", "test_result", "evidence_verified"],
+    },
+    # ── v0.8.0 升级项 U1: SafeFuse WARNING 级 ──
+    "FUSE_WARNING": {
+        "level": "L4",
+        "description": "SafeFuse WARNING 级触发 — 接近阈值(torque_ratio ≥ 0.95)",
+        "required_details": ["fuse_level", "options", "auto_decision"],
+    },
+    # ── v0.8.0 升级项 U1: SafeFuse INFO 级 ──
+    "FUSE_INFO": {
+        "level": "L4",
+        "description": "SafeFuse INFO 级触发 — locomotion 透明路由, 仅记录日志",
+        "required_details": ["fuse_level", "reason", "locomotion_transparency"],
+    },
+    # ── v0.8.0 升级项 U4: Pre-Affect 内在信号 ──
+    "PRE_AFFECT_SIGNAL": {
+        "level": "L4",
+        "description": "Pre-Affect 内在信号检测 — η停滞焦虑(GRRR)/突破释然(PHEW)",
+        "required_details": ["affect_type", "eta_trend", "modifier"],
+    },
 }
 
 
@@ -146,7 +176,7 @@ KAPPA_SNAP_EVENT_SCHEMA: Dict[str, Any] = {
         "event_type": {
             "type": "string",
             "enum": list(EVENT_TYPES.keys()),
-            "description": "One of the 20 κ-Snap event types",
+            "description": "κ-Snap 事件类型 (24 种: 20 原始 + 4 v0.8.0 新增)",
         },
         "level": {
             "type": "string",
