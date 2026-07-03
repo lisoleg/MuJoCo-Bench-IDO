@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.9.3"
+WEBVIZ_VERSION: str = "v0.9.4"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -1212,29 +1212,37 @@ async def start_viewer() -> JSONResponse:
             ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
             DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
             MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
-            # v0.9.3: 100% gravity cancel + PD-only height control + height ceiling.
-            # Previous 95% cancel left 5% residual gravity, but PD gains were tuned for
-            # near-zero gravity → overshoot → oscillation → robot floated up.
-            # With 100% cancel, net force at target_height is exactly zero (equilibrium).
-            # PD is the ONLY height restoring force, so it's inherently stable.
-            # Additionally, a height ceiling (KP_CEILING) prevents leg-push catapult:
-            # if root_z > target_height, strong downward force kicks in.
+            # v0.9.4: ZERO gravity cancel — robot stands on its own legs.
+            # Previous approaches (95%, 100% gravity cancel) ALL caused floating because
+            # qfrc_applied[2] on root FREE joint is a "puppet string" — any gravity cancel
+            # makes the robot weightless, and ground contact / leg PD forces push it up.
+            #
+            # New approach: gravity_cancel = 0. The robot stands via:
+            #   1. Leg joint PD holds initial standing pose (knees slightly bent)
+            #   2. Ground contact reaction force supports body weight (physics!)
+            #   3. Root height PD provides gentle upward assist ONLY when below target
+            #      (like a soft cushion, not a puppet string)
+            #
+            # At equilibrium with zero gravity cancel:
+            #   kp * (target - z_eq) = mass * g
+            #   z_eq = target - mass*g/kp
+            # With kp = mass*80: z_eq = target - 0.123m (12cm below target — normal stance)
+            # Gravity ALWAYS pulls down → robot CANNOT float up. Ever.
             WARMUP_DURATION: float = 2.0     # Warmup phase duration (seconds of sim time)
-            GRAVITY_CANCEL_FRAC: float = 1.0  # 100% gravity cancel — PD controls height
-            MAX_HEIGHT_MARGIN: float = 0.15   # Max allowed height above target (m) before ceiling force
+            GRAVITY_CANCEL_FRAC: float = 0.0  # ZERO gravity cancel — no puppet string!
+            MAX_HEIGHT_MARGIN: float = 0.05   # Small margin — if robot goes above target, push down
 
             # Mass-proportional PD gains for root stabilization
-            # v0.9.3: With 100% gravity cancel, PD is the sole height controller.
-            # Critical damping ratio: kd = 2 * sqrt(kp * m). For kp = mass*15:
-            # kd_crit = 2 * sqrt(mass*15 * mass) = 2*mass*sqrt(15) ≈ 7.75*mass.
-            # We use kd = mass*8.0 (slightly over-damped → no oscillation).
-            KP_HEIGHT: float = humanoid_mass * 15.0    # Height PD — sole height controller
-            KD_HEIGHT: float = humanoid_mass * 8.0     # Height damping — critically damped
-            KP_HEIGHT_WARMUP: float = humanoid_mass * 25.0  # Stronger PD during warmup
-            KD_HEIGHT_WARMUP: float = humanoid_mass * 10.0  # Stronger damping during warmup
-            # Height ceiling: if root_z > target + MAX_HEIGHT_MARGIN, push down hard
-            # This prevents leg-push catapult from sending robot to the sky
-            KP_CEILING: float = humanoid_mass * 80.0   # Very strong downward force above ceiling
+            # v0.9.4: Zero gravity cancel means PD must fight full gravity.
+            # kp = mass*80 → equilibrium at target - 0.12m (standing height)
+            # kd = 2*sqrt(kp*m) = critical damping → no oscillation
+            KP_HEIGHT: float = humanoid_mass * 80.0    # Strong PD to support body weight
+            KD_HEIGHT: float = 2.0 * float(np.sqrt(humanoid_mass * 80.0 * humanoid_mass))  # Critical damping
+            KP_HEIGHT_WARMUP: float = humanoid_mass * 120.0  # Stronger during warmup
+            KD_HEIGHT_WARMUP: float = 2.0 * float(np.sqrt(humanoid_mass * 120.0 * humanoid_mass))
+            # Height ceiling: if robot goes above target, gravity + PD pull it back
+            # (no need for extra ceiling force — gravity does the job!)
+            KP_CEILING: float = humanoid_mass * 50.0   # Moderate downward push above target
             KP_MOVE: float = humanoid_mass * 1.5       # Horizontal velocity PD (gentle — gait-driven, not push)
             KP_TILT: float = humanoid_mass * 7.5       # Orientation tilt PD
             KD_TILT: float = humanoid_mass * 2.5       # Tilt damping
@@ -1270,15 +1278,17 @@ async def start_viewer() -> JSONResponse:
                 'initial_qpos': mj_data.qpos.copy(),
             }
 
-            # ── Unified walking step function (v0.4.5) ──
-            # v0.4.5: Floating bug fix — root vertical force no longer fully cancels
-            # gravity. Instead, mild 30% assist + gentle height PD. Robot stands via
-            # leg joint ground contact, not root levitation. Horizontal movement
-            # is gait-driven (reduced push force). Support phase boosts leg
-            # extension when feet are near ground; reduces when floating too high.
+            # ── Unified walking step function (v0.9.4) ──
+            # v0.9.4: ZERO gravity cancel — robot stands on its own legs via ground contact.
+            # Previous versions (v0.9.1-v0.9.3) used gravity cancel (85%, 95%, 100%) which
+            # ALL caused floating: any gravity cancel makes robot weightless, and ground
+            # contact / leg PD forces push it up → robot floats to the sky.
             #
-            # Multi-layer control architecture (v0.4.5):
-            #   L1: Root height — mild gravity assist (30%) + gentle PD (NOT full cancel)
+            # v0.9.4: gravity_cancel = 0. Gravity ALWAYS pulls down. PD provides upward
+            # support force (like exoskeleton legs). Robot CANNOT float — physics guarantees it.
+            #
+            # Multi-layer control architecture (v0.9.4):
+            #   L1: Root height — ZERO gravity cancel + strong PD (support body weight)
             #   L2: Root horizontal — gentle velocity PD (gait-driven, not push)
             #   L3: Root orientation — tilt PD (keep torso upright)
             #   L4: Root yaw — heading PD toward waypoint
@@ -1324,29 +1334,31 @@ async def start_viewer() -> JSONResponse:
                 root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. Root height: 100% gravity cancel + PD + ceiling (v0.9.3) ──
-                # v0.9.3: With 100% gravity cancel, the net force at target_height is exactly
-                # zero (equilibrium). PD is the SOLE height restoring force, making the system
-                # a simple mass-spring-damper: F = kp*(target - z) - kd*vz.
-                # This is inherently stable — no oscillation divergence like 95% cancel.
+                # ── 3. Root height: ZERO gravity cancel + strong PD (v0.9.4) ──
+                # v0.9.4: No gravity cancel at all! The robot stands on its own legs.
+                # qfrc_applied[2] provides gentle upward PD force to help support body
+                # weight (like a soft exoskeleton), but gravity ALWAYS pulls down.
+                # This means the robot CANNOT float — gravity prevents it.
                 #
-                # Additionally, a ceiling force prevents leg-push catapult:
-                # if root_z > target + MAX_HEIGHT_MARGIN, strong downward force kicks in.
-                # This is the "hard ceiling" that physically prevents floating.
+                # Equilibrium: kp*(target - z_eq) = mass*g → z_eq = target - mass*g/kp
+                # With kp = mass*80: z_eq = target - 0.123m (standing height, slightly bent knees)
+                # With kp_warmup = mass*120: z_eq = target - 0.082m (more upright during warmup)
+                #
+                # If leg PD pushes robot above target, PD becomes negative (pulls down)
+                # AND gravity pulls down → double downward force → no floating possible.
                 if is_warmup:
                     kp_h: float = KP_HEIGHT_WARMUP
                     kd_h: float = KD_HEIGHT_WARMUP
                 else:
                     kp_h: float = KP_HEIGHT
                     kd_h: float = KD_HEIGHT
-                gravity_cancel: float = GRAVITY_CANCEL_FRAC * humanoid_mass * 9.81
+                gravity_cancel: float = 0.0  # ZERO — no puppet string!
                 height_force: float = gravity_cancel + kp_h * (target_height - root_z) - kd_h * root_vz
-                # Height ceiling: if robot floats above target + margin, push down hard
+                # If robot somehow goes above target, add extra downward force
                 ceiling_z: float = target_height + MAX_HEIGHT_MARGIN
                 if root_z > ceiling_z:
                     ceiling_force: float = -KP_CEILING * (root_z - ceiling_z)
                     height_force += ceiling_force
-                    # Also add extra damping when above ceiling to kill upward velocity
                     if root_vz > 0:
                         height_force -= KP_CEILING * 0.5 * root_vz
                 data.qfrc_applied[2] = float(np.clip(height_force, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
@@ -1408,17 +1420,16 @@ async def start_viewer() -> JSONResponse:
                 # ── 7. Walking gait: sinusoidal joint oscillation + support phase (v0.4.5) ──
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
 
-                # ── Support phase modulation (v0.9.3: 100% gravity cancel, PD-stable) ──
-                # v0.9.3: With 100% gravity cancel and critically damped PD, the robot stays
-                # at target_height without floating or sinking. No more "floating too high" branch.
-                # Warmup: hold legs rigid for upright stabilization.
-                # Normal: gentle walking gait with moderate leg extension.
+                # ── Support phase modulation (v0.9.4: zero gravity cancel, legs support) ──
+                # v0.9.4: No gravity cancel means legs must support body weight.
+                # Warmup: strong leg PD to hold standing pose against gravity.
+                # Normal: moderate leg PD for walking gait.
                 if is_warmup:
-                    support_mult: float = 0.5    # v0.9.3: Reduced — strong leg extension pushes ground → catapult
+                    support_mult: float = 1.5    # Strong leg extension during warmup — fight gravity!
                     hip_amp_mult: float = 0.0    # No walking swing during warmup — just stand upright
                     knee_amp_mult: float = 0.0   # No knee bend during warmup — full extension
                 else:
-                    support_mult: float = 0.8   # v0.9.3: Reduced from 1.0 to minimize ground push
+                    support_mult: float = 1.2   # Moderate leg support for walking
                     hip_amp_mult: float = 1.0
                     knee_amp_mult: float = 1.0
 
