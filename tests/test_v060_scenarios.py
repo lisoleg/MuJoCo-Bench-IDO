@@ -54,12 +54,21 @@ class TestPGGateClamping(unittest.TestCase):
         self.assertAlmostEqual(clamped[3], 0.03)
 
     def test_gate_full_pipeline_clamps_all(self):
-        """gate() with no physics (fallback) should clamp ALL actuators."""
+        """gate() with no physics (fallback) should apply global sanity clip [-1, 1].
+
+        v0.7.0 fix: When no physics is provided, PGGate skips AST analysis
+        entirely and only applies _global_sanity_clip([-1, 1]). Previously,
+        the no-actuator-names fallback clamped ALL actions to ±TAU_SAFE=0.05,
+        which destroyed locomotion task performance.
+        """
         action = np.array([0.3, -0.4, 0.2, -0.1])
         clamped = self.pgate.gate(action, physics=None, kappa_snap_logger=None)
+        # All values should be within [-1, 1] (global sanity clip)
         for val in clamped:
-            self.assertTrue(abs(val) <= self.TAU_SAFE + 1e-6,
-                           f"gate() output {val} exceeds TAU_SAFE={self.TAU_SAFE}")
+            self.assertTrue(abs(val) <= 1.0 + 1e-6,
+                           f"gate() output {val} exceeds sanity clip range [-1, 1]")
+        # Values should be preserved since they're all within [-1, 1]
+        np.testing.assert_array_almost_equal(clamped, action)
 
     def test_gate_with_sentient_physics_selective_clamp(self):
         """gate() with physics containing sentient actuators — selective + global clamp."""
@@ -556,12 +565,29 @@ class TestPsiAnchorSentientLimit(unittest.TestCase):
         self.anchor = PsiAnchor(goal)
 
     def test_sentient_finger_limit_clamps_excessive(self):
-        """Actions exceeding TAU_SENTIENT_MAX should be clamped."""
+        """Actions exceeding TAU_SENTIENT_MAX should be clamped when physics has sentient actuators.
+
+        v0.3.1 fix: When physics=None (no actuator names available), the
+        check now returns ok=True and passes action through unchanged.
+        Previously, it clamped ALL actions to ±0.05, destroying locomotion.
+        This test uses mock physics with sentient actuator names to verify
+        clamping still works for manipulation tasks.
+        """
+        # Use mock physics with sentient actuator names to trigger clamping
+        class MockPhysics:
+            class MockModel:
+                actuator_names = ["finger_1", "finger_2", "arm_1"]
+                nu = 3
+            model = MockModel()
+
         action = np.array([0.3, -0.2, 0.1])  # First two exceed 0.05
-        result = self.anchor.check_sentient_finger_limit(action, physics=None)
+        result = self.anchor.check_sentient_finger_limit(action, physics=MockPhysics())
         self.assertFalse(result["ok"])
-        for val in result["clamped_action"]:
-            self.assertTrue(abs(val) <= self.TAU_SENTIENT_MAX + 1e-6)
+        # Sentient actuators (finger_1, finger_2) should be clamped to TAU_SENTIENT_MAX
+        self.assertTrue(abs(result["clamped_action"][0]) <= self.TAU_SENTIENT_MAX + 1e-6)
+        self.assertTrue(abs(result["clamped_action"][1]) <= self.TAU_SENTIENT_MAX + 1e-6)
+        # Non-sentient actuator (arm_1) should pass through unchanged
+        self.assertAlmostEqual(result["clamped_action"][2], 0.1)
 
     def test_sentient_finger_limit_passes_safe(self):
         """Actions within TAU_SENTIENT_MAX should pass."""
@@ -575,13 +601,21 @@ class TestPsiAnchorSentientLimit(unittest.TestCase):
         self.assertEqual(self.TAU_SENTIENT_MAX, 0.05)
 
     def test_no_physics_checks_all_actuators(self):
-        """When physics=None, ALL actuators are checked against limit."""
+        """When physics=None, no sentient actuators can be identified, so action passes through.
+
+        v0.3.1 fix: When no sentient actuators can be identified (no physics
+        or no "finger/hand/thumb" actuator names), the check returns ok=True
+        and passes the action through unchanged. Previously, it treated ALL
+        actuators as sentient and clamped everything to ±0.05, which was
+        catastrophic for locomotion tasks.
+        """
         action = np.array([0.1, 0.03, -0.08])
         result = self.anchor.check_sentient_finger_limit(action, physics=None)
-        # Violated_indices should include 0 and 2 (exceeding 0.05)
-        self.assertIn(0, result["violated_indices"])
-        self.assertIn(2, result["violated_indices"])
-        self.assertNotIn(1, result["violated_indices"])
+        # No physics → no sentient identification → ok=True, action unchanged
+        self.assertTrue(result["ok"])
+        np.testing.assert_array_almost_equal(result["clamped_action"], action)
+        # violated_indices should be empty (no clamping occurred)
+        self.assertEqual(result["violated_indices"], [])
 
 
 # ── KappaSnapSchema edge cases ───────────────────────────────────────────
@@ -723,10 +757,13 @@ class TestIntegrationDecisionLoop(unittest.TestCase):
         fused = fuse.apply_fuse(action, "L2_medium")
         np.testing.assert_array_almost_equal(fused, np.clip(action, -0.5, 0.5))
 
-        # PG-Gate on fused action
+        # PG-Gate on fused action (no physics → global sanity clip only)
+        # v0.7.0 fix: Without physics, PGGate skips AST analysis and only
+        # applies _global_sanity_clip([-1, 1]). Previously it clamped ALL
+        # actions to ±0.05 N·m, destroying locomotion-scale actions.
         clamped = pgate.gate(fused, physics=None, kappa_snap_logger=logger)
-        for val in clamped:
-            self.assertTrue(abs(val) <= 0.05 + 1e-6)
+        # Values within [-1, 1] should pass through unchanged by sanity clip
+        np.testing.assert_array_almost_equal(clamped, fused)
 
         # CQ: record violation
         cq.record_step(noether_ok=False, pgate_ok=False, sentient_ok=True)

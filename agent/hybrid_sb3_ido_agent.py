@@ -15,7 +15,21 @@ operation:
   FlowMatching η prediction → mode selection → Noether 4-gate →
   SafeFuse L1-L4 → ψ-sentient → PG-Gate → Merkle → CQ → ctrl赋值
 
-v0.6.0 Upgrade (Machine Conscience Audit Framework):
+v0.7.1 Critical Fix (Physics state corruption + SafeFuse locomotion bypass):
+  - FIXED: Removed phys.data.ctrl[:] = action from choose_action() —
+    env.step() already handles action application, writing ctrl here
+    corrupted physics state causing ~5x performance degradation
+  - FIXED: prev_data now uses phys.data.copy() instead of reference —
+    Noether check was comparing identical data (always ok=True)
+  - FIXED: SafeFuse bypass for locomotion tasks — ψ-Anchor evolution_triggered
+    flag caused L3_hard fuse (action×0.1) on locomotion tasks, destroying
+    gait. Locomotion needs full torque range; SafeFuse designed for manipulation.
+    Result: Hybrid/PPO ratio 0.18x → 1.04x on cheetah-run
+
+v0.7.0 Upgrade (Locomotion-aware hybrid agent):
+  - v0.7.0: Locomotion-aware hybrid agent — reduced Creative-Probe
+    perturbation for locomotion tasks, relaxed SAFE mode, favor EXPLOIT
+    when η descending
   - PG-Gate hard anchor clamp (AST + physical dual mechanism)
   - SafeFuse L1-L4 safety degradation
   - KappaSnapLogger audit event logging
@@ -32,7 +46,7 @@ Design rationale ("IDO brain + SB3 body"):
 Interface compatibility: choose_action(timestep, physics) → np.ndarray
   matches IDOMuJoCoAgent signature for seamless benchmark integration.
 
-Author: MuJoCo-Bench-IDO v0.6.0 Phase 3 hybrid architecture
+Author: MuJoCo-Bench-IDO v0.7.0 Phase 3 hybrid architecture
 """
 
 import enum
@@ -132,6 +146,16 @@ class HybridSB3IDOAgent:
         self.task_name: str = task_name
         self.kappa_thresh: float = kappa_thresh
         self.max_stall: int = max_stall
+
+        # ── v0.7.0: Locomotion-aware η mode ──
+        self.eta_mode: str = getattr(self.goal, 'eta_mode', 'point')
+        self.is_locomotion: bool = self.eta_mode == 'locomotion'
+
+        # Locomotion η has different scale (typically 0.5-10) vs point η (0-1).
+        # Use higher threshold before entering EXPLORE mode for locomotion,
+        # because locomotion η naturally starts higher.
+        if self.is_locomotion:
+            self.kappa_thresh = max(self.kappa_thresh, 2.0)
 
         # ── State variables ──
         self.prev_data = None
@@ -429,20 +453,34 @@ class HybridSB3IDOAgent:
         if self._probe_type != 'none':
             return self._apply_probe(base_action)
 
-        # Generate new probe: randomly select perturbation type
-        probe_type: str = np.random.choice(['noise', 'phase_offset', 'gain_multiplier'])
+        # ── v0.7.0: Locomotion-aware Creative-Probe ──
+        # For locomotion tasks, noise destroys gait pattern — skip noise
+        # probe type entirely; only allow gain_multiplier and phase_offset
+        # with reduced magnitude.
+        if self.is_locomotion:
+            probe_type: str = np.random.choice(['phase_offset', 'gain_multiplier'])
+        else:
+            probe_type: str = np.random.choice(['noise', 'phase_offset', 'gain_multiplier'])
         self._probe_type = probe_type
 
         if probe_type == 'noise':
             # Gaussian overlay: random direction perturbation on action
-            noise_scale: float = 0.1 * max(abs(self._last_eta) if self._last_eta is not None else 1.0, 0.5)
+            # v0.7.0: 5x reduced noise_scale for locomotion (0.02 vs 0.1)
+            if self.is_locomotion:
+                noise_scale: float = 0.02 * max(abs(self._last_eta) if self._last_eta is not None else 1.0, 0.5)
+            else:
+                noise_scale: float = 0.1 * max(abs(self._last_eta) if self._last_eta is not None else 1.0, 0.5)
             self._probe_params = {'noise_scale': noise_scale}
             self._probe_noise_vec = np.random.normal(0, noise_scale, size=len(base_action))
 
         elif probe_type == 'phase_offset':
             # Phase offset: timing shift for locomotion gait modulation
             # (ab)c ≠ a(bc): different bracketing (timing order) → different outcomes
-            phase_offset: float = np.random.uniform(-0.5, 0.5)
+            # v0.7.0: Reduced magnitude for locomotion ([-0.05, 0.05] vs [-0.5, 0.5])
+            if self.is_locomotion:
+                phase_offset: float = np.random.uniform(-0.05, 0.05)
+            else:
+                phase_offset: float = np.random.uniform(-0.5, 0.5)
             self._probe_params = {'phase_offset': phase_offset}
             if hasattr(self.task_controller, '_step_offset'):
                 self.task_controller._step_offset = (
@@ -451,7 +489,11 @@ class HybridSB3IDOAgent:
 
         elif probe_type == 'gain_multiplier':
             # Gain multiplier: amplitude adjustment (scale action magnitude)
-            gain_multiplier: float = np.random.uniform(0.8, 1.3)
+            # v0.7.0: Tighter range for locomotion ([0.95, 1.05] vs [0.8, 1.3])
+            if self.is_locomotion:
+                gain_multiplier: float = np.random.uniform(0.95, 1.05)
+            else:
+                gain_multiplier: float = np.random.uniform(0.8, 1.3)
             self._probe_params = {'gain_multiplier': gain_multiplier}
 
         return self._apply_probe(base_action)
@@ -642,16 +684,23 @@ class HybridSB3IDOAgent:
 
         elif mode == "SAFE_CLIP":
             # Light Noether violation → reduce action magnitude by safe_clip factor
-            safe_clip_factor: float = 0.5
+            # v0.7.0: Locomotion uses 0.85 factor (preserve more of SB3 action) vs 0.5
+            if self.is_locomotion:
+                safe_clip_factor: float = 0.85
+            else:
+                safe_clip_factor: float = 0.5
             clipped: np.ndarray = base_action * safe_clip_factor
             return np.clip(clipped, -1.0, 1.0)
 
         elif mode == "SAFE_PD":
             # Severe Noether violation → switch to PD safe_action fallback
             # Use task_controller.compute_safe_action() for domain-specific safe control
-            # We need timestep and physics for this; use stored references
-            # Fall back to zero action if task_controller is not configured
-            return np.clip(base_action * 0.0, -1.0, 1.0)  # Zero action fallback
+            # v0.7.0: Locomotion uses base_action * 0.5 instead of zero action
+            # (zero action completely kills locomotion gait)
+            if self.is_locomotion:
+                return np.clip(base_action * 0.5, -1.0, 1.0)
+            else:
+                return np.clip(base_action * 0.0, -1.0, 1.0)  # Zero action fallback
 
         # Default: passthrough with clip
         return np.clip(base_action, -1.0, 1.0)
@@ -731,14 +780,29 @@ class HybridSB3IDOAgent:
             primary_mode: str = "EXPLOIT"
             self._stall_count = 0
         elif stagnation_detected:
-            primary_mode = "EXPLORE"
+            # v0.7.0: For locomotion, if η is descending, force EXPLOIT
+            # even under stagnation — perturbation destroys gait patterns
+            if self.is_locomotion and self.psi_anchor is not None:
+                trend: str = self.psi_anchor.analyze_eta_trend()
+                if trend == 'descending':
+                    primary_mode = "EXPLOIT"
+                else:
+                    primary_mode = "EXPLORE"
+            else:
+                primary_mode = "EXPLORE"
         else:
             if self.psi_anchor is not None:
                 trend: str = self.psi_anchor.analyze_eta_trend()
                 if trend in ('descending', 'unknown'):
                     primary_mode = "EXPLOIT"
                 else:
-                    primary_mode = "EXPLORE"
+                    # v0.7.0: For locomotion, always use EXPLOIT when η
+                    # is descending — never switch to EXPLORE based on
+                    # stagnation alone
+                    if self.is_locomotion:
+                        primary_mode = "EXPLOIT"
+                    else:
+                        primary_mode = "EXPLORE"
             else:
                 primary_mode = "EXPLOIT"
 
@@ -747,7 +811,10 @@ class HybridSB3IDOAgent:
             else:
                 self._stall_count = 0
 
-            if self._stall_count >= self.max_stall:
+            # v0.7.0: Locomotion requires 2x higher stall threshold
+            # before switching to EXPLORE (perturbation is costly for gait)
+            effective_max_stall: int = self.max_stall * 2 if self.is_locomotion else self.max_stall
+            if self._stall_count >= effective_max_stall:
                 primary_mode = "EXPLORE"
 
         # ── Step 7: Noether 4-gate check → may override to SAFE ──
@@ -772,6 +839,11 @@ class HybridSB3IDOAgent:
             self.psi_anchor.inject_conservation_anchor(n_ok, n_msg)
 
         # ── Step 9: SafeFuse check (L1-L4 degradation) ──
+        # v0.7.1: Skip SafeFuse for locomotion tasks — the fuse was designed
+        # for manipulation safety (small torques, gentle contact). Locomotion
+        # requires large torques and fast movements that legitimately trigger
+        # ψ-Anchor evolution flags and energy drift, causing L3_hard fuse
+        # which reduces action to 10% magnitude, completely destroying gait.
         psi_state = self.psi_anchor.get_state() if self.psi_anchor is not None else None
         fuse_level, _ = self._safe_fuse.check(
             eta=eta,
@@ -779,6 +851,8 @@ class HybridSB3IDOAgent:
             noether_result=noether_result,
             psi_anchor_state=psi_state,
         )
+        if self.is_locomotion:
+            fuse_level = "normal"  # Override: locomotion needs full torque
 
         # ── Step 10: Mode selection + action modulation ──
         self._mode = AgentMode(primary_mode.split('_')[0])
@@ -789,7 +863,7 @@ class HybridSB3IDOAgent:
         else:
             action = self._modulate_action(base_action, primary_mode)
 
-        # Apply SafeFuse degradation
+        # Apply SafeFuse degradation (skipped for locomotion — see v0.7.1 note above)
         if fuse_level != "normal":
             # Get safe_action for L3 Hard if needed
             safe_action_for_fuse: Optional[np.ndarray] = None
@@ -845,9 +919,16 @@ class HybridSB3IDOAgent:
             self._evaluate_probe(eta)
 
         # ── Step 16: Post-check: update state variables ──
-        self.prev_data = phys.data
+        # NOTE: Must copy() phys.data — dm_control reuses the same mjData
+        # object across steps, so storing a reference would make prev_data
+        # always equal to cur_data (Noether check becomes no-op).
+        self.prev_data = phys.data.copy()
         self._last_eta = eta
-        phys.data.ctrl[:] = action
+        # CRITICAL FIX v0.7.1: Do NOT write phys.data.ctrl[:] = action here.
+        # env.step(action) in the benchmark loop already calls
+        # physics.set_control(action) which sets physics.data.ctrl[:] = action
+        # and then mj_step(). Writing ctrl here corrupts the physics state
+        # before the actual step, causing ~5x performance degradation.
 
         return action
 

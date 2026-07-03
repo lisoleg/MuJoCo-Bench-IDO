@@ -1,0 +1,697 @@
+{
+  "summaries": {
+    "cheetah-run": {
+      "IDO": {
+        "n_episodes": 3,
+        "avg_episode_return": 0.8295173911198083,
+        "std_episode_return": 0.1269166401747012,
+        "avg_speed": 0.11618021391155892,
+        "std_speed": 0.01563818841182634,
+        "avg_eta": 9.848932072790104,
+        "std_eta": 0.010373040598649375,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.5020205974578857
+      },
+      "PPO": {
+        "n_episodes": 3,
+        "avg_episode_return": 19.00537124008873,
+        "std_episode_return": 0.3829226187603391,
+        "avg_speed": 1.9005371240088724,
+        "std_speed": 0.038292261876034434,
+        "avg_eta": 0.0,
+        "std_eta": 0.0,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.12195150057474773
+      },
+      "Hybrid-PPO": {
+        "n_episodes": 3,
+        "avg_episode_return": 17.862568539884368,
+        "std_episode_return": 2.7169199884163837,
+        "avg_speed": 1.786256853988437,
+        "std_speed": 0.271691998841638,
+        "avg_eta": 8.15570573019982,
+        "std_eta": 0.2612729499794762,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.8361994425455729,
+        "mode_distribution": {
+          "EXPLOIT": {
+            "count": 300,
+            "ratio": 1.0
+          },
+          "EXPLORE": {
+            "count": 0,
+            "ratio": 0.0
+          },
+          "SAFE": {
+            "count": 0,
+            "ratio": 0.0
+          }
+        }
+      }
+    },
+    "walker-walk": {
+      "IDO": {
+        "n_episodes": 3,
+        "avg_episode_return": 6.064647667908351,
+        "std_episode_return": 2.208742394754124,
+        "avg_speed": 0.16786394925904166,
+        "std_speed": 0.1256981259686011,
+        "avg_eta": 1.4455178680035552,
+        "std_eta": 0.21647322275912267,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.5003747940063477
+      },
+      "PPO": {
+        "n_episodes": 3,
+        "avg_episode_return": 16.521826472507996,
+        "std_episode_return": 4.144230516203336,
+        "avg_speed": 0.564099503589569,
+        "std_speed": 0.04897823251044513,
+        "avg_eta": 0.0,
+        "std_eta": 0.0,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.21504918734232584
+      },
+      "SAC": {
+        "n_episodes": 3,
+        "avg_episode_return": 46.21712286665996,
+        "std_episode_return": 8.633644501735766,
+        "avg_speed": 0.8104923407378856,
+        "std_speed": 0.09812261538675542,
+        "avg_eta": 0.0,
+        "std_eta": 0.0,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.16597652435302734
+      },
+      "Hybrid-PPO": {
+        "n_episodes": 3,
+        "avg_episode_return": 18.929757928403376,
+        "std_episode_return": 6.080644048247759,
+        "avg_speed": 0.5759738989035436,
+        "std_speed": 0.1185672418832425,
+        "avg_eta": 1.0426179860036542,
+        "std_eta": 0.21728671188238807,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.8949823379516602,
+        "mode_distribution": {
+          "EXPLOIT": {
+            "count": 282,
+            "ratio": 0.94
+          },
+          "EXPLORE": {
+            "count": 0,
+            "ratio": 0.0
+          },
+          "SAFE": {
+            "count": 18,
+            "ratio": 0.06
+          }
+        }
+      },
+      "Hybrid-SAC": {
+        "n_episodes": 3,
+        "avg_episode_return": 65.62615643976608,
+        "std_episode_return": 6.248197515706218,
+        "avg_speed": 0.8866920637598112,
+        "std_speed": 0.058238888683808526,
+        "avg_eta": 0.5336640470891291,
+        "std_eta": 0.21213485707363064,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.9978830814361572,
+        "mode_distribution": {
+          "EXPLOIT": {
+            "count": 238,
+            "ratio": 0.7933333333333333
+          },
+          "EXPLORE": {
+            "count": 0,
+            "ratio": 0.0
+          },
+          "SAFE": {
+            "count": 62,
+            "ratio": 0.20666666666666667
+          }
+        }
+      }
+    },
+    "humanoid-stand": {
+      "IDO": {
+        "n_episodes": 3,
+        "avg_episode_return": 8.054932153796594,
+        "std_episode_return": 4.91739658508722,
+        "avg_speed": 0.0970861902020121,
+        "std_speed": 0.02752443960647269,
+        "avg_eta": 2.8864278766156164,
+        "std_eta": 0.1705860365298954,
+        "avg_steps": 100.0,
+        "total_noether_violations": 118,
+        "avg_elapsed_s": 0.4258874257405599
+      },
+      "PPO": {
+        "n_episodes": 3,
+        "avg_episode_return": 5.667300874465667,
+        "std_episode_return": 2.727742450366894,
+        "avg_speed": 0.25911669023988043,
+        "std_speed": 0.048028798588723554,
+        "avg_eta": 0.0,
+        "std_eta": 0.0,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.28566845258076984
+      },
+      "SAC": {
+        "n_episodes": 3,
+        "avg_episode_return": 35.82009548373431,
+        "std_episode_return": 4.661766211191618,
+        "avg_speed": 0.43452637401834043,
+        "std_speed": 0.14609758883939233,
+        "avg_eta": 0.0,
+        "std_eta": 0.0,
+        "avg_steps": 100.0,
+        "total_noether_violations": 0,
+        "avg_elapsed_s": 0.3474748929341634
+      },
+      "Hybrid-PPO": {
+        "n_episodes": 3,
+        "avg_episode_return": 5.884505422058922,
+        "std_episode_return": 0.9410692560835472,
+        "avg_speed": 0.20702051866920582,
+        "std_speed": 0.0738929234732588,
+        "avg_eta": 13.37956500671064,
+        "std_eta": 6.227495701696109,
+        "avg_steps": 100.0,
+        "total_noether_violations": 144,
+        "avg_elapsed_s": 1.0531662305196126,
+        "mode_distribution": {
+          "EXPLOIT": {
+            "count": 49,
+            "ratio": 0.16333333333333333
+          },
+          "EXPLORE": {
+            "count": 45,
+            "ratio": 0.15
+          },
+          "SAFE": {
+            "count": 206,
+            "ratio": 0.6866666666666666
+          }
+        }
+      },
+      "Hybrid-SAC": {
+        "n_episodes": 3,
+        "avg_episode_return": 29.219351625599653,
+        "std_episode_return": 20.670527435810286,
+        "avg_speed": 0.3109418125800072,
+        "std_speed": 0.03263348739222257,
+        "avg_eta": 7.6216645978572215,
+        "std_eta": 0.35493824992971074,
+        "avg_steps": 100.0,
+        "total_noether_violations": 48,
+        "avg_elapsed_s": 0.9778395493825277,
+        "mode_distribution": {
+          "EXPLOIT": {
+            "count": 82,
+            "ratio": 0.2733333333333333
+          },
+          "EXPLORE": {
+            "count": 87,
+            "ratio": 0.29
+          },
+          "SAFE": {
+            "count": 131,
+            "ratio": 0.43666666666666665
+          }
+        }
+      }
+    }
+  },
+  "raw_results": {
+    "cheetah-run": {
+      "IDO": [
+        {
+          "steps": 100,
+          "episode_return": 0.9990245759914211,
+          "avg_eta": 9.836780318865864,
+          "final_eta": 9.78555657428275,
+          "avg_speed": 0.1380056294240409,
+          "noether_violations": 0,
+          "elapsed_s": 0.689241886138916
+        },
+        {
+          "steps": 100,
+          "episode_return": 0.7958738372041159,
+          "avg_eta": 9.847890990126412,
+          "final_eta": 9.803936890674516,
+          "avg_speed": 0.10836069762794014,
+          "noether_violations": 0,
+          "elapsed_s": 0.40503525733947754
+        },
+        {
+          "steps": 100,
+          "episode_return": 0.693653760163888,
+          "avg_eta": 9.862124909378032,
+          "final_eta": 9.80118315954002,
+          "avg_speed": 0.10217431468269574,
+          "noether_violations": 0,
+          "elapsed_s": 0.41178464889526367
+        }
+      ],
+      "PPO": [
+        {
+          "steps": 100,
+          "episode_return": 18.611746623457243,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 1.861174662345723,
+          "noether_violations": 0,
+          "elapsed_s": 0.14052629470825195
+        },
+        {
+          "steps": 100,
+          "episode_return": 18.880097622254794,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 1.8880097622254783,
+          "noether_violations": 0,
+          "elapsed_s": 0.12070059776306152
+        },
+        {
+          "steps": 100,
+          "episode_return": 19.52426947455416,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 1.952426947455416,
+          "noether_violations": 0,
+          "elapsed_s": 0.10462760925292969
+        }
+      ],
+      "Hybrid-PPO": [
+        {
+          "steps": 100,
+          "episode_return": 20.087725246520222,
+          "avg_eta": 7.941101802452341,
+          "final_eta": 6.772351742298322,
+          "avg_speed": 2.008772524652022,
+          "noether_violations": 0,
+          "elapsed_s": 0.9049761295318604,
+          "mode_counts": {
+            "EXPLOIT": 100,
+            "EXPLORE": 0,
+            "SAFE": 0
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 14.037244426571629,
+          "avg_eta": 8.523496076219448,
+          "final_eta": 8.252771253144681,
+          "avg_speed": 1.4037244426571633,
+          "noether_violations": 0,
+          "elapsed_s": 0.7318401336669922,
+          "mode_counts": {
+            "EXPLOIT": 100,
+            "EXPLORE": 0,
+            "SAFE": 0
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 19.462735946561256,
+          "avg_eta": 8.002519311927669,
+          "final_eta": 6.749225625305792,
+          "avg_speed": 1.9462735946561254,
+          "noether_violations": 0,
+          "elapsed_s": 0.8717820644378662,
+          "mode_counts": {
+            "EXPLOIT": 100,
+            "EXPLORE": 0,
+            "SAFE": 0
+          }
+        }
+      ]
+    },
+    "walker-walk": {
+      "IDO": [
+        {
+          "steps": 100,
+          "episode_return": 8.870212689378887,
+          "avg_eta": 1.2086561257661157,
+          "final_eta": 1.3215645302926218,
+          "avg_speed": 0.3357001022158054,
+          "noether_violations": 0,
+          "elapsed_s": 0.5440487861633301
+        },
+        {
+          "steps": 100,
+          "episode_return": 3.47257203422061,
+          "avg_eta": 1.7319171008924747,
+          "final_eta": 1.7497547047357365,
+          "avg_speed": 0.03321819169298509,
+          "noether_violations": 0,
+          "elapsed_s": 0.5494887828826904
+        },
+        {
+          "steps": 100,
+          "episode_return": 5.851158280125558,
+          "avg_eta": 1.3959803773520756,
+          "final_eta": 1.3215631576313016,
+          "avg_speed": 0.13467355386833452,
+          "noether_violations": 0,
+          "elapsed_s": 0.40758681297302246
+        }
+      ],
+      "PPO": [
+        {
+          "steps": 100,
+          "episode_return": 11.298642872658666,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.49515208061523736,
+          "noether_violations": 0,
+          "elapsed_s": 0.28403449058532715
+        },
+        {
+          "steps": 100,
+          "episode_return": 16.831085831440433,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.5928294759923236,
+          "noether_violations": 0,
+          "elapsed_s": 0.2077345848083496
+        },
+        {
+          "steps": 100,
+          "episode_return": 21.435750713424884,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.604316954161146,
+          "noether_violations": 0,
+          "elapsed_s": 0.15337848663330078
+        }
+      ],
+      "SAC": [
+        {
+          "steps": 100,
+          "episode_return": 51.09177375963565,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.9484668394659833,
+          "noether_violations": 0,
+          "elapsed_s": 0.1700146198272705
+        },
+        {
+          "steps": 100,
+          "episode_return": 53.474541360949345,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.7286851946873059,
+          "noether_violations": 0,
+          "elapsed_s": 0.1663360595703125
+        },
+        {
+          "steps": 100,
+          "episode_return": 34.08505347939489,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.7543249880603677,
+          "noether_violations": 0,
+          "elapsed_s": 0.16157889366149902
+        }
+      ],
+      "Hybrid-PPO": [
+        {
+          "steps": 100,
+          "episode_return": 16.53603949639375,
+          "avg_eta": 1.1348642670080802,
+          "final_eta": 0.28602471717449796,
+          "avg_speed": 0.6807209025609241,
+          "noether_violations": 0,
+          "elapsed_s": 0.7271072864532471,
+          "mode_counts": {
+            "EXPLOIT": 92,
+            "EXPLORE": 0,
+            "SAFE": 8
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 27.279513908197625,
+          "avg_eta": 0.7426479615898414,
+          "final_eta": 0.09768850241157125,
+          "avg_speed": 0.6369949965507524,
+          "noether_violations": 0,
+          "elapsed_s": 0.9097156524658203,
+          "mode_counts": {
+            "EXPLOIT": 93,
+            "EXPLORE": 0,
+            "SAFE": 7
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 12.97372038061875,
+          "avg_eta": 1.250341729413041,
+          "final_eta": 0.30048420189293734,
+          "avg_speed": 0.4102057975989545,
+          "noether_violations": 0,
+          "elapsed_s": 1.048124074935913,
+          "mode_counts": {
+            "EXPLOIT": 97,
+            "EXPLORE": 0,
+            "SAFE": 3
+          }
+        }
+      ],
+      "Hybrid-SAC": [
+        {
+          "steps": 100,
+          "episode_return": 57.55122144987641,
+          "avg_eta": 0.8197264564941668,
+          "final_eta": 0.0036864671140321354,
+          "avg_speed": 0.8055123526460924,
+          "noether_violations": 0,
+          "elapsed_s": 0.8827002048492432,
+          "mode_counts": {
+            "EXPLOIT": 79,
+            "EXPLORE": 0,
+            "SAFE": 21
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 66.55612864513965,
+          "avg_eta": 0.4689145121600191,
+          "final_eta": 0.0,
+          "avg_speed": 0.9152385348128266,
+          "noether_violations": 0,
+          "elapsed_s": 1.1169462203979492,
+          "mode_counts": {
+            "EXPLOIT": 77,
+            "EXPLORE": 0,
+            "SAFE": 23
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 72.77111922428219,
+          "avg_eta": 0.3123511726132015,
+          "final_eta": 7.519034957055079e-17,
+          "avg_speed": 0.9393253038205147,
+          "noether_violations": 0,
+          "elapsed_s": 0.9940028190612793,
+          "mode_counts": {
+            "EXPLOIT": 82,
+            "EXPLORE": 0,
+            "SAFE": 18
+          }
+        }
+      ]
+    },
+    "humanoid-stand": {
+      "IDO": [
+        {
+          "steps": 100,
+          "episode_return": 1.1028915412199765,
+          "avg_eta": 3.1270743599551536,
+          "final_eta": 2.846350943295902,
+          "avg_speed": 0.06502865643847312,
+          "noether_violations": 71,
+          "elapsed_s": 0.31687045097351074
+        },
+        {
+          "steps": 100,
+          "episode_return": 11.682716267875756,
+          "avg_eta": 2.751395918798488,
+          "final_eta": 2.724780097759739,
+          "avg_speed": 0.13223636028085928,
+          "noether_violations": 47,
+          "elapsed_s": 0.5364019870758057
+        },
+        {
+          "steps": 100,
+          "episode_return": 11.379188652294047,
+          "avg_eta": 2.7808133510932076,
+          "final_eta": 2.7569267670813193,
+          "avg_speed": 0.09399355388670394,
+          "noether_violations": 0,
+          "elapsed_s": 0.4243898391723633
+        }
+      ],
+      "PPO": [
+        {
+          "steps": 100,
+          "episode_return": 9.078003485377483,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.3270135221853643,
+          "noether_violations": 0,
+          "elapsed_s": 0.20552444458007812
+        },
+        {
+          "steps": 100,
+          "episode_return": 5.522782387808706,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.22680026680367327,
+          "noether_violations": 0,
+          "elapsed_s": 0.4371175765991211
+        },
+        {
+          "steps": 100,
+          "episode_return": 2.40111675021081,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.2235362817306038,
+          "noether_violations": 0,
+          "elapsed_s": 0.21436333656311035
+        }
+      ],
+      "SAC": [
+        {
+          "steps": 100,
+          "episode_return": 38.25158909540538,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.24866880634333216,
+          "noether_violations": 0,
+          "elapsed_s": 0.25299715995788574
+        },
+        {
+          "steps": 100,
+          "episode_return": 39.91132290282336,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.4492919849387123,
+          "noether_violations": 0,
+          "elapsed_s": 0.4848968982696533
+        },
+        {
+          "steps": 100,
+          "episode_return": 29.297374452974193,
+          "avg_eta": 0.0,
+          "final_eta": 0.0,
+          "avg_speed": 0.6056183307729767,
+          "noether_violations": 0,
+          "elapsed_s": 0.30453062057495117
+        }
+      ],
+      "Hybrid-PPO": [
+        {
+          "steps": 100,
+          "episode_return": 5.224092381032268,
+          "avg_eta": 14.291599241927818,
+          "final_eta": 2.1942679409583628,
+          "avg_speed": 0.12931022540858156,
+          "noether_violations": 34,
+          "elapsed_s": 1.0470952987670898,
+          "mode_counts": {
+            "EXPLOIT": 22,
+            "EXPLORE": 18,
+            "SAFE": 60
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 5.214058167008539,
+          "avg_eta": 20.509633786144686,
+          "final_eta": 80.26252014987375,
+          "avg_speed": 0.3063825157393496,
+          "noether_violations": 22,
+          "elapsed_s": 0.9806070327758789,
+          "mode_counts": {
+            "EXPLOIT": 22,
+            "EXPLORE": 24,
+            "SAFE": 54
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 7.215365718135958,
+          "avg_eta": 5.337461992059417,
+          "final_eta": 2.9361455995793584,
+          "avg_speed": 0.18536881485968634,
+          "noether_violations": 88,
+          "elapsed_s": 1.1317963600158691,
+          "mode_counts": {
+            "EXPLOIT": 5,
+            "EXPLORE": 3,
+            "SAFE": 92
+          }
+        }
+      ],
+      "Hybrid-SAC": [
+        {
+          "steps": 100,
+          "episode_return": 37.742050481249414,
+          "avg_eta": 8.09352271644863,
+          "final_eta": 12.246964156024537,
+          "avg_speed": 0.32779237699778435,
+          "noether_violations": 14,
+          "elapsed_s": 0.8789947032928467,
+          "mode_counts": {
+            "EXPLOIT": 31,
+            "EXPLORE": 25,
+            "SAFE": 44
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 0.7417109897097243,
+          "avg_eta": 7.534006165572671,
+          "final_eta": 3.361379661035872,
+          "avg_speed": 0.2653081897984825,
+          "noether_violations": 28,
+          "elapsed_s": 1.0100951194763184,
+          "mode_counts": {
+            "EXPLOIT": 21,
+            "EXPLORE": 31,
+            "SAFE": 48
+          }
+        },
+        {
+          "steps": 100,
+          "episode_return": 49.17429340583981,
+          "avg_eta": 7.237464911550363,
+          "final_eta": 3.0555735800111963,
+          "avg_speed": 0.33972487094375475,
+          "noether_violations": 6,
+          "elapsed_s": 1.044428825378418,
+          "mode_counts": {
+            "EXPLOIT": 30,
+            "EXPLORE": 31,
+            "SAFE": 39
+          }
+        }
+      ]
+    }
+  },
+  "bugs_found": []
+}

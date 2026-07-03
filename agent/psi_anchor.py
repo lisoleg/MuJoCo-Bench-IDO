@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 
 from core.goal_eml_mj import GoalEML
 
-IDO_PSI_ANCHOR_VERSION: str = "v0.3.0"
+IDO_PSI_ANCHOR_VERSION: str = "v0.3.1"
 
 # Default configuration constants
 ETA_HISTORY_MAX_LEN: int = 100
@@ -446,23 +446,33 @@ class PsiAnchor:
                                       physics: Optional[object] = None) -> dict:
         """Check if action applies excessive torque to sentient finger actuators.
 
-        v0.3.0: Implements τ_sentient_max = 0.05 N·m biological safety torque
+        v0.3.0→v0.3.1: Implements τ_sentient_max = 0.05 N·m biological safety torque
         upper limit. If any actuator connected to a "sentient" body part
         (finger, hand, thumb) receives torque exceeding TAU_SENTIENT_MAX,
         the action is clamped and a FINGER_TORQUE_CLAMPED κ-Snap event
         should be triggered.
 
+        v0.3.1 FIX: When no sentient actuators can be identified (locomotion
+        tasks have no "finger/hand/thumb" actuators), the check now returns
+        ok=True and passes the action through unchanged. Previously, it
+        fell back to treating ALL actuators as sentient and clamping
+        everything to ±0.05, which catastrophically degraded locomotion
+        performance (same bug pattern as PG-Gate no-actuator-names fallback).
+
         This check ensures that the agent never applies harmful force to
         biological tissue during manipulation tasks (e.g., "捏飘叶").
+        For locomotion tasks, the check is effectively a no-op since
+        there are no sentient actuators to protect.
 
         Args:
             action: Control action array from agent decision loop.
             physics: MuJoCo physics data (for actuator name extraction).
-                     If None, checks all actions against TAU_SENTIENT_MAX.
+                     If None, the check returns ok=True (no clamping).
 
         Returns:
             Dict with keys:
-            - ok: bool — True if no sentient actuator exceeds τ_sentient_max.
+            - ok: bool — True if no sentient actuator exceeds τ_sentient_max,
+                  or if no sentient actuators can be identified (locomotion tasks).
             - clamped_action: np.ndarray — action with sentient components clamped.
             - violated_indices: List[int] — indices of actuators that were clamped.
             - original_torques: Dict[int, float] — original torque values at violated indices.
@@ -505,8 +515,22 @@ class PsiAnchor:
                             break
 
         if len(sentient_indices) == 0:
-            # No identifiable sentient actuators — check ALL actuators for safety
-            sentient_indices = list(range(len(action)))
+            # No identifiable sentient actuators — skip clamping entirely.
+            # For locomotion tasks (cheetah/walker/hopper), there are no
+            # "finger/hand/thumb" actuators. Clamping ALL actuators to
+            # ±0.05 N·m would destroy locomotion-scale actions ([-1,1] range),
+            # making the agent nearly immobile. Instead, we only clamp when
+            # we can positively identify sentient actuators by name.
+            # Previously, this fallback treated ALL actuators as sentient
+            # and clamped everything to ±TAU_SENTIENT_MAX=0.05, which was
+            # the same catastrophic bug as PG-Gate's no-actuator-names fallback.
+            return {
+                "ok": True,
+                "clamped_action": action.copy(),
+                "violated_indices": [],
+                "original_torques": {},
+                "clamped_torques": {},
+            }
 
         # Check each sentient actuator for torque violation
         for idx in sentient_indices:

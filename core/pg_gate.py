@@ -102,9 +102,13 @@ class PGGate:
                         clamped_action[idx] = np.clip(
                             clamped_action[idx], -self.tau_safe, self.tau_safe)
 
-        # Step 3: Also apply global physical clamp for safety
-        # (any action exceeding tau_safe on ANY actuator is gently reduced)
-        clamped_action = self.physical_clamp(clamped_action, self.tau_safe)
+        # Step 3: Apply global safety clamp ONLY on non-sentient actuators
+        # (sentient actuators are already clamped in Step 2).
+        # The global clamp limits action to [-1, 1] (actuator range) —
+        # NOT to tau_safe, which would destroy locomotion actions.
+        # For non-sentient actuators, we only clip to the standard
+        # actuator range [-1, 1] as a sanity check.
+        clamped_action = self._global_sanity_clip(clamped_action)
 
         # Step 4: Determine gate outcome and log
         was_rejected: bool = not np.allclose(action, clamped_action, atol=1e-6)
@@ -187,12 +191,14 @@ class PGGate:
                     actuator_names = None
 
         if actuator_names is None:
-            # No actuator names available — skip AST analysis
-            # Default: treat all actuators as potentially sentient for safety
-            result["ast_reason"] = "no_actuator_names_fallback_safe"
-            result["sentient_actuator_indices"] = list(range(len(action)))
-            result["is_sentient_target"] = True
-            result["action_norm"] = float(np.linalg.norm(action))
+            # No actuator names available — skip AST analysis entirely.
+            # We cannot identify which actuators are sentient without names,
+            # so we do NOT clamp any actuators. The global sanity clip
+            # (Step 3) will still ensure actions stay within [-1, 1].
+            # Previously, this fallback treated ALL actuators as sentient
+            # and clamped everything to ±0.05 N·m, which destroyed
+            # locomotion task actions.
+            result["ast_reason"] = "no_actuator_names_skip"
             return result
 
         # Identify sentient actuators by keyword matching
@@ -244,6 +250,21 @@ class PGGate:
             tau_safe = self.tau_safe
 
         return np.clip(action, -tau_safe, tau_safe)
+
+    def _global_sanity_clip(self, action: np.ndarray) -> np.ndarray:
+        """Apply global sanity clip to action array.
+
+        Clips all action components to the standard MuJoCo actuator range
+        [-1, 1]. This is NOT the same as physical_clamp — it preserves
+        locomotion-scale actions while catching any extreme outliers.
+
+        Args:
+            action: Control action array to clip.
+
+        Returns:
+            Clipped action array with all components within [-1, 1].
+        """
+        return np.clip(action, -1.0, 1.0)
 
     def check_sentient_finger(self, action: np.ndarray, physics: Optional[Any] = None) -> Dict[str, Any]:
         """Check if action applies excessive force to sentient finger actuators.

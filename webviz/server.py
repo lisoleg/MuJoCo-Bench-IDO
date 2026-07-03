@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.6.5"
+WEBVIZ_VERSION: str = "v0.6.6"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -842,10 +842,39 @@ async def get_tasks() -> JSONResponse:
         "swimmer-swim6": "Swimmer forward swim 6 segments",
         "swimmer-swim15": "Swimmer forward swim 15 segments",
     }
+    # ── v0.6.6: η mode mapping for each task ──
+    task_eta_modes: dict = {
+        "acrobot-swingup": "point",
+        "ball_in_cup-catch": "point",
+        "cartpole-balance": "point",
+        "cartpole-balance_sparse": "point",
+        "cartpole-swingup": "point",
+        "cartpole-swingup_sparse": "point",
+        "cheetah-run": "locomotion",
+        "finger-spin": "point",
+        "finger-turn_easy": "point",
+        "finger-turn_hard": "point",
+        "fish-swim": "locomotion",
+        "hopper-hop": "locomotion",
+        "hopper-stand": "point",
+        "humanoid-run": "locomotion",
+        "humanoid-stand": "point",
+        "humanoid-walk": "locomotion",
+        "manipulator-bring_ball": "point",
+        "pendulum-swingup": "point",
+        "reacher-easy": "point",
+        "reacher-hard": "point",
+        "swimmer-swim6": "locomotion",
+        "swimmer-swim15": "locomotion",
+        "walker-stand": "point",
+        "walker-walk": "locomotion",
+        "walker-run": "locomotion",
+    }
     for task_name in TASK_REGISTRY.keys():
         tasks.append({
             "name": task_name,
             "description": task_descriptions.get(task_name, ""),
+            "eta_mode": task_eta_modes.get(task_name, "point"),
         })
     return JSONResponse(content={"tasks": tasks, "version": WEBVIZ_VERSION})
 

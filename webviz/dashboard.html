@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.6.5</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.6.6</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -362,6 +362,11 @@
           </optgroup>
         </select>
         <p class="hint-text" data-i18n="hint_task_select">Choose a dm_control benchmark task. The task determines the physics environment and goal invariants for the IDO agent.</p>
+        <!-- v0.6.6: η Mode badge for selected task -->
+        <div class="mt-2 flex items-center gap-2">
+          <span class="label-sm" data-i18n="label_selected_eta_mode">η Mode:</span>
+          <span id="selectedTaskEtaMode" class="px-2 py-0.5 rounded text-xs font-semibold" style="background: #3b82f6; color: white;">point 🎯</span>
+        </div>
       </div>
 
       <!-- ════════════ Episodes Slider ════════════ -->
@@ -751,6 +756,7 @@
         status_idle: "空闲",
         status_running: "运行中",
         label_task_select: "任务选择",
+        label_selected_eta_mode: "η 模式:",
         label_episodes: "Episode 数量",
         label_max_steps: "最大步数",
         label_sip_mode: "SIP-Bench 模式",
@@ -869,6 +875,7 @@
         status_idle: "Idle",
         status_running: "Running",
         label_task_select: "Task Selection",
+        label_selected_eta_mode: "η Mode:",
         label_episodes: "Episodes",
         label_max_steps: "Max Steps",
         label_sip_mode: "SIP-Bench Mode",
@@ -1027,6 +1034,23 @@
     // ── v0.6.1: η Mode state ──
     let currentEtaMode = 'point';
 
+    // ── v0.6.6: Task η mode mapping (populated from /api/tasks) ──
+    const TASK_ETA_MODES = {
+      'acrobot-swingup': 'point', 'ball_in_cup-catch': 'point',
+      'cartpole-balance': 'point', 'cartpole-balance_sparse': 'point',
+      'cartpole-swingup': 'point', 'cartpole-swingup_sparse': 'point',
+      'cheetah-run': 'locomotion', 'finger-spin': 'point',
+      'finger-turn_easy': 'point', 'finger-turn_hard': 'point',
+      'fish-swim': 'locomotion', 'hopper-hop': 'locomotion',
+      'hopper-stand': 'point', 'humanoid-run': 'locomotion',
+      'humanoid-stand': 'point', 'humanoid-walk': 'locomotion',
+      'manipulator-bring_ball': 'point', 'pendulum-swingup': 'point',
+      'reacher-easy': 'point', 'reacher-hard': 'point',
+      'swimmer-swim6': 'locomotion', 'swimmer-swim15': 'locomotion',
+      'walker-stand': 'point', 'walker-walk': 'locomotion',
+      'walker-run': 'locomotion',
+    };
+
     // ── Global State ──
     let ws = null;
     let isRunning = false;
@@ -1082,7 +1106,7 @@
               ticks: { color: '#94a3b8' },
             },
             y: {
-              title: { display: true, text: 'η (GaussEx Residual)', color: '#94a3b8' },
+              title: { display: true, text: 'η (GaussEx Residual) — 🎯 point / 🏃 locomotion', color: '#94a3b8' },
               grid: { color: 'rgba(71, 85, 105, 0.3)' },
               ticks: { color: '#94a3b8' },
               suggestedMin: 0,
@@ -1273,11 +1297,17 @@
 
       if (!etaDatasets[episode]) {
         const colorIdx = (episode - 1) % episodeColors.length;
+        // v0.6.6: Use mode-specific base color for η trajectory
+        const isLocomotion = currentEtaMode === 'locomotion';
+        const baseColors = isLocomotion
+          ? ['#22c55e', '#16a34a', '#4ade80', '#86efac', '#bbf7d0', '#15803d', '#34d399', '#6ee7b7']
+          : ['#3b82f6', '#2563eb', '#60a5fa', '#93c5fd', '#bfdbfe', '#1d4ed8', '#7dd3fc', '#a5b4fc'];
+        const lineColor = baseColors[colorIdx % baseColors.length];
         etaDatasets[episode] = {
-          label: `Episode ${episode}`,
+          label: `Ep ${episode} (${isLocomotion ? '🏃' : '🎯'})`,
           data: [],
-          borderColor: episodeColors[colorIdx],
-          backgroundColor: episodeColors[colorIdx] + '20',
+          borderColor: lineColor,
+          backgroundColor: lineColor + '20',
           borderWidth: 2,
           pointRadius: 0,
           tension: 0.1,
@@ -1777,8 +1807,32 @@
       initCharts();
       connectWebSocket();
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.6.5');
+      // v0.6.6: η mode badge update on task selection change
+      const taskSelect = document.getElementById('taskSelect');
+      updateEtaModeBadge(taskSelect.value);
+      taskSelect.addEventListener('change', function() {
+        updateEtaModeBadge(this.value);
+      });
+      addLog('Dashboard initialized v0.6.6');
     });
+
+    // ── v0.6.6: Update η mode badge when task changes ──
+    function updateEtaModeBadge(taskName) {
+      const mode = TASK_ETA_MODES[taskName] || 'point';
+      const badge = document.getElementById('selectedTaskEtaMode');
+      if (mode === 'locomotion') {
+        badge.textContent = 'locomotion 🏃';
+        badge.style.background = '#22c55e'; // green for locomotion
+        badge.style.color = 'white';
+      } else {
+        badge.textContent = 'point 🎯';
+        badge.style.background = '#3b82f6'; // blue for point
+        badge.style.color = 'white';
+      }
+      currentEtaMode = mode;
+      // Also update the η Mode card
+      updateEtaModeDisplay(mode);
+    }
   </script>
 
 </body>
