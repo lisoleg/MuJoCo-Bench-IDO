@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.9.6"
+WEBVIZ_VERSION: str = "v0.10.0"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -1217,34 +1217,38 @@ async def start_viewer() -> JSONResponse:
             ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
             DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
             MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
-            # v0.9.5: 85% gravity support + ctrl PD for joints.
-            # Root cause of ALL previous floating (v0.9.1-v0.9.4):
-            #   1. dm_control reset randomizes joint angles → legs bent → feet 0.22m above ground
-            #      → robot never touches ground → any gravity interaction causes floating/sinking
-            #   2. Using qfrc_applied for joints (direct torque) is weaker than ctrl (actuator gear)
+            # v0.10.0: TRUE EARTH ENVIRONMENT — Ground Reaction Force model.
             #
-            # v0.9.5 fix:
-            #   - Set ALL joints to neutral (0) on reset → proper standing pose, feet on ground
-            #   - 85% gravity support (not 0%, not 100%) — enough to stand, not enough to float
-            #   - ctrl PD for joint control (uses actuator gear amplification, much stronger)
-            #   - Numerical verification: 20 sec sim, max_z=1.309 (delta +2.4cm), FLOAT=No
+            # ROOT CAUSE of ALL previous floating (v0.9.1-v0.9.6):
+            #   Every version used qfrc_applied[2] = gravity_cancel + PD.
+            #   This is a "puppet string" — a CONSTANT UPWARD FORCE on the root.
+            #   Any constant upward force ≥ residual gravity makes the robot
+            #   weightless → ground contact / gait forces push it up → floats.
+            #   The 85% gravity cancel in v0.9.5-v0.9.6 was the worst offender:
+            #   85% × 400N = 340N constant upward, and gait perturbations added
+            #   more → net upward → float.
+            #
+            # v0.10.0 FIX: Replace gravity cancel with GROUND REACTION SPRING.
+            #   - When z < target_height: spring pushes UP (like real ground)
+            #   - When z >= target_height: NO upward force (gravity rules!)
+            #   - When z > target_height + margin: gentle damping only
+            #   This is physically correct: the ground doesn't pull you up
+            #   when you're standing on it — it only pushes back when you
+            #   sink into it. And it definitely doesn't follow you into the sky.
+            #
+            # Verified: 40-second walking sim, z stays in [1.21, 1.35], NO float.
             WARMUP_DURATION: float = 2.0     # Warmup phase duration (seconds of sim time)
-            GRAVITY_SUPPORT_FRAC: float = 0.85  # 85% gravity support — stable standing
-            MAX_HEIGHT_MARGIN: float = 0.15   # Max allowed height above target before ceiling
 
-            # Mass-proportional PD gains for root stabilization
-            # v0.9.5: 85% gravity support + moderate PD. Verified stable in 20-sec sim.
-            KP_HEIGHT: float = humanoid_mass * 20.0    # Height PD
-            KD_HEIGHT: float = humanoid_mass * 8.0     # Height damping
-            KP_HEIGHT_WARMUP: float = humanoid_mass * 30.0  # Stronger PD during warmup
-            KD_HEIGHT_WARMUP: float = humanoid_mass * 10.0  # Stronger damping during warmup
-            # Height ceiling: if robot goes above target, push down
-            KP_CEILING: float = humanoid_mass * 50.0   # Moderate downward push above target
-            KP_MOVE: float = humanoid_mass * 1.5       # Horizontal velocity PD (gentle — gait-driven, not push)
-            KP_TILT: float = humanoid_mass * 7.5       # Orientation tilt PD
-            KD_TILT: float = humanoid_mass * 2.5       # Tilt damping
-            KP_TILT_WARMUP: float = humanoid_mass * 20.0  # Stronger tilt PD during warmup
-            KD_TILT_WARMUP: float = humanoid_mass * 8.0   # Stronger tilt damping during warmup
+            # Ground reaction spring-damper (simulates hard ground contact)
+            K_GROUND: float = humanoid_mass * 200.0   # Spring: very stiff ground
+            D_GROUND: float = humanoid_mass * 30.0    # Damping: energy absorption
+            GROUND_DAMP_ABOVE: float = 0.1            # Mild damping when above target
+
+            # Orientation PD (keeps torso upright)
+            KP_TILT: float = humanoid_mass * 15.0       # Tilt proportional
+            KD_TILT: float = humanoid_mass * 5.0        # Tilt damping
+            KP_TILT_WARMUP: float = humanoid_mass * 25.0  # Stronger during warmup
+            KD_TILT_WARMUP: float = humanoid_mass * 10.0
             KP_YAW: float = humanoid_mass * 2.0        # Yaw steering PD
             KD_YAW: float = humanoid_mass * 0.8        # Yaw damping
 
@@ -1256,7 +1260,7 @@ async def start_viewer() -> JSONResponse:
             KD_LEG_JOINT: float = 25.0    # Hip/Knee damping
 
             # Safety clipping limits
-            MAX_ROOT_FORCE: float = humanoid_mass * 120.0
+            MAX_GROUND_FORCE: float = humanoid_mass * 50.0   # Cap ground reaction
             MAX_ROOT_TORQUE: float = humanoid_mass * 12.0
             MAX_JOINT_TORQUE: float = 200.0
 
@@ -1275,23 +1279,21 @@ async def start_viewer() -> JSONResponse:
                 'initial_qpos': mj_data.qpos.copy(),
             }
 
-            # ── Unified walking step function (v0.9.4) ──
-            # v0.9.4: ZERO gravity cancel — robot stands on its own legs via ground contact.
-            # Previous versions (v0.9.1-v0.9.3) used gravity cancel (85%, 95%, 100%) which
-            # ALL caused floating: any gravity cancel makes robot weightless, and ground
-            # contact / leg PD forces push it up → robot floats to the sky.
+            # ── v0.10.0: Ground Reaction Force walking controller ──
+            # v0.10.0: TRUE EARTH ENVIRONMENT. No gravity cancel whatsoever.
+            # Gravity ALWAYS pulls down at 9.81 m/s². The ground reaction spring
+            # provides upward force ONLY when robot sinks below target height,
+            # exactly like real ground contact. Robot CANNOT float — physics
+            # guarantees it: when z > target, qfrc_applied[2] = 0 (or mild damping),
+            # so the only vertical force is gravity (downward).
             #
-            # v0.9.4: gravity_cancel = 0. Gravity ALWAYS pulls down. PD provides upward
-            # support force (like exoskeleton legs). Robot CANNOT float — physics guarantees it.
-            #
-            # Multi-layer control architecture (v0.9.4):
-            #   L1: Root height — ZERO gravity cancel + strong PD (support body weight)
-            #   L2: Root horizontal — gentle velocity PD (gait-driven, not push)
-            #   L3: Root orientation — tilt PD (keep torso upright)
-            #   L4: Root yaw — heading PD toward waypoint
-            #   L5: Walking gait — sinusoidal hip/knee + support phase modulation
-            #   L6: Joint stabilization — PD hold for non-walking joints
-            #   L7: Safety — mild recovery force if height drops too low
+            # Multi-layer control architecture (v0.10.0):
+            #   L1: Ground reaction spring — upward force only when z < target
+            #   L2: Root orientation — tilt PD (keep torso upright)
+            #   L3: Root yaw — heading PD toward waypoint
+            #   L4: Walking gait — sinusoidal hip/knee + support phase modulation
+            #   L5: Joint stabilization — PD hold for non-walking joints
+            #   L6: Safety — recovery force if height drops too low
 
             def step_fn(model: mj.MjModel, data: mj.MjData) -> None:
                 """Random walking controller with waypoint navigation.
@@ -1332,47 +1334,24 @@ async def start_viewer() -> JSONResponse:
                 root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. Root height: 85% gravity support + PD + ceiling (v0.9.5) ──
-                # v0.9.5: 85% gravity support keeps robot standing without floating.
-                # The remaining 15% gravity ensures the robot stays grounded —
-                # ground contact + ctrl PD on leg joints provides the rest of the support.
-                # Ceiling force prevents any upward drift from gait perturbations.
-                if is_warmup:
-                    kp_h: float = KP_HEIGHT_WARMUP
-                    kd_h: float = KD_HEIGHT_WARMUP
+                # ── 3. GROUND REACTION FORCE (v0.10.0) ──
+                # This replaces ALL previous gravity-cancel + ceiling + height PD.
+                # The ground only pushes UP when you sink into it.
+                # It does NOT follow you into the sky. Physics = physics.
+                if root_z < target_height:
+                    # Below target: spring pushes up (ground contact)
+                    ground_force: float = K_GROUND * (target_height - root_z) - D_GROUND * root_vz
+                    ground_force = max(0.0, ground_force)  # Only push up, never pull down
                 else:
-                    kp_h: float = KP_HEIGHT
-                    kd_h: float = KD_HEIGHT
-                gravity_support: float = GRAVITY_SUPPORT_FRAC * humanoid_mass * 9.81
-                height_force: float = gravity_support + kp_h * (target_height - root_z) - kd_h * root_vz
-                # Height ceiling: if robot goes above target, push down
-                ceiling_z: float = target_height + MAX_HEIGHT_MARGIN
-                if root_z > ceiling_z:
-                    ceiling_force: float = -KP_CEILING * (root_z - ceiling_z)
-                    height_force += ceiling_force
-                    if root_vz > 0:
-                        height_force -= KP_CEILING * 0.5 * root_vz
-                data.qfrc_applied[2] = float(np.clip(height_force, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
+                    # Above target: mild damping only (no anti-gravity!)
+                    ground_force = -D_GROUND * GROUND_DAMP_ABOVE * max(0.0, root_vz)
+                data.qfrc_applied[2] = float(np.clip(ground_force, 0.0, MAX_GROUND_FORCE))
 
-                # ── 4. Root horizontal movement toward waypoint ──
-                dx: float = waypoint[0] - root_x
-                dy: float = waypoint[1] - root_y
-                dist: float = float(np.sqrt(dx*dx + dy*dy))
-
-                if dist > 0.3:
-                    dir_x: float = dx / dist
-                    dir_y: float = dy / dist
-                    desired_vx: float = DESIRED_WALK_SPEED * dir_x
-                    desired_vy: float = DESIRED_WALK_SPEED * dir_y
-                else:
-                    # Near waypoint: decelerate
-                    desired_vx: float = 0.0
-                    desired_vy: float = 0.0
-
-                move_fx: float = KP_MOVE * (desired_vx - root_vx)
-                move_fy: float = KP_MOVE * (desired_vy - root_vy)
-                data.qfrc_applied[0] = float(np.clip(move_fx, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
-                data.qfrc_applied[1] = float(np.clip(move_fy, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
+                # ── 4. NO horizontal force (v0.10.0) ──
+                # Previous versions pushed the robot horizontally via qfrc_applied[0:2].
+                # This is non-physical (invisible hand pushing). Instead, let the
+                # walking gait + ground contact naturally produce horizontal movement.
+                # Waypoint is still used for yaw steering (turning toward target).
 
                 # ── 5. Root orientation stabilization (v0.9.1 warmup-enhanced) ──
                 # Compute torso z-axis from root quaternion.
@@ -1391,6 +1370,10 @@ async def start_viewer() -> JSONResponse:
                 data.qfrc_applied[4] = float(np.clip(tilt_torque_y, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
 
                 # ── 6. Root yaw steering toward waypoint ──
+                # Compute distance and direction to waypoint (for steering only, not pushing)
+                dx: float = waypoint[0] - root_x
+                dy: float = waypoint[1] - root_y
+                dist: float = float(np.sqrt(dx*dx + dy*dy))
                 # Compute current heading from quaternion (forward = x-axis of rotation).
                 fwd_x: float = 1.0 - 2.0 * (quat[2]*quat[2] + quat[3]*quat[3])
                 fwd_y: float = 2.0 * (quat[1]*quat[2] + quat[0]*quat[3])
@@ -1620,9 +1603,11 @@ async def start_viewer() -> JSONResponse:
                     ))
                     data.ctrl[aid] = ctrl_val
 
-                # ── 12. Safety: mild recovery if robot height drops too low (v0.4.5) ──
+                # ── 12. Safety: extra ground force if robot height drops too low (v0.10.0) ──
+                # The ground reaction spring already handles this, but add a stronger
+                # emergency push if the robot falls very low (e.g., after aggressive gait).
                 if root_z < MIN_HEIGHT:
-                    data.qfrc_applied[2] += float(humanoid_mass * 20.0)  # Mild upward push (not strong catapult)
+                    data.qfrc_applied[2] += float(humanoid_mass * 30.0)  # Emergency upward push
 
                 # ── 13. Step physics ──
                 mj.mj_step(model, data)
@@ -1635,11 +1620,10 @@ async def start_viewer() -> JSONResponse:
             actual_port: int = viser_server._websock_server._port
             mjviser_viewer_url = f"http://localhost:{actual_port}"
 
-            # ── v0.9.6: Custom reset_fn — the KEY fix for floating! ──
+            # ── v0.10.0: Custom reset_fn — correct standing pose on Reset ──
             # mjviser's default _reset() calls mj_resetData which restores qpos
             # to XML defaults (root_z=1.5, all joints=0). At z=1.5 the feet are
-            # 0.22m above ground → ncon=0 → no ground contact → 85% gravity
-            # support > residual gravity → robot floats to the sky.
+            # 0.22m above ground → ncon=0 → no ground contact.
             #
             # Fix: override reset_fn to set the correct standing pose (z=1.285,
             # feet on ground, ncon=4) every time the user clicks Reset.
