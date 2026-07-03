@@ -114,6 +114,7 @@ def make_humanoid_stand_eml(physics,
         pos_tol=0.05,
         ori_tol=0.15,
         collide_thresh=0.01,  # humanoid: default (low = tolerant, with parent-child exclusion)
+        eta_mode='locomotion',  # v0.9.0 FIX: humanoid-stand is locomotion (21-dof balance)
     )
 
 

@@ -887,6 +887,11 @@ class HybridSB3IDOAgent:
                 primary_mode = "EXPLORE"
 
         # ── Step 7: Noether 4-gate check → may override to SAFE ──
+        # v0.9.0 FIX: Locomotion tasks also skip Noether-triggered SAFE override.
+        # humanoid-stand Hybrid-SAC was 0.02x because Noether triggered SAFE
+        # → action ×0.8 clip destroyed SAC's learned balancing. Locomotion
+        # needs to trust the motor layer entirely — Noether conservation
+        # violations are expected (energy fluctuation in gait patterns).
         n_ok: bool = True
         n_msg: str = ""
         noether_result: dict = {"ok": True, "total": 0}
@@ -899,7 +904,8 @@ class HybridSB3IDOAgent:
                 collide_thresh=self.goal.collide_thresh,
             )
 
-        if not n_ok:
+        # Locomotion: Noether override bypassed — trust motor layer
+        if not n_ok and not self.is_locomotion:
             primary_mode = noether_mode_override
 
         # ── Step 8: ψ-Anchor inject conservation anchor ──
