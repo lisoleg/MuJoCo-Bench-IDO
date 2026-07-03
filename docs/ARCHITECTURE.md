@@ -561,7 +561,293 @@ graph TB
 *v0.4.2 update: 2025-07-01 — Three-layer PD standing controller (gravity comp + root orientation + joint PD)*
 *v0.4.3 update: 2025-07-01 — Random walking controller + waypoint navigation + obstacle arena (replaces hard-lock root)*
 *v0.4.4 update: 2025-07-02 — Expanded dashboard task/scene selection + explanatory tooltips + 4 new 3D arenas*
-*v0.4.5 update: 2025-07-02 — Floating bug fix (root vertical force → adaptive gravity assist + leg joint ground support)*
+*v0.4.5 update: 2025-07-02 — Floating bug fix + P0 evaluation infrastructure (cumulative reward, success criteria, NVR breakdown, SB3 adapter)*
+
+---
+
+### v0.5.0 模块演进（Motor层重构 + 混合智能体）
+
+#### agent/ 目录新增/修改
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `agent/hybrid_sb3_ido_agent.py` | ★ 新(v0.5.0) | Hybrid SB3 + IDO 智能体：SB3 motor层 + IDO认知层，15步决策循环，三模式(EXPLOIT/EXPLORE/SAFE) |
+| `agent/task_pd_controllers.py` | ★ 新(v0.5.0) | Per-task PD控制器替换通用MotorPrimitives：WalkerWalkPD, CheetahRunPD, HumanoidStandPD等 |
+| `agent/mujoco_ido_agent.py` | ★ 修改(v0.5.0) | 集成TaskPDController，支持per-task controller选择，MotorPrimitives保留为fallback |
+
+#### HybridSB3IDOAgent 架构
+
+```
+┌──────────────────────────────────────┐
+│     HybridSB3IDOAgent               │
+│  ┌────────────────┐ ┌──────────────┐│
+│  │ SB3 Motor Layer│ │ IDO Cognitive││
+│  │ (PPO/SAC)      │ │ Layer        ││
+│  │ choose_action()│ │ κ-Snap η     ││
+│  │ train()        │ │ Noether-Check││
+│  │ evaluate()     │ │ ψ-Anchor     ││
+│  └────────────────┘ └──────────────┘│
+│  ┌──────────────────────────────────┐│
+│  │ 15-Step Decision Loop           ││
+│  │ Step 1-15: Motor acts           ││
+│  │ Step 15: IDO supervises         ││
+│  │ → EXPLOIT/EXPLORE/SAFE mode     ││
+│  └──────────────────────────────────┘│
+│  ┌──────────────────────────────────┐│
+│  │ Locomotion Bypasses             ││
+│  │ SafeFuse: hard bypass ×0.1→×1.0 ││
+│  │ PreAffect: skip for locomotion  ││
+│  │ Noether SAFE: skip for locomotion││
+│  └──────────────────────────────────┘│
+└──────────────────────────────────────┘
+```
+
+三模式决策逻辑：
+- **EXPLOIT**: η < κ_thresh → 信任motor层，直接使用PPO/SAC动作
+- **EXPLORE**: η ≥ κ_thresh AND creative-probe触发 → IDO探索扰动
+- **SAFE**: Noether违规 → 保守策略，action clip ×0.8（point任务）/ ×1.0（locomotion）
+
+#### 核心类图更新
+
+```mermaid
+classDiagram
+    class HybridSB3IDOAgent {
+        +str agent_id
+        +GoalEML goal_eml
+        +object motor_agent
+        +float kappa_thresh
+        +bool is_locomotion
+        +int decision_interval
+        +choose_action(obs) ndarray
+        +step(obs) ndarray
+        +reset() None
+    }
+
+    class HybridDreamerIDOAgent {
+        +str agent_id
+        +GoalEML goal_eml
+        +object dreamer_agent
+        +float kappa_thresh
+        +bool is_locomotion
+        +choose_action(obs) ndarray
+        +step(obs) ndarray
+        +reset() None
+    }
+
+    class TaskPDController {
+        +dict TASK_CONTROLLER_MAP
+        +get_controller(task_name) object
+    }
+
+    HybridSB3IDOAgent --> GoalEML : uses
+    HybridSB3IDOAgent --> PsiAnchor : uses
+    HybridDreamerIDOAgent --> GoalEML : uses
+    HybridDreamerIDOAgent --> PsiAnchor : uses
+```
+
+---
+
+### v0.6.x 模块演进（步态PD控制器 + η mode分类）
+
+#### v0.6.0-v0.6.3 关键修改
+
+| 版本 | 文件 | 修改 |
+|------|------|------|
+| v0.6.0 | `core/goal_eml_mj.py` | 新增 `eta_mode` 参数（'locomotion'/'point'），影响η计算和Hybrid agent行为 |
+| v0.6.0 | `agent/task_pd_controllers.py` | WalkerWalkPD 3-phase (recovery→stabilize→walk)，CheetahRunPD bounding gait |
+| v0.6.3 | `agent/task_pd_controllers.py` | WalkerWalkPD v0.6.3: 添加高度PD + upright PD反馈 |
+| v0.6.5 | `webviz/server.py` | 修复5个dashboard bug（success rate, scene switching, task running, ee_pos shape, eta_weights） |
+| v0.6.6 | `webviz/server.py` | `/api/tasks` 新增 `eta_mode` 字段；dashboard η mode badge（point 🎯 / locomotion 🏃） |
+
+#### η mode 分类（9 locomotion, 16 point）
+
+| locomotion tasks (9) | point tasks (16) |
+|---------------------|------------------|
+| cheetah-run, walker-walk, walker-run, walker-stand, hopper-hop, humanoid-stand, humanoid-walk, humanoid-run, swimmer-swim6 | reacher-easy, reacher-hard, hopper-stand, cartpole-balance, ... |
+
+#### v0.6.6 模块关系图
+
+```mermaid
+graph TB
+    subgraph Agent_v066
+        HybridSB3["HybridSB3IDOAgent<br/>3-mode + locomotion bypass"]
+        TaskPD["TaskPDController<br/>WalkerWalkPD/CheetahRunPD/..."]
+    end
+    subgraph Core_v066
+        GoalEML["GoalEML<br/>+ eta_mode field"]
+        KappaSnap["κ-Snap"]
+        Noether["Noether-Check"]
+    end
+    HybridSB3 --> GoalEML
+    HybridSB3 --> KappaSnap
+    HybridSB3 --> Noether
+    HybridSB3 --> TaskPD
+```
+
+---
+
+### v0.7.x 模块演进（Hybrid物理修复 + SafeFuse locomotion绕过）
+
+#### v0.7.0-v0.7.1 关键修改
+
+| 版本 | 文件 | 修改 |
+|------|------|------|
+| v0.7.0 | `agent/hybrid_sb3_ido_agent.py` | Hybrid agent locomotion-aware: 减少Creative-Probe频率，放松SAFE阈值，偏好EXPLOIT |
+| v0.7.0 | `agent/task_pd_controllers.py` | HopperHopPD v0.7.0: 3-phase hopping gait (stance→flight→landing) |
+| v0.7.1 | `agent/mujoco_ido_agent.py` | **移除 phys.data.ctrl[:] = action** — env.step() 处理ctrl，choose_action不应直接写 |
+| v0.7.1 | `agent/mujoco_ido_agent.py` | **prev_data使用 phys.data.copy()** — Noether check之前用引用而非副本是no-op |
+| v0.7.1 | `agent/hybrid_sb3_ido_agent.py` | SafeFuse locomotion bypass: 对locomotion任务不触发L3_hard fuse (action×0.1) |
+
+#### v0.7.1 Benchmark Results
+
+| Task | Hybrid-PPO/PPO | Hybrid-SAC/SAC |
+|------|---------------|---------------|
+| cheetah-run | **1.04x** (was 0.21x, 5x improvement!) | — |
+| walker-walk | **1.15x** | **1.42x** |
+| humanoid-stand | **1.04x** | — |
+
+---
+
+### v0.8.0 模块演进（IDO/TOMAS v2升级）
+
+#### 新增模块
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `core/pre_affect.py` | ★ 新(v0.8.0) | P-Layer: PreAffect预感模块 + GRRR(Goal-Reactive Risk Rate)计算 |
+| `core/safe_fuse.py` | ★ 新(v0.8.0) | SafeFuse分级熔断: L1(warning)→L2(action×0.5)→L3_hard(action×0.1)→L4(recovery) |
+| `core/kappa_snap_mj.py` | ★ 修改(v0.8.0) | κ-Snap JSONL输出 + S-Bridge证据校验链 |
+| `core/eml_semzip_ic.py` | ★ 新(v0.8.0) | EML-SemZip信息压缩5阶段(IC压缩) |
+
+#### v0.8.0 模块关系图
+
+```mermaid
+graph TB
+    subgraph P_Layer_v080
+        PreAffect["PreAffect<br/>GRRR + risk_rate"]
+        SafeFuse["SafeFuse<br/>L1-L4 graded fuse"]
+    end
+    subgraph S_Bridge_v080
+        KappaSnapJSONL["κ-Snap JSONL<br/>evidence chain"]
+        SemZipIC["EML-SemZip IC<br/>5-stage compression"]
+    end
+    HybridSB3 --> PreAffect
+    HybridSB3 --> SafeFuse
+    HybridSB3 --> KappaSnapJSONL
+    HybridSB3 --> SemZipIC
+```
+
+#### v0.8.1 Bug修复
+
+- SafeFuse hard bypass restored for locomotion tasks
+- PreAffect GRRR disabled for locomotion tasks
+- Result: walker-walk Hybrid-SAC restored to 1.02x (was 0.60x in v0.8.0)
+
+---
+
+### v0.9.0 模块演进（DreamerV3适配器 + P5修复）
+
+#### 新增文件
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `baselines/dreamer_adapter.py` | ★ 新(v0.9.0) | DreamerV3 motor层适配器，20任务映射，SOTA参考数据，3种导入路径 |
+| `agent/hybrid_dreamer_ido_agent.py` | ★ 新(v0.9.0) | Hybrid IDO + DreamerV3智能体，三模式决策，无Noether SAFE override for locomotion |
+| `tests/test_v090.py` | ★ 新(v0.9.0) | 31个新测试（402 total pass） |
+| `third_party/r2dreamer/` | ★ 新(v0.9.0) | NM512/r2dreamer源码（ICLR 2026，PyTorch DreamerV3 reproduction，~5x faster） |
+
+#### P5修复（humanoid-stand Hybrid-SAC 0.02x → 0.91x）
+
+| 修改文件 | 修改内容 |
+|---------|---------|
+| `core/goal_eml_mj.py` | `make_humanoid_stand_eml()` 新增 `eta_mode='locomotion'` 参数（原缺省默认'point'） |
+| `agent/hybrid_sb3_ido_agent.py` | Step 7 Noether SAFE override bypass: `if not n_ok and not self.is_locomotion: primary_mode = noether_mode_override` |
+
+#### DreamerV3Adapter 架构
+
+```mermaid
+classDiagram
+    class DreamerV3Adapter {
+        +str task_name
+        +dict DMCONTROL_DREAMER_TASK_MAP
+        +dict DREAMER_SOTA_SCORES
+        +choose_action(obs) ndarray
+        +train(total_steps) dict
+        +train_cli() None
+        +evaluate(n_episodes) dict
+        +reset() None
+    }
+
+    class HybridDreamerIDOAgent {
+        +str agent_id
+        +GoalEML goal_eml
+        +DreamerV3Adapter dreamer_agent
+        +float kappa_thresh
+        +bool is_locomotion
+        +choose_action(obs) ndarray
+        +step(obs) ndarray
+        +reset() None
+    }
+
+    HybridDreamerIDOAgent --> DreamerV3Adapter : motor layer
+    HybridDreamerIDOAgent --> GoalEML : cognitive layer
+```
+
+#### r2dreamer third_party
+
+- 来源: https://github.com/NM512/r2dreamer (ICLR 2026 submission)
+- 核心文件: dreamer.py, train.py, trainer.py, networks.py, rssm.py, buffer.py
+- 配置: configs/dmc_proprio.yaml (510K steps, 16 envs, action_repeat=2)
+- **依赖**: Python 3.11 (`>=3.11,<3.12`) + torch 2.8.0
+- **当前限制**: 不兼容我们的 Python 3.13 + torch 2.12.1 venv，需创建独立 Python 3.11 venv
+
+#### v0.9.0 模块关系图
+
+```mermaid
+graph TB
+    subgraph Motor_Layers
+        SB3PPO["SB3PPOAdapter<br/>baselines/sb3_adapter.py"]
+        SB3SAC["SB3SACAdapter<br/>baselines/sb3_adapter.py"]
+        DreamerV3["DreamerV3Adapter<br/>baselines/dreamer_adapter.py"]
+        TDMPC2["TDMPC2Adapter<br/>baselines/tdmpc2_adapter.py"]
+    end
+    subgraph Hybrid_Agents
+        HybridSB3["HybridSB3IDOAgent<br/>agent/hybrid_sb3_ido_agent.py"]
+        HybridDreamer["HybridDreamerIDOAgent<br/>agent/hybrid_dreamer_ido_agent.py"]
+    end
+    subgraph IDO_Cognitive
+        GoalEML["GoalEML<br/>+ eta_mode"]
+        KappaSnap["κ-Snap"]
+        Noether["Noether-Check"]
+        PsiAnchor["ψ-Anchor"]
+        PreAffect["PreAffect"]
+        SafeFuse["SafeFuse"]
+    end
+    subgraph Third_Party
+        r2dreamer["r2dreamer<br/>third_party/r2dreamer/"]
+    end
+
+    HybridSB3 --> SB3PPO
+    HybridSB3 --> SB3SAC
+    HybridDreamer --> DreamerV3
+    DreamerV3 --> r2dreamer
+
+    HybridSB3 --> GoalEML
+    HybridSB3 --> KappaSnap
+    HybridSB3 --> Noether
+    HybridSB3 --> PsiAnchor
+    HybridSB3 --> PreAffect
+    HybridSB3 --> SafeFuse
+
+    HybridDreamer --> GoalEML
+    HybridDreamer --> KappaSnap
+    HybridDreamer --> Noether
+    HybridDreamer --> PsiAnchor
+```
+
+---
+
+*v0.9.0 update: 2026-07-03 — DreamerV3 adapter + HybridDreamerIDOAgent + P5 humanoid-stand fix + r2dreamer third_party*
 
 ---
 

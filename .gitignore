@@ -37,3 +37,12 @@ checkpoints/
 
 # Diagnostic test scripts (local-only, not for repo)
 test_walker_*.py
+
+# r2dreamer third_party cache and training runs
+third_party/r2dreamer/__pycache__/
+third_party/r2dreamer/runs/
+third_party/r2dreamer/*.egg-info/
+third_party/r2dreamer/.pytest_cache/
+
+# r2dreamer zip download artifact
+third_party/r2dreamer.zip
