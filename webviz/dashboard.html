@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.11.0</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.16.17</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -184,6 +184,59 @@
       margin-top: 2px;
     }
 
+    /* Bug 3: Baseline reference under metric cards */
+    .metric-baseline {
+      font-size: 0.6rem;
+      color: #64748b;
+      margin-top: 4px;
+      line-height: 1.3;
+    }
+    .metric-baseline .ido-target {
+      display: block;
+      color: #22c55e;
+      font-weight: 600;
+      font-size: 0.65rem;
+      margin-top: 2px;
+    }
+    .metric-baseline .ref-line {
+      color: #64748b;
+    }
+    .metric-baseline .hint-icon {
+      cursor: help;
+      color: #60a5fa;
+      font-size: 0.65rem;
+      margin-left: 2px;
+    }
+    .baseline-tooltip {
+      display: none;
+      position: absolute;
+      background: #1e293b;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.65rem;
+      color: #e2e8f0;
+      white-space: nowrap;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      max-width: 300px;
+      white-space: normal;
+    }
+    .metric-baseline:hover .baseline-tooltip {
+      display: block;
+    }
+    .sip-historical-badge {
+      display: inline-block;
+      font-size: 0.6rem;
+      font-weight: 600;
+      color: #f59e0b;
+      background: #78350f;
+      border: 1px solid #f59e0b;
+      border-radius: 4px;
+      padding: 1px 6px;
+      margin-left: 6px;
+    }
+
     /* Scene badge */
     .scene-badge {
       display: inline-block;
@@ -288,7 +341,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.6.5</span>
+      <span class="text-sm font-medium text-slate-400">v0.16.13</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -430,11 +483,75 @@
       <!-- ════════════ mjviser 3D Viewer Button ════════════ -->
       <div>
         <label class="label-sm mb-1 block" data-i18n="label_3d_vis">3D Visualization</label>
-        <button id="viewerBtn" class="btn-secondary" onclick="startViewer()" data-i18n="btn_open_viewer">
-          🎮 Open mjviser (8081)
-        </button>
-        <p class="hint-text" data-i18n="hint_3d_vis">Opens a 3D physics viewer in a new browser tab. The humanoid will walk through the selected scene terrain.</p>
+        <div class="flex gap-2">
+          <button id="viewerBtn" class="btn-secondary" onclick="startViewer()" data-i18n="btn_open_viewer">
+            🎮 Open mjviser
+          </button>
+          <button id="closeViewerBtn" class="btn-secondary" onclick="closeViewer()" style="font-size:0.8rem;">
+            ✖ Close
+          </button>
+        </div>
+        <p class="hint-text" data-i18n="hint_3d_vis">Opens a 3D physics viewer in a new browser tab. Select scene type, then click Open. Close button fully stops the viewer server.</p>
         <span id="viewerStatus" class="label-sm mt-1 block"></span>
+        <p class="hint-text" data-i18n="hint_3d_vis_controls" style="margin-top:4px;">
+          🎮 Direction control (◀ ▲ ▶ ■) and mjviser buttons (Play/Step/Pause) are inside the 3D viewer tab.
+        </p>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-slate-600 my-1"></div>
+
+      <!-- ════════════ SO-ARM100 Independent Panel ════════════ -->
+      <div>
+        <label class="label-sm mb-1 block" style="color: #38bdf8; font-weight: 600;">🦾 SO-ARM100 机械臂 (独立系统)</label>
+        <p class="hint-text" style="margin-bottom: 6px;">6-DOF pick-and-place with TOMAS IDO audit (ψ-Anchor + κ-Snap). Independent from humanoid — no scene switching needed.</p>
+        <div class="flex gap-2">
+          <button id="arm100StartBtn" class="btn-secondary" onclick="startArm100()" style="background: #1e3a5f;">
+            🦾 Open ARM100
+          </button>
+          <button id="arm100CloseBtn" class="btn-secondary" onclick="stopArm100()" style="font-size:0.8rem;">
+            ✖ Close
+          </button>
+        </div>
+        <span id="arm100Status" class="label-sm mt-1 block"></span>
+
+        <!-- v0.16.17: ARM100 Joint Control Panel (shown after viewer starts) -->
+        <div id="arm100ControlPanel" style="display: none; margin-top: 8px; padding: 6px; border: 1px solid #334155; border-radius: 4px;">
+          <label class="label-sm mb-1 block" style="color: #38bdf8;" data-i18n="label_arm_control">关节控制</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 4px;">
+            <button class="btn-sm" onclick="arm100Home()" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">🏠 Home</button>
+            <button class="btn-sm" onclick="arm100Gripper('open')" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">🖐 Open</button>
+            <button class="btn-sm" onclick="arm100Gripper('close')" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">✊ Close</button>
+            <button class="btn-sm" onclick="arm100Auto()" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">🔄 Auto</button>
+          </div>
+          <!-- VLA -->
+          <div style="margin-top: 6px;">
+            <label class="label-sm" style="color: #a78bfa;" data-i18n="label_vla_model">VLA 模型</label>
+            <select id="vlaModelSelect" style="width:100%; font-size:0.75rem; margin-top:2px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 2px;" onchange="arm100VlaLoad()">
+              <option value="none">None (Auto mode)</option>
+              <option value="openvla-7b">OpenVLA-7B</option>
+              <option value="octo-base">Octo</option>
+              <option value="pi0-base">π₀ (Pi-Zero)</option>
+            </select>
+            <input type="text" id="vlaInstruction" placeholder="pick up the red cube"
+                   style="width:100%; font-size:0.75rem; margin-top:2px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 2px;"
+                   onchange="arm100VlaLoad()">
+          </div>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-slate-600 my-1"></div>
+
+      <!-- ════════════ v0.16.17: Speed Control ════════════ -->
+      <div class="control-panel" style="margin-bottom: 10px;">
+        <label class="label-sm mb-1 block" style="color: #fbbf24; font-weight: 600;" data-i18n="label_sim_speed">仿真速度</label>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+          <input type="range" id="speedSlider" min="1" max="63" step="1" value="1"
+                 style="flex: 1; accent-color: #fbbf24;"
+                 oninput="updateSpeed(this.value)">
+          <span id="speedDisplay" class="value-sm font-mono text-amber-400" style="min-width: 40px; text-align: right;">1x</span>
+        </div>
       </div>
 
       <!-- Divider -->
@@ -481,30 +598,55 @@
           <div class="card-header" data-i18n="metric_episode_return">Episode Return</div>
           <div id="metricReturn" class="value-lg font-mono text-emerald-400">0.00</div>
           <div class="hint-text" data-i18n="hint_metric_return">Cumulative reward per episode</div>
+          <div id="baselineReturn" class="metric-baseline">
+            <span class="baseline-text"><span class="ref-line">参考：PPO ~200 / SAC ~200</span><span class="ido-target">IDO 目标：&gt;300</span></span>
+            <span class="hint-icon">ⓘ</span>
+            <div class="baseline-tooltip">PPO/SAC 100k 后 ~200，IDO 目标 &gt;300</div>
+          </div>
         </div>
         <!-- Metric 2: Success Rate -->
         <div class="card text-center">
           <div class="card-header" data-i18n="metric_success_rate">Success Rate</div>
           <div id="metricSuccess" class="value-lg font-mono text-blue-400">0%</div>
           <div class="hint-text" data-i18n="hint_metric_success">Task goal achieved ratio</div>
+          <div id="baselineSuccess" class="metric-baseline">
+            <span class="baseline-text"><span class="ref-line">参考：PPO ~50% / SAC ~50%</span><span class="ido-target">IDO 目标：&gt;70%</span></span>
+            <span class="hint-icon">ⓘ</span>
+            <div class="baseline-tooltip">PPO 100k 后 ~50%，IDO 目标 &gt;70%</div>
+          </div>
         </div>
         <!-- Metric 3: η (EML Residual) -->
         <div class="card text-center">
           <div class="card-header" data-i18n="metric_eta">η (EML Residual)</div>
           <div id="metricEta" class="value-lg font-mono text-yellow-400">—</div>
           <div class="hint-text" data-i18n="hint_metric_eta">Lower = closer to goal</div>
+          <div id="baselineEta" class="metric-baseline">
+            <span class="baseline-text"><span class="ref-line">参考：PPO ~0.8</span><span class="ido-target">IDO 目标：&lt;0.5</span></span>
+            <span class="hint-icon">ⓘ</span>
+            <div class="baseline-tooltip">越低越好，&lt;0.5 表明 η 接近目标</div>
+          </div>
         </div>
         <!-- Metric 4: NVR (Noether Violation Rate) -->
         <div class="card text-center">
           <div class="card-header" data-i18n="metric_nvr">NVR</div>
           <div id="metricNVR" class="value-lg font-mono text-red-400">0</div>
           <div class="hint-text" data-i18n="hint_metric_nvr">Noether violations count</div>
+          <div id="baselineNVR" class="metric-baseline">
+            <span class="baseline-text"><span class="ref-line">参考：PPO ~12</span><span class="ido-target">IDO 目标：&lt;2</span></span>
+            <span class="hint-icon">ⓘ</span>
+            <div class="baseline-tooltip">传统 RL ~12 次违规，IDO 目标 &lt;2</div>
+          </div>
         </div>
         <!-- Metric 5: SER (Snap Efficiency Ratio) -->
         <div class="card text-center">
           <div class="card-header" data-i18n="metric_ser">SER</div>
           <div id="metricSER" class="value-lg font-mono text-purple-400">—</div>
           <div class="hint-text" data-i18n="hint_metric_ser">Snap Efficiency Ratio</div>
+          <div id="baselineSER" class="metric-baseline">
+            <span class="baseline-text"><span class="ref-line">参考：PPO ~0.45</span><span class="ido-target">IDO 目标：&gt;0.8</span></span>
+            <span class="hint-icon">ⓘ</span>
+            <div class="baseline-tooltip">Snap 效率，&gt;0.8 表示高效</div>
+          </div>
         </div>
       </div>
 
@@ -570,6 +712,11 @@
           <div>
             <span class="label-sm" data-i18n="label_epiplexity">Epiplexity</span>
             <span id="epiplexityValue" class="value-md font-mono text-yellow-400">0.00</span>
+            <div id="baselineEpiplexity" class="metric-baseline" style="margin-top: 4px;">
+              <span class="baseline-text"><span class="ref-line">参考：PPO/SAC N/A</span><span class="ido-target">IDO 目标：&gt;200</span></span>
+              <span class="hint-icon">ⓘ</span>
+              <div class="baseline-tooltip">PPO/SAC 无 ψ-Anchor 不计算 epiplexity；IDO 目标 >200</div>
+            </div>
           </div>
         </div>
         <div class="mt-3">
@@ -637,6 +784,11 @@
             <span class="label-sm" data-i18n="label_cq_sentient">CQ Sentient</span>
             <span id="cqSentient" class="value-md font-mono text-red-400">0.000</span>
           </div>
+        </div>
+        <div id="baselineCQ" class="metric-baseline" style="margin-top: 4px;">
+          <span class="baseline-text"><span class="ref-line">参考：PPO ~0.15 / SAC ~0.20</span><span class="ido-target">IDO 目标：&gt;0.80</span></span>
+          <span class="hint-icon">ⓘ</span>
+          <div class="baseline-tooltip">PPO/SAC 无良知框架 CQ~0.15；IDO 目标 >0.80</div>
         </div>
         <div class="mt-3 flex items-center gap-2">
           <span class="label-sm" data-i18n="label_cq_compliance">Compliance Status:</span>
@@ -835,6 +987,10 @@
         hint_kappa_thresh: '当 η < δ_K 时，κ-Snap 触发 PD 稳定（代理"锁定"到目标）。较低的值要求更高的精度。',
         hint_3d_scene: "场景决定 mjviser 中加载的 3D 地形。选择与任务难度匹配的地形。",
         hint_3d_vis: "在新浏览器标签页中打开3D物理可视化器。人形机器人将在选定场景地形中行走。",
+        hint_3d_vis_controls: "🎮 方向控制 (◀ ▲ ▶ ■) 和 mjviser 按钮 (Play/Step/Pause) 都在 3D 可视化器页面内。",
+        hint_play: "▶ Play = 连续播放物理模拟",
+        hint_step: "⏭ Step = 单步执行（每按一次前进一帧）",
+        hint_pause: "⏸ Pause = 暂停模拟",
         hint_start_run: "启动 IDO 代理在所选任务上进行配置数量的回合评估。",
         hint_stop_run: "优雅地停止当前基准运行。代理完成当前步骤后才会停止。",
         hint_run_status: "显示实时进度：当前回合、步数，以及代理是否正在运行或空闲。",
@@ -856,7 +1012,10 @@
         hint_metric_nvr: "Noether 违规次数",
         metric_ser: "SER",
         hint_metric_ser: "Snap 效率比",
-        // ── v0.6.1: η Mode ──
+        // ── v0.16.10: SIP historical + baseline labels ──
+        sip_last_result: "上次结果",
+        sip_historical: "历史数据",
+        baseline_ref_label: "参考",
         card_eta_mode: "η Mode (目标类型)",
         label_eta_mode_type: "η 计算模式",
         label_eta_target_desc: "目标描述",
@@ -865,6 +1024,10 @@
         label_target_speed: "目标速度",
         label_target_height: "目标高度",
         label_target_upright: "目标姿态",
+        // ── v0.16.17 ──
+        label_sim_speed: "仿真速度",
+        label_arm_control: "关节控制",
+        label_vla_model: "VLA 模型",
       },
       en: {
         dashboard_title: "MuJoCo-Bench-IDO",
@@ -954,6 +1117,10 @@
         hint_kappa_thresh: "When η < δ_K, κ-Snap triggers PD stabilization (the agent \"snaps\" to goal). Lower values demand higher precision.",
         hint_3d_scene: "Scene determines the 3D terrain loaded in mjviser. Choose terrain that matches your task difficulty.",
         hint_3d_vis: "Opens a 3D physics viewer in a new browser tab. The humanoid will walk through the selected scene terrain.",
+        hint_3d_vis_controls: "🎮 Direction control (◀ ▲ ▶ ■) and mjviser buttons (Play/Step/Pause) are inside the 3D viewer tab.",
+        hint_play: "▶ Play = continuous simulation",
+        hint_step: "⏭ Step = advance one physics frame",
+        hint_pause: "⏸ Pause = freeze simulation",
         hint_start_run: "Launches the IDO agent on the selected task for the configured number of episodes.",
         hint_stop_run: "Gracefully stops the current benchmark run. The agent completes the current step before halting.",
         hint_run_status: "Shows real-time progress: current episode, step count, and whether the agent is running or idle.",
@@ -975,6 +1142,10 @@
         hint_metric_nvr: "Noether violations count",
         metric_ser: "SER",
         hint_metric_ser: "Snap Efficiency Ratio",
+        // ── v0.16.10: SIP historical + baseline labels ──
+        sip_last_result: "Last result",
+        sip_historical: "Historical",
+        baseline_ref_label: "Ref",
         // ── v0.6.1: η Mode ──
         card_eta_mode: "η Mode (Goal Type)",
         label_eta_mode_type: "η Computation Mode",
@@ -984,6 +1155,10 @@
         label_target_speed: "Target Speed",
         label_target_height: "Target Height",
         label_target_upright: "Target Upright",
+        // ── v0.16.17 ──
+        label_sim_speed: "Simulation Speed",
+        label_arm_control: "Joint Control",
+        label_vla_model: "VLA Model",
       }
     };
 
@@ -1059,6 +1234,9 @@
     let totalEpisodes = 0;
     let maxStepsForRun = 1000;
     let currentScene = 'plain';
+    let currentSipPhase = '';       // v0.16.11: Track SIP phase (T0/T1/T2)
+    let userEpisodes = 0;           // v0.16.11: User-set episode count (for SIP display)
+    let sipTotalEpisodes = 0;       // v0.16.11: Expanded total for SIP progress bar
 
     // ── Scene name mapping for badge ──
     const sceneBadgeKeys = {
@@ -1214,9 +1392,17 @@
           totalEpisodes = data.episodes;
           maxStepsForRun = data.max_steps;
           currentEtaMode = data.eta_mode || 'point';
+          currentSipPhase = '';
+          userEpisodes = data.user_episodes || data.episodes;
+          sipTotalEpisodes = data.sip_total_episodes || data.episodes;
           updateEtaModeUI(currentEtaMode);
           updateRunningUI(true);
-          addLog(`Run started: ${data.task}, ${data.episodes} episodes, max_steps=${data.max_steps}, mode=${data.eval_mode}`);
+          // v0.16.11: Show SIP phase info if available
+          if (data.eval_mode === 'sip' && data.user_episodes) {
+            addLog(`Run started: ${data.task}, SIP-Bench ${data.user_episodes} episodes × ${data.sip_evolution_rounds + 2} phases = ${data.sip_total_episodes} total (${data.sip_phase_breakdown}), max_steps=${data.max_steps}`);
+          } else {
+            addLog(`Run started: ${data.task}, ${data.episodes} episodes, max_steps=${data.max_steps}, mode=${data.eval_mode}`);
+          }
           clearChartData();
           if (data.eval_mode === 'sip') {
             document.getElementById('sipPanel').style.display = '';
@@ -1257,12 +1443,30 @@
           break;
 
         case 'sip_phase_start':
+          currentSipPhase = data.phase;  // v0.16.11: Track current phase
           document.getElementById('sipPhaseIndicator').textContent = `Phase ${data.phase}`;
+
+        case 'tomas_violation':
+          // v0.16.14: SO-ARM100 ψ-Anchor violation
+          addLog(`⚠️ TOMAS ψ-violation: ${data.violation} at step ${data.step} (${data.phase}, η=${data.eta?.toFixed(3)})`);
+          break;
+
+        case 'tomas_update':
+          // v0.16.14: SO-ARM100 periodic status update
+          if (data.step % 200 === 0) {
+            addLog(`🤖 SO-ARM100: step=${data.step}, phase=${data.phase}, η=${data.eta?.toFixed(3)}, violations=${data.violations}`);
+          }
+          break;
           addLog(`SIP-Bench phase ${data.phase} started`);
           break;
 
         case 'sip_phase_step':
           addLog(`SIP ${data.phase} episode ${data.episode} complete: steps=${data.metrics.steps_to_goal}, η=${data.metrics.final_eta.toFixed(4)}`);
+          break;
+
+        case 'sip_phase_complete':
+          updateSIPPhaseResult(data.phase, data.summary);
+          addLog(`SIP phase ${data.phase} complete: avg_eta=${data.summary.avg_eta.toFixed(4)}, avg_steps=${data.summary.avg_steps.toFixed(1)}, NV=${data.summary.noether_violations}`);
           break;
 
         case 'sip_evolution':
@@ -1386,7 +1590,14 @@
         motorChart.update('none');
       }
 
-      document.getElementById('currentEpisode').textContent = `${episode} / ${totalEpisodes}`;
+      // v0.16.11: Show SIP phase info in episode display
+      if (currentSipPhase && sipTotalEpisodes > 0 && userEpisodes > 0 && userEpisodes !== sipTotalEpisodes) {
+        // SIP mode: show "T1 · 2/3 (总: 5/15)"
+        const phaseEp = ((episode - 1) % userEpisodes) + 1;
+        document.getElementById('currentEpisode').textContent = `${currentSipPhase} ${phaseEp}/${userEpisodes} (总 ${episode}/${sipTotalEpisodes})`;
+      } else {
+        document.getElementById('currentEpisode').textContent = `${episode} / ${totalEpisodes}`;
+      }
       document.getElementById('currentStep').textContent = step;
 
       const epProgress = (episode / totalEpisodes) * 100;
@@ -1538,6 +1749,38 @@
       indicatorEl.style.color = '#22c55e';
     }
 
+    // ── Bug 1 Fix: Real-time SIP phase result update ──
+    // Updates a single phase row (T0/T1/T2) as soon as that phase completes,
+    // instead of waiting for all 3 phases to finish.
+    function updateSIPPhaseResult(phase, summary) {
+      if (!phase || !summary) return;
+      const phaseKey = phase; // "T0", "T1", "T2"
+
+      // Update the three cells for this phase
+      const etaEl = document.getElementById('sip' + phaseKey + 'Eta');
+      const stepsEl = document.getElementById('sip' + phaseKey + 'Steps');
+      const nvEl = document.getElementById('sip' + phaseKey + 'NV');
+
+      if (etaEl) {
+        etaEl.textContent = (summary.avg_eta || 0).toFixed(4);
+        etaEl.style.color = '#22c55e';
+      }
+      if (stepsEl) {
+        stepsEl.textContent = (summary.avg_steps || 0).toFixed(1);
+        stepsEl.style.color = '#22c55e';
+      }
+      if (nvEl) {
+        nvEl.textContent = summary.noether_violations || 0;
+        nvEl.style.color = '#22c55e';
+      }
+
+      // Update phase indicator
+      const indicatorEl = document.getElementById('sipPhaseIndicator');
+      indicatorEl.textContent = phase + ' ✓';
+      indicatorEl.style.background = '#1e3a5f';
+      indicatorEl.style.color = '#60a5fa';
+    }
+
     // ── Clear Chart Data for New Run ──
     function clearChartData() {
       etaDatasets = {};
@@ -1673,21 +1916,185 @@
     }
 
     function startViewer() {
+      const dict = i18nDict[currentLang];
+      const btn = document.getElementById('viewerBtn');
+      const oldText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⏳ ' + (currentLang === 'zh' ? '启动中...' : 'Starting...');
+
       fetch('/api/start_viewer', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
-        const dict = i18nDict[currentLang];
-        if (data.error) {
-          addLog(data.error);
-          document.getElementById('viewerStatus').textContent = data.error;
+        btn.disabled = false;
+        btn.innerHTML = oldText;
+
+        if (data.status === 'error' || data.status === 'timeout') {
+          const errMsg = data.error || 'Unknown error';
+          addLog(`❌ mjviser: ${errMsg}`);
+          document.getElementById('viewerStatus').textContent = '❌ ' + errMsg;
+        } else if (data.status === 'already_running') {
+          addLog(`mjviser already running at ${data.url}`);
+          document.getElementById('viewerStatus').textContent = `${dict.viewer_already_running}: ${data.url}`;
+          window.open(data.url, '_blank');
         } else {
-          addLog(`mjviser starting at ${data.url}`);
-          document.getElementById('viewerStatus').textContent = `${dict.viewer_opening} ${data.url}...`;
+          // status === 'running'
+          addLog(`✅ mjviser running at ${data.url}`);
+          document.getElementById('viewerStatus').textContent = `✅ ${data.url}`;
           window.open(data.url, '_blank');
         }
       })
       .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = oldText;
         addLog(`Viewer request error: ${err.message}`);
+      });
+    }
+
+    // v0.16.14: Close mjviser — fully stops the ViserServer (frees port for next open)
+    function closeViewer() {
+      fetch('/api/stop_viewer', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        addLog('🔌 mjviser viewer closed (server stopped)');
+        document.getElementById('viewerStatus').textContent =
+          currentLang === 'zh' ? '已关闭' : 'Closed';
+      })
+      .catch(err => {
+        addLog(`Close viewer error: ${err.message}`);
+      });
+    }
+
+    // ═══ v0.16.15: SO-ARM100 Independent Viewer ═══
+    function startArm100() {
+      const btn = document.getElementById('arm100StartBtn');
+      const oldText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⏳ 启动中...';
+
+      fetch('/api/arm100/start', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = oldText;
+
+        if (data.status === 'error' || data.status === 'timeout') {
+          const errMsg = data.error || 'Unknown error';
+          addLog(`❌ SO-ARM100: ${errMsg}`);
+          document.getElementById('arm100Status').textContent = '❌ ' + errMsg;
+        } else if (data.status === 'already_running') {
+          addLog(`SO-ARM100 already running at ${data.url}`);
+          document.getElementById('arm100Status').textContent = `✅ ${data.url}`;
+          window.open(data.url, '_blank');
+          document.getElementById('arm100ControlPanel').style.display = 'block';
+        } else {
+          addLog(`✅ SO-ARM100 viewer running at ${data.url}`);
+          document.getElementById('arm100Status').textContent = `✅ ${data.url}`;
+          window.open(data.url, '_blank');
+          document.getElementById('arm100ControlPanel').style.display = 'block';
+        }
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = oldText;
+        addLog(`SO-ARM100 request error: ${err.message}`);
+      });
+    }
+
+    function stopArm100() {
+      fetch('/api/arm100/stop', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        addLog('🔌 SO-ARM100 viewer closed');
+        document.getElementById('arm100Status').textContent =
+          currentLang === 'zh' ? '已关闭' : 'Closed';
+        document.getElementById('arm100ControlPanel').style.display = 'none';
+      })
+      .catch(err => {
+        addLog(`Close SO-ARM100 error: ${err.message}`);
+      });
+    }
+
+    // ═══ v0.16.17: Speed Control ═══
+    function updateSpeed(val) {
+      document.getElementById('speedDisplay').textContent = val + 'x';
+      fetch('/api/viewer_speed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({speed: parseInt(val)})
+      });
+    }
+
+    // ═══ v0.16.17: ARM100 Joint Control ═══
+    function arm100Home() {
+      fetch('/api/arm100/home', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => addLog(`🏠 ARM100 home: ${d.pose ? d.pose.slice(0,5).map(v=>v.toFixed(2)) : 'N/A'}`))
+        .catch(e => addLog(`ARM100 home error: ${e.message}`));
+    }
+
+    function arm100Gripper(action) {
+      fetch('/api/arm100/gripper', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: action})
+      })
+        .then(r => r.json())
+        .then(d => addLog(`${action === 'open' ? '🖐' : '✊'} ARM100 gripper: ${action}`))
+        .catch(e => addLog(`ARM100 gripper error: ${e.message}`));
+    }
+
+    function arm100Auto() {
+      fetch('/api/arm100/control', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: 'auto'})
+      })
+        .then(r => r.json())
+        .then(d => addLog(`🔄 ARM100 auto mode`))
+        .catch(e => addLog(`ARM100 auto error: ${e.message}`));
+    }
+
+    function arm100VlaLoad() {
+      const model = document.getElementById('vlaModelSelect').value;
+      const instruction = document.getElementById('vlaInstruction').value || 'pick up the red cube';
+      if (model === 'none') {
+        fetch('/api/arm100/vla/unload', {method: 'POST'})
+          .then(r => r.json())
+          .then(d => addLog(`🔄 VLA unloaded, auto mode`))
+          .catch(e => addLog(`VLA unload error: ${e.message}`));
+      } else {
+        fetch('/api/arm100/vla/load', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({model: model, instruction: instruction})
+        })
+          .then(r => r.json())
+          .then(d => {
+            if (d.loaded) addLog(`🧠 VLA loaded: ${model}, instruction: "${instruction}"`);
+            else addLog(`❌ VLA load failed: ${d.error}`);
+          })
+          .catch(e => addLog(`VLA load error: ${e.message}`));
+      }
+    }
+
+    // v0.16.10: Send direction control command to robot in 3D viewer
+    function sendViewerCommand(action) {
+      fetch('/api/viewer_control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action }),
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          addLog(`⚠️ Robot control: ${data.error}`);
+        } else {
+          const dirDeg = (data.direction_deg || 0).toFixed(0);
+          addLog(`🤖 Robot: ${data.action}, dir=${dirDeg}°, speed=${data.speed}`);
+        }
+      })
+      .catch(err => {
+        addLog(`Robot control error: ${err.message}`);
       });
     }
 
@@ -1812,8 +2219,14 @@
       updateEtaModeBadge(taskSelect.value);
       taskSelect.addEventListener('change', function() {
         updateEtaModeBadge(this.value);
+        // Bug 3: Refresh baseline reference when task changes
+        loadBaselineReference(this.value);
       });
-      addLog('Dashboard initialized v0.6.6');
+      // Bug 2: Load last SIP result on page load
+      loadSIPHistory();
+      // Bug 3: Load baseline reference for initial task
+      loadBaselineReference(taskSelect.value);
+      addLog('Dashboard initialized v0.16.16');
     });
 
     // ── v0.6.6: Update η mode badge when task changes ──
@@ -1832,6 +2245,110 @@
       currentEtaMode = mode;
       // Also update the η Mode card
       updateEtaModeDisplay(mode);
+    }
+
+    // ── Bug 2 Fix: Load last SIP result on page load ──
+    function loadSIPHistory() {
+      fetch('/api/sip_history')
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.sip_history && data.sip_history.length > 0) {
+            const lastSip = data.sip_history[0]; // newest
+            const ageMs = Date.now() - (lastSip.timestamp * 1000);
+            const ageHours = ageMs / (1000 * 3600);
+
+            // Always fill the SIP table with the last result
+            if (lastSip.sip_result) {
+              updateSIPResults(lastSip.sip_result);
+              // Show the SIP panel even if toggle is off
+              document.getElementById('sipPanel').style.display = 'block';
+
+              // Add historical badge if older than 24h
+              const indicatorEl = document.getElementById('sipPhaseIndicator');
+              if (ageHours >= 24) {
+                indicatorEl.innerHTML = (currentLang === 'zh' ? '历史数据' : 'Historical') +
+                  ' <span class="sip-historical-badge">' + ageHours.toFixed(0) + 'h ago</span>';
+                indicatorEl.style.background = '#78350f';
+                indicatorEl.style.color = '#f59e0b';
+              } else {
+                indicatorEl.textContent = (currentLang === 'zh' ? '上次结果' : 'Last result') +
+                  ' (' + ageHours.toFixed(1) + 'h)';
+                indicatorEl.style.background = '#1e3a5f';
+                indicatorEl.style.color = '#60a5fa';
+              }
+
+              const langMsg = currentLang === 'zh'
+                ? `已加载上次 SIP 结果（${ageHours.toFixed(1)}h 前，任务：${lastSip.task}）`
+                : `Loaded last SIP result from ${ageHours.toFixed(1)}h ago (${lastSip.task})`;
+              addLog(langMsg);
+            }
+          }
+        })
+        .catch(err => {
+          // Silent fail — no SIP history is normal on first run
+        });
+    }
+
+    // ── Bug 3 Fix: Load baseline reference for metric cards ──
+    function loadBaselineReference(taskName) {
+      const task = taskName || document.getElementById('taskSelect').value;
+      fetch('/api/baseline_reference?task=' + encodeURIComponent(task))
+        .then(r => r.json())
+        .then(data => {
+          if (!data.baseline) return;
+          const b = data.baseline;
+          const isZh = currentLang === 'zh';
+          const refLabel = isZh ? '参考' : 'Ref';
+
+          // Helper to format baseline text
+          function formatBaseline(metricKey) {
+            const m = b[metricKey];
+            if (!m) return null;
+            const ppo = m.PPO_100k !== undefined ? m.PPO_100k : (m.PPO_avg !== undefined ? m.PPO_avg : '—');
+            const sac = m.SAC_100k !== undefined ? m.SAC_100k : '—';
+            const ido = m.IDO_target !== undefined ? m.IDO_target : '—';
+            // v0.16.10: IDO target on its own highlighted line, PPO/SAC as secondary ref
+            // v0.16.16: Handle N/A values (e.g. epiplexity has no PPO/SAC baseline)
+            let refText;
+            if (ppo === 'N/A' && sac === 'N/A') {
+              refText = isZh ? '参考：PPO/SAC N/A' : 'Ref: PPO/SAC N/A';
+            } else {
+              refText = isZh ? `参考：PPO ~${ppo} / SAC ~${sac}` : `Ref: PPO ~${ppo} / SAC ~${sac}`;
+            }
+            const idoText = isZh ? `IDO 目标：${ido}` : `IDO Target: ${ido}`;
+            return { text: refText, idoText: idoText, tooltip: m.interpretation || '' };
+          }
+
+          // Update each metric card's baseline
+          const metricMap = {
+            'baselineReturn': 'episode_return',
+            'baselineSuccess': 'success_rate',
+            'baselineEta': 'H_EML_residual',
+            'baselineNVR': 'noether_violations',
+            'baselineSER': 'snap_efficiency',
+            'baselineEpiplexity': 'epiplexity',
+            'baselineCQ': 'cq_overall',
+          };
+
+          for (const [elId, metricKey] of Object.entries(metricMap)) {
+            const el = document.getElementById(elId);
+            if (!el) continue;
+            const formatted = formatBaseline(metricKey);
+            if (formatted) {
+              el.style.display = 'block';
+              const textEl = el.querySelector('.baseline-text');
+              const tooltipEl = el.querySelector('.baseline-tooltip');
+              if (textEl) {
+                // v0.16.10: Show PPO/SAC ref + IDO target on separate highlighted line
+                textEl.innerHTML = `<span class="ref-line">${formatted.text}</span><span class="ido-target">${formatted.idoText}</span>`;
+              }
+              if (tooltipEl) tooltipEl.textContent = formatted.tooltip;
+            }
+          }
+        })
+        .catch(err => {
+          // Silent fail
+        });
     }
   </script>
 

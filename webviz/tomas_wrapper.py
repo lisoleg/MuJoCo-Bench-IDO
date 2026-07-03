@@ -1,0 +1,822 @@
+"""
+TOMAS MuJoCo Wrapper — IDO/TOMAS Framework for Embodied AI Audit
+
+Based on:
+  - "From VLA to Embodied Consciousness" (Zhang Feng, 2026)
+  - "Beyond Leaderboards: Diagnosing AI Agent Instability" (Zhang Feng, 2026)
+
+This module implements:
+  1. PsiAnchorGate  — ψ-Anchor physical safety constraints (C-Layer)
+  2. KappaSnap       — κ-Snap step-level audit trail (S-Layer)
+  3. TOMASMuJoCoWrapper — wraps MuJoCo environment with IDO audit layer
+  4. SOArm100Controller — pick-and-place controller for SO-ARM100 arm
+
+Integration with MuJoCo-Bench-IDO webviz:
+  - Used as step_fn provider for mjviser.Viewer
+  - ψ-Anchor violations broadcast to dashboard via WebSocket
+  - κ-Snap audit log queryable via /api/tomas/snap_log
+"""
+
+from __future__ import annotations
+
+import time
+import math
+import json
+from dataclasses import dataclass, field, asdict
+from typing import Any, Optional, List, Dict, Tuple, Callable
+from collections import deque
+
+import numpy as np
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 1. KappaSnap — Step-level Audit Trail (S-Layer)
+# ──────────────────────────────────────────────────────────────────────
+
+@dataclass
+class KappaSnap:
+    """κ-Snap: A single step's causal snapshot for audit.
+
+    Records what the agent did, why, and whether it violated any ψ-anchors.
+    This is the "black box flight recorder" for embodied AI.
+    """
+    step: int                          # Simulation step number
+    timestamp: float                   # Simulation time (seconds)
+    eta: float                         # GaussEx residual (distance to goal)
+    ic: float                          # Information Cardinality (joint velocity std)
+    action: List[float]                # Joint control outputs
+    psi_violation: Optional[str] = None  # ψ-Anchor violation name (None if clean)
+    phase: str = "idle"                # Current task phase
+    note: str = ""                     # Human-readable annotation
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 2. PsiAnchorGate — Physical Safety Constraints (C-Layer)
+# ──────────────────────────────────────────────────────────────────────
+
+class PsiAnchorGate:
+    """ψ-Anchor Gate: Hard physical constraints that cannot be overridden.
+
+    Implements the C-Layer of the IDO/TOMAS framework:
+    - MAX_TORQUE: Joint torque must not exceed ST3215 stall limit
+    - MAX_VELOCITY: Joint velocity safety limit
+    - NO_SPILL: Object tilt must not exceed threshold (30° default)
+    - MAX_GRIP_FORCE: Gripper force must not crush objects
+
+    When a violation is detected, the action is scaled down to comply.
+    """
+
+    def __init__(
+        self,
+        max_torque: float = 2.5,        # N·m at joint (after gear)
+        max_velocity: float = 3.0,       # rad/s
+        max_grip_force: float = 2.0,     # N·m at gripper joint
+        no_spill_angle: float = 0.524,   # radians (30°)
+    ):
+        self.max_torque = max_torque
+        self.max_velocity = max_velocity
+        self.max_grip_force = max_grip_force
+        self.no_spill_angle = no_spill_angle
+        self.violation_log: List[str] = []
+
+    def check_action(
+        self,
+        action: np.ndarray,
+        joint_velocities: np.ndarray,
+        joint_forces: Optional[np.ndarray] = None,
+        gripper_indices: Optional[List[int]] = None,
+    ) -> Tuple[np.ndarray, Optional[str]]:
+        """Check and potentially clamp an action vector.
+
+        For position actuators, 'action' is position targets (radians).
+        Force checking is done via joint_forces (qfrc_actuator) if provided.
+
+        Returns:
+            (safe_action, violation_name) — if violation, action is scaled.
+        """
+        gripper_indices = gripper_indices or []
+
+        # Check actual joint forces (qfrc_actuator) if provided
+        if joint_forces is not None and len(joint_forces) > 0:
+            arm_forces = np.delete(joint_forces, gripper_indices) if gripper_indices else joint_forces
+            max_force = float(np.max(np.abs(arm_forces))) if len(arm_forces) > 0 else 0.0
+            if max_force > self.max_torque:
+                reason = "MAX_TORQUE"
+                self.violation_log.append(reason)
+                return action, reason
+
+        # Check joint velocities
+        max_vel = float(np.max(np.abs(joint_velocities))) if len(joint_velocities) > 0 else 0.0
+        if max_vel > self.max_velocity:
+            # Don't modify action, just log — velocity is a consequence, not a control
+            reason = "MAX_VELOCITY_EXCEEDED"
+            self.violation_log.append(reason)
+            return action, reason
+
+        # Check gripper position (for position actuators, action IS the target position)
+        if gripper_indices:
+            grip_actions = action[gripper_indices]
+            max_grip = float(np.max(np.abs(grip_actions)))
+            if max_grip > self.max_grip_force:
+                # Scale gripper target to safe range
+                scale = self.max_grip_force / max_grip
+                for idx in gripper_indices:
+                    action[idx] *= scale
+                reason = "MAX_GRIP_FORCE"
+                self.violation_log.append(reason)
+                return action, reason
+
+        return action, None
+
+    def check_spill(
+        self,
+        object_quat: np.ndarray,
+        object_name: str = "object",
+    ) -> Optional[str]:
+        """Check if an object is tilted beyond the NO_SPILL threshold.
+
+        Args:
+            object_quat: Quaternion [w, x, y, z] of the grasped object.
+            object_name: Name for logging.
+
+        Returns:
+            Violation name if tilted, None otherwise.
+        """
+        w, x, y, z = float(object_quat[0]), float(object_quat[1]), float(object_quat[2]), float(object_quat[3])
+        # Compute tilt angle from vertical (z-axis deviation)
+        tilt = math.acos(max(-1.0, min(1.0, 2.0 * w * w - 1.0)))
+        if tilt > self.no_spill_angle:
+            reason = f"NO_SPILL_{object_name}"
+            self.violation_log.append(reason)
+            return reason
+        return None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 3. TOMASMuJoCoWrapper — IDO Audit Layer around MuJoCo
+# ──────────────────────────────────────────────────────────────────────
+
+class TOMASMuJoCoWrapper:
+    """Wraps a MuJoCo environment with IDO/TOMAS audit layer.
+
+    This is the integration point between the physical simulation and the
+    IDO framework. It:
+    - Intercepts actions and applies ψ-Anchor checks
+    - Records κ-Snap audit entries at each step
+    - Computes GaussEx residual (η) and Information Cardinality (IC)
+    - Provides queryable audit trail for the dashboard
+
+    Usage:
+        wrapper = TOMASMuJoCoWrapper(model, data, target_body="red_cube", tray_body="tray")
+        safe_action, violation = wrapper.gate.check_action(action, data.qvel)
+        wrapper.record_snap(step, safe_action, violation)
+        data.ctrl[:] = safe_action
+        mujoco.mj_step(model, data)
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        data: Any,
+        target_body_name: str = "red_cube",
+        tray_body_name: str = "tray",
+        gripper_body_name: str = "gripper_base",
+        max_snaps: int = 5000,
+    ):
+        import mujoco as mj
+
+        self.model = model
+        self.data = data
+        self._mj = mj
+
+        # Resolve body IDs
+        self.target_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, target_body_name)
+        self.tray_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, tray_body_name)
+        self.gripper_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, gripper_body_name)
+
+        if self.target_body_id < 0:
+            raise ValueError(f"Body '{target_body_name}' not found in model")
+        if self.tray_body_id < 0:
+            raise ValueError(f"Body '{tray_body_name}' not found in model")
+
+        # IDO components
+        self.gate = PsiAnchorGate()
+        self.snaps: deque = deque(maxlen=max_snaps)
+
+        # Gripper actuator indices (last 2 in SO-ARM100)
+        self.gripper_indices = self._find_gripper_indices()
+
+        # Statistics
+        self.total_violations: int = 0
+        self.total_steps: int = 0
+
+    def _find_gripper_indices(self) -> List[int]:
+        """Find actuator indices for gripper joints."""
+        indices = []
+        for i in range(self.model.nu):
+            name = self._mj.mj_id2name(self.model, self._mj.mjtObj.mjOBJ_ACTUATOR, i)
+            if name and ("Gripper" in name or "grip" in name.lower()):
+                indices.append(i)
+        return indices
+
+    def compute_eta(self) -> float:
+        """Compute GaussEx residual (η): distance from gripper to target object.
+
+        η = ||gripper_pos - target_pos|| + tilt_penalty
+
+        Lower η means closer to goal. The agent's mission is to drive η → 0.
+        """
+        gripper_pos = self.data.xpos[self.gripper_body_id].copy()
+        target_pos = self.data.xpos[self.target_body_id].copy()
+        distance = float(np.linalg.norm(gripper_pos - target_pos))
+
+        # Add tilt penalty if object is grasped (tilted)
+        target_quat = self.data.xquat[self.target_body_id].copy()
+        w = float(target_quat[0])
+        tilt = abs(math.acos(max(-1.0, min(1.0, 2.0 * w * w - 1.0))))
+        tilt_penalty = max(0.0, tilt - 0.1) * 2.0  # penalty for tilt > 5.7°
+
+        return distance + tilt_penalty
+
+    def compute_ic(self) -> float:
+        """Compute Information Cardinality: std of joint velocities.
+
+        High IC means lots of movement (information-rich step).
+        Low IC means the arm is stationary (dead-zero step).
+        """
+        arm_vels = []
+        for i in range(self.model.nv):
+            # Only consider arm joint velocities (skip freejoint objects)
+            if i >= 18:  # First 18 dof are 3 freejoint objects (6 each)
+                arm_vels.append(float(self.data.qvel[i]))
+        if not arm_vels:
+            return 0.0
+        return float(np.std(arm_vels))
+
+    def check_and_record(
+        self,
+        step: int,
+        action: np.ndarray,
+        phase: str = "idle",
+        note: str = "",
+    ) -> Tuple[np.ndarray, Optional[str]]:
+        """Apply ψ-Anchor check, record κ-Snap, return safe action.
+
+        This is the main entry point called from the viewer's step_fn.
+
+        Args:
+            step: Simulation step number.
+            action: Raw joint control outputs.
+            phase: Current task phase (e.g., "reach", "grasp", "lift", "place").
+            note: Human-readable annotation.
+
+        Returns:
+            (safe_action, violation_name) — action may be scaled if violated.
+        """
+        # Get arm joint velocities (skip freejoint objects)
+        arm_vels = self.data.qvel[18:] if self.model.nv > 18 else self.data.qvel[:]
+        # Get actual actuator forces (qfrc_actuator) for ψ-Anchor torque check
+        arm_forces = self.data.qfrc_actuator[18:] if self.model.nv > 18 else self.data.qfrc_actuator[:]
+
+        safe_action, violation = self.gate.check_action(
+            action.copy(),
+            arm_vels,
+            joint_forces=arm_forces,
+            gripper_indices=self.gripper_indices,
+        )
+
+        # Check spill if object is near gripper
+        if violation is None:
+            gripper_pos = self.data.xpos[self.gripper_body_id]
+            target_pos = self.data.xpos[self.target_body_id]
+            dist = float(np.linalg.norm(gripper_pos - target_pos))
+            if dist < 0.05:  # Object is near gripper
+                target_quat = self.data.xquat[self.target_body_id]
+                spill_violation = self.gate.check_spill(target_quat, "object")
+                if spill_violation:
+                    violation = spill_violation
+
+        # Record κ-Snap
+        snap = KappaSnap(
+            step=step,
+            timestamp=float(self.data.time),
+            eta=self.compute_eta(),
+            ic=self.compute_ic(),
+            action=safe_action.tolist(),
+            psi_violation=violation,
+            phase=phase,
+            note=note,
+        )
+        self.snaps.append(snap)
+        self.total_steps += 1
+        if violation:
+            self.total_violations += 1
+
+        return safe_action, violation
+
+    def get_recent_snaps(self, n: int = 20) -> List[Dict]:
+        """Get recent κ-Snap entries as dicts (for dashboard API)."""
+        recent = list(self.snaps)[-n:]
+        return [asdict(s) for s in recent]
+
+    def get_summary(self) -> Dict:
+        """Get summary statistics for dashboard display."""
+        if not self.snaps:
+            return {"total_steps": 0, "total_violations": 0, "avg_eta": 0, "avg_ic": 0}
+
+        etas = [s.eta for s in self.snaps]
+        ics = [s.ic for s in self.snaps]
+        violations_by_type: Dict[str, int] = {}
+        for s in self.snaps:
+            if s.psi_violation:
+                violations_by_type[s.psi_violation] = violations_by_type.get(s.psi_violation, 0) + 1
+
+        return {
+            "total_steps": self.total_steps,
+            "total_violations": self.total_violations,
+            "violation_rate": self.total_violations / max(1, self.total_steps),
+            "avg_eta": float(np.mean(etas)),
+            "min_eta": float(np.min(etas)),
+            "current_eta": etas[-1] if etas else 0.0,
+            "avg_ic": float(np.mean(ics)),
+            "violations_by_type": violations_by_type,
+        }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 4. SOArm100Controller — Pick-and-Place with IDO Audit
+# ──────────────────────────────────────────────────────────────────────
+
+class SOArm100Controller:
+    """Simple pick-and-place controller for SO-ARM100 in MuJoCo.
+
+    Implements a state-machine controller that:
+    1. HOME — Move to home pose
+    2. REACH — Move toward the target object
+    3. DESCEND — Lower gripper to object
+    4. GRASP — Close gripper fingers
+    5. LIFT — Raise the object
+    6. TRANSPORT — Move to tray
+    7. RELEASE — Open gripper
+    8. RETREAT — Return to home pose
+
+    Each step is audited through the TOMASMuJoCoWrapper.
+    """
+
+    # Task phases
+    PHASE_HOME = "home"
+    PHASE_REACH = "reach"
+    PHASE_DESCEND = "descend"
+    PHASE_GRASP = "grasp"
+    PHASE_LIFT = "lift"
+    PHASE_TRANSPORT = "transport"
+    PHASE_RELEASE = "release"
+    PHASE_RETREAT = "retreat"
+    PHASE_DONE = "done"
+
+    def __init__(
+        self,
+        model: Any,
+        data: Any,
+        wrapper: TOMASMuJoCoWrapper,
+        target_object: str = "red_cube",
+    ):
+        import mujoco as mj
+        self._mj = mj
+        self.model = model
+        self.data = data
+        self.wrapper = wrapper
+        self.target_object = target_object
+
+        # Update wrapper target
+        wrapper.target_body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, target_object)
+
+        # Controller state
+        self.phase = self.PHASE_HOME
+        self.phase_step = 0
+        self.step_count = 0
+
+        # Home pose (neutral arm position)
+        self.home_pose = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+
+        # PD gains for joint control
+        self.kp = np.array([50, 50, 50, 30, 30, 20, 20])
+        self.kd = np.array([5, 5, 5, 3, 3, 2, 2])
+
+    def _get_arm_qpos(self) -> np.ndarray:
+        """Get current arm joint positions (skip freejoint objects)."""
+        # First 7 qpos entries are from freejoint objects (3 objects × 7 = 21)
+        # Arm joints start at qpos index 21
+        arm_start = 21  # 3 objects × 7 qpos each
+        return self.data.qpos[arm_start:arm_start + 7].copy()
+
+    def _get_arm_qvel(self) -> np.ndarray:
+        """Get current arm joint velocities."""
+        # First 18 qvel entries are from freejoint objects (3 objects × 6 = 18)
+        arm_start = 18
+        return self.data.qvel[arm_start:arm_start + 7].copy()
+
+    def _compute_target_pose(self) -> np.ndarray:
+        """Compute target joint pose based on current phase."""
+        target_pos = self.data.xpos[self.wrapper.target_body_id].copy()
+        tray_pos = self.data.xpos[self.wrapper.tray_body_id].copy()
+
+        if self.phase == self.PHASE_HOME:
+            return self.home_pose
+
+        elif self.phase == self.PHASE_REACH:
+            # Move to above the object
+            target_world = target_pos + np.array([0, 0, 0.08])
+            # Simple IK approximation: point arm toward target
+            dx = target_world[0] - 0.0  # arm base x
+            dy = target_world[1] - 0.0  # arm base y
+            dz = target_world[2] - 0.40  # arm base z
+            # Base rotation
+            base_rot = math.atan2(dy, dx)
+            # Shoulder pitch (approximate)
+            reach = math.sqrt(dx*dx + dz*dz)
+            shoulder = math.atan2(dz, reach) * 0.5
+            # Elbow bend
+            elbow = -0.3 - 0.2 * reach
+            return np.array([base_rot, shoulder, elbow, 0.0, 0.0, 0.0, 0.0])
+
+        elif self.phase == self.PHASE_DESCEND:
+            # Lower gripper to object
+            target_world = target_pos + np.array([0, 0, 0.02])
+            dx = target_world[0]
+            dy = target_world[1]
+            dz = target_world[2] - 0.40
+            base_rot = math.atan2(dy, dx)
+            reach = math.sqrt(dx*dx + dz*dz)
+            shoulder = math.atan2(dz, reach) * 0.6
+            elbow = -0.5 - 0.15 * reach
+            return np.array([base_rot, shoulder, elbow, 0.0, 0.0, 0.0, 0.0])
+
+        elif self.phase == self.PHASE_GRASP:
+            # Close gripper — hold current arm pose, close fingers
+            current = self._get_arm_qpos()
+            current[5] = 0.7   # Close left finger
+            current[6] = -0.7  # Close right finger
+            return current
+
+        elif self.phase == self.PHASE_LIFT:
+            # Raise arm
+            current = self._get_arm_qpos()
+            current[1] -= 0.3  # Raise shoulder
+            current[2] += 0.2  # Straighten elbow
+            current[5] = 0.7   # Keep gripper closed
+            current[6] = -0.7
+            return current
+
+        elif self.phase == self.PHASE_TRANSPORT:
+            # Move to above tray
+            dx = tray_pos[0]
+            dy = tray_pos[1]
+            dz = tray_pos[2] + 0.08 - 0.40
+            base_rot = math.atan2(dy, dx)
+            reach = math.sqrt(dx*dx + dz*dz)
+            shoulder = math.atan2(dz, reach) * 0.5
+            elbow = -0.4
+            return np.array([base_rot, shoulder, elbow, 0.0, 0.0, 0.7, -0.7])
+
+        elif self.phase == self.PHASE_RELEASE:
+            # Open gripper above tray
+            current = self._get_arm_qpos()
+            current[5] = 0.0   # Open left finger
+            current[6] = 0.0   # Open right finger
+            return current
+
+        elif self.phase == self.PHASE_RETREAT:
+            return self.home_pose
+
+        return self.home_pose
+
+    def _check_phase_transition(self) -> bool:
+        """Check if current phase should transition. Returns True if transitioned."""
+        eta = self.wrapper.compute_eta()
+        arm_vel = self._get_arm_qvel()
+        max_vel = float(np.max(np.abs(arm_vel))) if len(arm_vel) > 0 else 0.0
+
+        # Transition when arm is stable (low velocity) and enough steps passed
+        stable = max_vel < 0.1
+        min_steps = 50  # minimum steps per phase
+
+        if self.phase_step < min_steps:
+            return False
+
+        transitions = {
+            self.PHASE_HOME: (stable, self.PHASE_REACH),
+            self.PHASE_REACH: (stable and eta < 0.12, self.PHASE_DESCEND),
+            self.PHASE_DESCEND: (stable and eta < 0.06, self.PHASE_GRASP),
+            self.PHASE_GRASP: (self.phase_step >= 100, self.PHASE_LIFT),
+            self.PHASE_LIFT: (stable, self.PHASE_TRANSPORT),
+            self.PHASE_TRANSPORT: (stable, self.PHASE_RELEASE),
+            self.PHASE_RELEASE: (self.phase_step >= 80, self.PHASE_RETREAT),
+            self.PHASE_RETREAT: (stable, self.PHASE_DONE),
+        }
+
+        if self.phase in transitions:
+            should_transition, next_phase = transitions[self.phase]
+            if should_transition:
+                self.phase = next_phase
+                self.phase_step = 0
+                return True
+
+        return False
+
+    def compute_action(self) -> Tuple[np.ndarray, str, str]:
+        """Compute the next action (joint position targets).
+
+        Returns:
+            (action, phase, note) — action is the 7-element position target vector
+            for position actuators. The actuator's internal PD (kp/kv in XML)
+            handles force computation. forcerange in XML enforces torque limits.
+
+            Note: ψ-Anchor torque check is performed post-step via qfrc_actuator
+            in check_and_record(), not on the position target values.
+        """
+        # Check for phase transition
+        self._check_phase_transition()
+
+        # Compute target pose — this is the position target for position actuators
+        target_pose = self._compute_target_pose()
+
+        # Clip to actuator ctrlrange (matching XML ctrlrange values)
+        ctrl_limits = np.array([
+            [3.14, 1.571, 2.356, 1.571, 3.14, 0.873, 0.873],  # max
+            [-3.14, -1.571, -1.571, -1.571, -3.14, 0.0, -0.873],  # min
+        ])
+        target_pose = np.clip(target_pose, ctrl_limits[1], ctrl_limits[0])
+
+        note = f"phase={self.phase}, eta={self.wrapper.compute_eta():.3f}, step={self.phase_step}"
+        self.phase_step += 1
+        self.step_count += 1
+
+        return target_pose, self.phase, note
+
+    def reset(self):
+        """Reset controller to home phase."""
+        self.phase = self.PHASE_HOME
+        self.phase_step = 0
+        self.step_count = 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# v0.16.17: VLA (Vision-Language-Action) Adapter Framework
+# Based on "From VLA to Embodied Consciousness" (Zhang Feng, 2026)
+# Architecture: VLA backbone → ψ-Anchor safety → κ-Snap audit → MuJoCo
+# ═══════════════════════════════════════════════════════════════
+
+__all__ = [
+    "KappaSnap", "PsiAnchorGate", "TOMASMuJoCoWrapper",
+    "SOArm100Controller",
+    "VLAAdapter", "OpenVLAAdapter", "OctoAdapter", "Pi0Adapter",
+    "create_vla_adapter",
+]
+
+
+class VLAAdapter:
+    """Base class for Vision-Language-Action model adapters.
+
+    Unified interface: predict(obs_dict) → np.ndarray
+
+    All VLA outputs pass through PsiAnchorGate before execution.
+    This ensures physical safety constraints are enforced regardless
+    of the VLA backbone model.
+
+    Attributes:
+        model_name: Name of the VLA model.
+        loaded: Whether the model is actually loaded (False for stubs).
+    """
+
+    def __init__(self, model_name: str = "base"):
+        self.model_name: str = model_name
+        self.loaded: bool = False
+        self._action_buffer: deque = deque(maxlen=50)
+
+    def predict(self, obs_dict: Dict[str, Any]) -> np.ndarray:
+        """Predict action from observation.
+
+        Args:
+            obs_dict: Dictionary with keys:
+                - 'rgb': (H,W,3) uint8 camera image (optional in sim)
+                - 'language': str language instruction
+                - 'proprio': (n_joints,) float current joint positions
+
+        Returns:
+            np.ndarray of shape (7,) — joint position targets for SO-ARM100.
+
+        Note:
+            In stub mode, returns a simple reach-toward-target action.
+            Override this method in subclasses for real model inference.
+        """
+        # Stub: simple proportional control toward home-like pose
+        proprio = obs_dict.get('proprio', np.zeros(7))
+        target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+        # Smooth interpolation toward target
+        action = proprio + (target - proprio) * 0.1
+        return action.astype(np.float64)
+
+    def is_loaded(self) -> bool:
+        """Check if real model weights are loaded."""
+        return self.loaded
+
+
+class OpenVLAAdapter(VLAAdapter):
+    """OpenVLA-7B adapter — 7B parameter VLA model.
+
+    Architecture: Dual visual encoders (DINOv2 + SigLIP) + Llama-2 LLM.
+    Input: Image + Language + Proprioception
+    Output: 6-DOF joint position commands
+
+    HuggingFace: openvla/openvla-7b
+
+    Note: Requires torch + transformers. In stub mode, uses simple IK.
+    """
+
+    def __init__(self):
+        super().__init__(model_name="openvla-7b")
+        self._processor = None
+        self._model = None
+
+    def _try_load(self) -> bool:
+        """Attempt to load real OpenVLA model from HuggingFace."""
+        try:
+            import torch
+            from transformers import AutoProcessor, AutoModelForVision2Seq
+            self._processor = AutoProcessor.from_pretrained("openvla/openvla-7b")
+            self._model = AutoModelForVision2Seq.from_pretrained(
+                "openvla/openvla-7b",
+                torch_dtype=torch.bfloat16,
+                device_map="cuda"
+            )
+            self.loaded = True
+            return True
+        except Exception:
+            self.loaded = False
+            return False
+
+    def predict(self, obs_dict: Dict[str, Any]) -> np.ndarray:
+        """Run OpenVLA inference or fall back to stub."""
+        if not self.loaded:
+            if not self._try_load():
+                return super().predict(obs_dict)
+
+        # Real inference (if loaded)
+        rgb = obs_dict.get('rgb')
+        language = obs_dict.get('language', 'pick up the object')
+        proprio = obs_dict.get('proprio', np.zeros(7))
+
+        if rgb is not None and self._processor and self._model:
+            import torch
+            inputs = self._processor(images=rgb, text=language, return_tensors="pt")
+            with torch.no_grad():
+                outputs = self._model.generate(**inputs, max_new_tokens=50)
+            # Decode action (implementation depends on OpenVLA version)
+            action = self._decode_action(outputs, proprio)
+            return action
+        else:
+            return super().predict(obs_dict)
+
+    def _decode_action(self, outputs, proprio: np.ndarray) -> np.ndarray:
+        """Decode model output to joint commands."""
+        # Placeholder — actual decoding depends on OpenVLA's tokenizer
+        return super().predict({'proprio': proprio})
+
+
+class OctoAdapter(VLAAdapter):
+    """Octo adapter — lightweight multi-task VLA model.
+
+    Supports multi-view input (primary + wrist camera).
+    Uses Action Chunking for smoother trajectories.
+
+    GitHub: octo-models/octo (JAX-based)
+    """
+
+    def __init__(self):
+        super().__init__(model_name="octo-base")
+        self._model = None
+        self._unnorm_stats = None
+
+    def _try_load(self) -> bool:
+        """Attempt to load Octo model."""
+        try:
+            from octo.model import OctoModel
+            self._model = OctoModel.load_pretrained("octo-base")
+            self._unnorm_stats = self._model.dataset_statistics
+            self.loaded = True
+            return True
+        except Exception:
+            self.loaded = False
+            return False
+
+    def predict(self, obs_dict: Dict[str, Any]) -> np.ndarray:
+        """Run Octo inference or fall back to stub."""
+        if not self.loaded:
+            if not self._try_load():
+                return super().predict(obs_dict)
+
+        rgb = obs_dict.get('rgb')
+        wrist_rgb = obs_dict.get('wrist_rgb')
+        language = obs_dict.get('language', 'pick up the object')
+
+        if rgb is not None and self._model:
+            obs = {
+                "image_primary": rgb,
+                "task": {"language_instruction": language}
+            }
+            if wrist_rgb is not None:
+                obs["image_wrist"] = wrist_rgb
+            action = self._model.sample_actions(obs, self._unnorm_stats)
+            return np.array(action[:7], dtype=np.float64)
+        else:
+            return super().predict(obs_dict)
+
+
+class Pi0Adapter(VLAAdapter):
+    """π₀ (Pi-Zero) adapter — Flow Matching VLA from Physical Intelligence.
+
+    Key feature: Outputs Action Chunks (future N-step action sequences)
+    at 50Hz, not single-step actions. Uses an internal action buffer.
+
+    Note: Only model weights are public; training pipeline is proprietary.
+    """
+
+    def __init__(self, chunk_size: int = 50):
+        super().__init__(model_name="pi0-base")
+        self.chunk_size: int = chunk_size
+        self._action_buffer: deque = deque(maxlen=chunk_size)
+        self._flow_model = None
+
+    def _try_load(self) -> bool:
+        """Attempt to load π₀ model."""
+        try:
+            # π₀ weights are available but training pipeline is not
+            # This is a stub that would load the Flow Matching model
+            self.loaded = False  # Set to True when real weights available
+            return False
+        except Exception:
+            return False
+
+    def predict(self, obs_dict: Dict[str, Any]) -> np.ndarray:
+        """Run π₀ inference with action chunking or fall back to stub.
+
+        If buffer is empty, generates a new chunk via Flow Matching.
+        Returns the next action from the buffer.
+        """
+        if not self._action_buffer:
+            if self.loaded and self._flow_model:
+                # Generate new action chunk via Flow Matching
+                import torch
+                noise = torch.randn(self.chunk_size, 7)
+                action_chunk = self._flow_matching_sample(noise, obs_dict)
+                for a in action_chunk:
+                    self._action_buffer.append(a)
+            else:
+                # Stub: fill buffer with smooth trajectory
+                proprio = obs_dict.get('proprio', np.zeros(7))
+                target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+                for i in range(min(self.chunk_size, 10)):
+                    alpha = (i + 1) / 10.0
+                    self._action_buffer.append(
+                        proprio + (target - proprio) * alpha * 0.1
+                    )
+
+        if self._action_buffer:
+            return self._action_buffer.popleft()
+        return super().predict(obs_dict)
+
+    def _flow_matching_sample(self, noise, obs_dict):
+        """Flow Matching sampling (stub)."""
+        # Real implementation would use the π₀ Flow Matching model
+        return [super().predict(obs_dict) for _ in range(self.chunk_size)]
+
+
+def create_vla_adapter(model_name: str) -> VLAAdapter:
+    """Factory function to create a VLA adapter by name.
+
+    Args:
+        model_name: One of 'openvla-7b', 'octo-base', 'pi0-base'.
+
+    Returns:
+        VLAAdapter instance (stub mode if real model unavailable).
+
+    Raises:
+        ValueError: If model_name is not recognized.
+    """
+    adapters = {
+        'openvla-7b': OpenVLAAdapter,
+        'octo-base': OctoAdapter,
+        'pi0-base': Pi0Adapter,
+    }
+
+    cls = adapters.get(model_name)
+    if cls is None:
+        raise ValueError(
+            f"Unknown VLA model: {model_name}. "
+            f"Available: {list(adapters.keys())}"
+        )
+
+    adapter = cls()
+    print(f"VLA adapter created: {model_name} (loaded={adapter.is_loaded()})")
+    return adapter

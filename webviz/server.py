@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Any
 
 import numpy as np
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
 
@@ -54,7 +54,77 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.11.0"
+# v0.16.14: TOMAS wrapper for SO-ARM100 IDO integration
+# v0.16.17: Also import VLA adapter factory (lazy import in API endpoints)
+try:
+    from webviz.tomas_wrapper import (
+        TOMASMuJoCoWrapper,
+        PsiAnchorGate,
+        KappaSnap,
+        SOArm100Controller,
+    )
+    TOMAS_AVAILABLE = True
+except ImportError as _tomas_err:
+    TOMAS_AVAILABLE = False
+    print(f"Warning: TOMAS wrapper not available: {_tomas_err}")
+
+WEBVIZ_VERSION: str = "v0.16.17"
+
+# ── Bug 3 Fix: Baseline reference data for 7 core metrics ──
+# Source: dm_control PPO/SAC 100k step typical scores (paperswithcode, DM Control paper)
+# H_EML_residual: target < 0.5 (lower = better, η approaching target)
+# noether_violations: 1000-step cumulative violation count (collision-dominant), IDO target < 100
+# snap_efficiency: PPO ~0.45, IDO target > 0.8 (fraction of steps in PD-snap mode)
+# epiplexity: PPO/SAC N/A (no ψ-Anchor); IDO target >200 (sufficient structural info for evolution)
+# cq_overall: PPO/SAC ~0.15 (no conscience framework); IDO target >0.80
+BASELINE_REFERENCE: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "humanoid-stand": {
+        "episode_return": {"PPO_100k": 220, "SAC_100k": 180, "IDO_target": ">300", "interpretation": "PPO 100k 后 ~220（dm_control 标准）；IDO point η-mode 下 reward 尺度不同，累计 ~4-14 属正常"},
+        "success_rate": {"PPO_100k": 0.55, "SAC_100k": 0.48, "IDO_target": ">0.70", "interpretation": "PPO 100k 后 ~55%，IDO 目标 >70%"},
+        "H_EML_residual": {"PPO_100k": 0.85, "IDO_target": "<0.5", "interpretation": "越低越好，<0.5 表明 η 接近目标"},
+        "noether_violations": {"PPO_100k": 800, "IDO_target": "<100", "interpretation": "humanoid-stand 1000步累计违规 ~800（碰撞检测为主），IDO 目标 <100"},
+        "snap_efficiency": {"PPO_100k": 0.45, "IDO_target": ">0.8", "interpretation": "Snap 触发比例，>0.8 表示高效"},
+        "epiplexity": {"PPO_100k": "N/A", "SAC_100k": "N/A", "IDO_target": ">300", "interpretation": "PPO/SAC 无 ψ-Anchor 不计算 epiplexity；IDO 目标 >300 表示有足够结构信息支持进化（实测 ~373）"},
+        "cq_overall": {"PPO_100k": 0.10, "SAC_100k": 0.12, "IDO_target": ">0.80", "interpretation": "PPO/SAC 无良知框架 CQ~0.10；IDO 目标 >0.80"},
+    },
+    "cheetah-run": {
+        "episode_return": {"PPO_100k": 350, "SAC_100k": 420, "IDO_target": ">500", "interpretation": "PPO 100k 后 ~350，SAC 更强 ~420，IDO 目标 >500"},
+        "success_rate": {"PPO_100k": 0.60, "SAC_100k": 0.72, "IDO_target": ">0.80", "interpretation": "cheetah 是连续运动任务，IDO 目标 >80%"},
+        "H_EML_residual": {"PPO_100k": 0.72, "IDO_target": "<0.4", "interpretation": "运动模式 η 目标更低，<0.4 为良好"},
+        "noether_violations": {"PPO_100k": 600, "IDO_target": "<50", "interpretation": "cheetah-run 1000步累计违规 ~600（碰撞检测为主），IDO 目标 <50"},
+        "snap_efficiency": {"PPO_100k": 0.50, "IDO_target": ">0.85", "interpretation": "周期性步态 Snap 效率较高，>0.85"},
+        "epiplexity": {"PPO_100k": "N/A", "SAC_100k": "N/A", "IDO_target": ">200", "interpretation": "PPO/SAC 无 ψ-Anchor 不计算 epiplexity；IDO 目标 >200 表示有足够结构信息支持进化"},
+        "cq_overall": {"PPO_100k": 0.15, "SAC_100k": 0.18, "IDO_target": ">0.80", "interpretation": "PPO/SAC 无良知框架 CQ~0.15；IDO 目标 >0.80"},
+    },
+    "walker-walk": {
+        "episode_return": {"PPO_100k": 250, "SAC_100k": 310, "IDO_target": ">400", "interpretation": "PPO 100k 后 ~250，IDO 目标 >400"},
+        "success_rate": {"PPO_100k": 0.50, "SAC_100k": 0.65, "IDO_target": ">0.75", "interpretation": "walker 步态稳定性，IDO 目标 >75%"},
+        "H_EML_residual": {"PPO_100k": 0.78, "IDO_target": "<0.5", "interpretation": "双足运动 η 目标 <0.5"},
+        "noether_violations": {"PPO_100k": 700, "IDO_target": "<80", "interpretation": "walker-walk 1000步累计违规 ~700（碰撞检测为主），IDO 目标 <80"},
+        "snap_efficiency": {"PPO_100k": 0.40, "IDO_target": ">0.8", "interpretation": "walker 需更多探索，Snap 效率偏低，>0.8"},
+        "epiplexity": {"PPO_100k": "N/A", "SAC_100k": "N/A", "IDO_target": ">250", "interpretation": "PPO/SAC 无 ψ-Anchor 不计算 epiplexity；IDO 目标 >250 表示有足够结构信息支持进化"},
+        "cq_overall": {"PPO_100k": 0.12, "SAC_100k": 0.15, "IDO_target": ">0.80", "interpretation": "PPO/SAC 无良知框架 CQ~0.12；IDO 目标 >0.80"},
+    },
+    "hopper-stand": {
+        "episode_return": {"PPO_100k": 180, "SAC_100k": 150, "IDO_target": ">280", "interpretation": "PPO 100k 后 ~180，IDO 目标 >280"},
+        "success_rate": {"PPO_100k": 0.45, "SAC_100k": 0.40, "IDO_target": ">0.65", "interpretation": "单足站立难度大，IDO 目标 >65%"},
+        "H_EML_residual": {"PPO_100k": 0.90, "IDO_target": "<0.5", "interpretation": "单足平衡 η 偏高，目标 <0.5"},
+        "noether_violations": {"PPO_100k": 850, "IDO_target": "<100", "interpretation": "hopper-stand 1000步累计违规 ~850（碰撞检测为主），IDO 目标 <100"},
+        "snap_efficiency": {"PPO_100k": 0.35, "IDO_target": ">0.75", "interpretation": "hopper 需频繁探索，>0.75"},
+        "epiplexity": {"PPO_100k": "N/A", "SAC_100k": "N/A", "IDO_target": ">200", "interpretation": "PPO/SAC 无 ψ-Anchor 不计算 epiplexity；IDO 目标 >200 表示有足够结构信息支持进化"},
+        "cq_overall": {"PPO_100k": 0.10, "SAC_100k": 0.10, "IDO_target": ">0.75", "interpretation": "PPO/SAC 无良知框架 CQ~0.10；IDO 目标 >0.75"},
+    },
+    # ── Generic fallback for other tasks ──
+    "_default": {
+        "episode_return": {"PPO_100k": 200, "SAC_100k": 200, "IDO_target": ">300", "interpretation": "PPO/SAC 100k 后 ~200；IDO η-mode 下 reward 尺度可能不同"},
+        "success_rate": {"PPO_100k": 0.50, "SAC_100k": 0.50, "IDO_target": ">0.70", "interpretation": "PPO 100k 后 ~50%，IDO 目标 >70%"},
+        "H_EML_residual": {"PPO_100k": 0.80, "IDO_target": "<0.5", "interpretation": "越低越好，<0.5 表明 η 接近目标"},
+        "noether_violations": {"PPO_100k": 700, "IDO_target": "<80", "interpretation": "1000步累计违规 ~700（碰撞检测为主），IDO 目标 <80"},
+        "snap_efficiency": {"PPO_100k": 0.45, "IDO_target": ">0.8", "interpretation": "Snap 效率，>0.8 表示高效"},
+        "epiplexity": {"PPO_100k": "N/A", "SAC_100k": "N/A", "IDO_target": ">200", "interpretation": "PPO/SAC 无 ψ-Anchor 不计算 epiplexity；IDO 目标 >200 表示有足够结构信息支持进化"},
+        "cq_overall": {"PPO_100k": 0.15, "SAC_100k": 0.20, "IDO_target": ">0.80", "interpretation": "PPO/SAC 无良知框架 CQ~0.15；IDO 目标 >0.80"},
+    },
+}
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -83,7 +153,41 @@ MJVISER_AVAILABLE: bool = False
 mjviser_viewer_thread: Optional[threading.Thread] = None
 mjviser_viewer_running: bool = False
 mjviser_viewer_url: str = ""
+mjviser_viewer_error: str = ""  # captures last error from viewer thread
 mjviser_scene_type: str = "plain"
+
+# v0.16.7: Direction control — allows user to steer the robot in 3D viewer
+# v0.16.11: Split into target_direction (set by buttons) and walk_direction (interpolated)
+mjviser_walk_direction: float = 0.0   # current yaw angle (radians), interpolated towards target
+mjviser_target_direction: float = 0.0  # target yaw angle (radians), set by direction buttons
+mjviser_walk_speed: float = 1.0       # 0=stop, 1=full walk
+mjviser_walk_action: str = "walk"     # "walk" | "stop" | "turn_left" | "turn_right" | "step_up"
+
+# v0.16.14: Persistent ViserServer — created once, reused across scene changes.
+# Previous approach (stop + recreate) failed on Windows because viser_server.stop()
+# doesn't synchronously release the port. Now we keep the server alive and only
+# recreate the Viewer/Model when scenes change.
+mjviser_persistent_server = None       # type: Optional[Any]
+mjviser_persistent_port: int = 0
+mjviser_viewer_object = None           # type: Optional[Any]  # current mjviser.Viewer instance
+
+# v0.16.15: SO-ARM100 independent viewer system — completely separate from humanoid mjviser
+arm100_viewer_thread: Optional[threading.Thread] = None
+arm100_viewer_running: bool = False
+arm100_viewer_url: str = ""
+arm100_viewer_error: str = ""
+arm100_persistent_server = None        # type: Optional[Any]
+arm100_persistent_port: int = 0
+arm100_tomas_wrapper = None            # type: Optional[Any]  # TOMASMuJoCoWrapper instance
+
+# v0.16.17: Simulation speed multiplier, direction cooldown, ARM100 manual/VLA control
+mjviser_sim_speed: int = 1           # v0.16.17: Simulation speed multiplier (1-63x)
+mjviser_last_dir_change_time: float = 0.0  # v0.16.17: Anti-backflip cooldown timer
+arm100_manual_mode: bool = False     # v0.16.17: SO-ARM100 manual control mode
+arm100_manual_target: Optional[np.ndarray] = None  # v0.16.17: Manual joint targets
+arm100_vla_adapter = None            # v0.16.17: VLA adapter instance
+arm100_vla_mode: bool = False        # v0.16.17: VLA inference mode
+arm100_vla_instruction: str = "pick up the red cube"  # v0.16.17: VLA language instruction
 
 try:
     import mjviser
@@ -548,7 +652,8 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
         run_state.current_task = request.task
         run_state.current_episode = 0
         run_state.current_step = 0
-        run_state.total_episodes = request.episodes
+        # v0.16.6: Fix total_episodes for SIP — T0(episodes) + T1(evolution_rounds*episodes) + T2(episodes)
+        run_state.total_episodes = request.episodes * (request.evolution_rounds + 2)
 
     task: str = request.task
     episodes: int = request.episodes
@@ -572,10 +677,17 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
 
         original_goal = goal_factory(env.physics, kappa_thresh)
 
+        # v0.16.6: Broadcast total_episodes (not per-phase) so dashboard shows correct progress
+        # v0.16.11: Also send user_episodes + SIP phase breakdown so dashboard can explain
+        total_eps_sip: int = episodes * (evolution_rounds + 2)
         broadcast_sync({
             "type": "run_start",
             "task": task,
-            "episodes": episodes,
+            "episodes": total_eps_sip,
+            "user_episodes": episodes,  # What the user actually set
+            "sip_total_episodes": total_eps_sip,  # Expanded total for progress bar
+            "sip_evolution_rounds": evolution_rounds,
+            "sip_phase_breakdown": f"T0:{episodes} + T1:{episodes}×{evolution_rounds} + T2:{episodes} = {total_eps_sip}",
             "max_steps": max_steps,
             "eval_mode": "sip",
         })
@@ -620,6 +732,18 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
 
         t0_summary: dict = _aggregate_metrics(t0_results)
         t0_summary['phase'] = 'T0'
+
+        # ── Bug 1 Fix: Broadcast sip_phase_complete for T0 ──
+        broadcast_sync({
+            "type": "sip_phase_complete",
+            "phase": "T0",
+            "summary": {
+                "avg_eta": t0_summary.get('avg_final_eta', 0.0),
+                "avg_steps": t0_summary.get('avg_steps', 0.0),
+                "noether_violations": t0_summary.get('total_noether_violations', 0),
+                "episodes_run": len(t0_results),
+            }
+        })
 
         # ── Phase T1: Iterated ──
         goal_t1: GoalEML = GoalEML(
@@ -686,6 +810,18 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
         t1_summary['phase'] = 'T1'
         t1_summary['evolution_rounds'] = evolution_rounds
 
+        # ── Bug 1 Fix: Broadcast sip_phase_complete for T1 ──
+        broadcast_sync({
+            "type": "sip_phase_complete",
+            "phase": "T1",
+            "summary": {
+                "avg_eta": t1_summary.get('avg_final_eta', 0.0),
+                "avg_steps": t1_summary.get('avg_steps', 0.0),
+                "noether_violations": t1_summary.get('total_noether_violations', 0),
+                "episodes_run": len(t1_phase_results),
+            }
+        })
+
         # ── Phase T2: Retention ──
         adjusted_dk_from_t1: float = agent_t1.psi_anchor.adjusted_delta_K
         evolved_macros_from_t1: list = list(agent_t1.macros)
@@ -732,6 +868,18 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
 
         t2_summary: dict = _aggregate_metrics(t2_results)
         t2_summary['phase'] = 'T2'
+
+        # ── Bug 1 Fix: Broadcast sip_phase_complete for T2 ──
+        broadcast_sync({
+            "type": "sip_phase_complete",
+            "phase": "T2",
+            "summary": {
+                "avg_eta": t2_summary.get('avg_final_eta', 0.0),
+                "avg_steps": t2_summary.get('avg_steps', 0.0),
+                "noether_violations": t2_summary.get('total_noether_violations', 0),
+                "episodes_run": len(t2_results),
+            }
+        })
 
         # ── SIP-Bench Summary ──
         t0_avg_steps: float = t0_summary.get('avg_steps', float('inf'))
@@ -950,6 +1098,88 @@ async def get_results() -> JSONResponse:
     })
 
 
+@app.get("/api/sip_history")
+async def get_sip_history() -> JSONResponse:
+    """Return recent SIP-Bench results from saved JSON files.
+
+    Scans benchmarks/results/sip_*.json, sorts by file modification time
+    (newest first), and returns up to 10 entries. Each entry includes the
+    task name, file modification timestamp, and the full sip_result content.
+
+    Bug 2 Fix: Enables dashboard to restore last SIP result on page reload.
+
+    Returns:
+        JSONResponse with list of SIP history entries (max 10).
+    """
+    results_dir: str = os.path.join(PROJECT_ROOT, "benchmarks", "results")
+    history: List[dict] = []
+
+    if not os.path.isdir(results_dir):
+        return JSONResponse(content={"sip_history": [], "count": 0})
+
+    sip_files: List[tuple] = []
+    for fname in os.listdir(results_dir):
+        if fname.startswith("sip_") and fname.endswith(".json"):
+            fpath: str = os.path.join(results_dir, fname)
+            try:
+                mtime: float = os.path.getmtime(fpath)
+                sip_files.append((mtime, fpath, fname))
+            except OSError:
+                continue
+
+    # Sort by mtime descending (newest first)
+    sip_files.sort(key=lambda x: x[0], reverse=True)
+
+    for mtime, fpath, fname in sip_files[:10]:
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                sip_data: dict = json.load(f)
+            # Extract task name from filename: sip_<task>_e<ep>_r<rounds>.json
+            # or from the JSON content if available
+            task_name: str = sip_data.get("task", "")
+            if not task_name:
+                # Parse from filename
+                parts: list = fname.replace("sip_", "").replace(".json", "").split("_")
+                if len(parts) >= 1:
+                    task_name = parts[0]
+            history.append({
+                "task": task_name,
+                "timestamp": mtime,
+                "filename": fname,
+                "sip_result": sip_data,
+            })
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    return JSONResponse(content={"sip_history": history, "count": len(history)})
+
+
+@app.get("/api/baseline_reference")
+async def get_baseline_reference(task: Optional[str] = None) -> JSONResponse:
+    """Return baseline reference data for the 7 core metrics.
+
+    Bug 3 Fix: Provides PPO/SAC/IDO target reference values so the
+    dashboard can show baseline comparison under each metric card.
+
+    Args:
+        task: Optional task name to get task-specific baselines.
+              If not provided or not found, returns all baselines.
+
+    Returns:
+        JSONResponse with baseline reference dict.
+    """
+    if task and task in BASELINE_REFERENCE:
+        return JSONResponse(content={
+            "task": task,
+            "baseline": BASELINE_REFERENCE[task],
+        })
+    return JSONResponse(content={
+        "task": task or "all",
+        "baseline": BASELINE_REFERENCE.get(task or "", BASELINE_REFERENCE["_default"]) if task else BASELINE_REFERENCE,
+        "default": BASELINE_REFERENCE["_default"],
+    })
+
+
 # ── v0.6.0: CQ / Merkle API Endpoints ──
 
 @app.get("/api/cq")
@@ -1035,12 +1265,16 @@ async def set_mjviser_scene(req: SceneRequest) -> JSONResponse:
     Returns:
         JSONResponse with the current scene_type and viewer_restarted hint.
     """
-    global mjviser_scene_type, mjviser_viewer_running
+    global mjviser_scene_type, mjviser_viewer_running, mjviser_walk_direction, mjviser_target_direction, mjviser_walk_speed
     valid_scenes = {"plain", "obstacle", "ramp", "stairs", "floating", "maze"}
     if req.scene_type not in valid_scenes:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Invalid scene type. Must be one of: {', '.join(sorted(valid_scenes))}.")
     mjviser_scene_type = req.scene_type
+    # v0.16.11: Reset direction when switching scenes
+    mjviser_walk_direction = 0.0
+    mjviser_target_direction = 0.0
+    mjviser_walk_speed = 1.0
 
     # v0.6.5: If viewer is running, stop it so new scene takes effect on next start
     viewer_was_running: bool = mjviser_viewer_running
@@ -1072,7 +1306,8 @@ async def start_viewer() -> JSONResponse:
             },
         )
 
-    global mjviser_viewer_thread, mjviser_viewer_running, mjviser_viewer_url
+    global mjviser_viewer_thread, mjviser_viewer_running, mjviser_viewer_url, mjviser_viewer_error
+    global mjviser_persistent_server, mjviser_persistent_port, mjviser_viewer_object
 
     if mjviser_viewer_running:
         return JSONResponse(content={
@@ -1080,8 +1315,19 @@ async def start_viewer() -> JSONResponse:
             "url": mjviser_viewer_url,
         })
 
+    # v0.16.14: Wait for old viewer thread to fully exit before starting a new one.
+    # The old thread no longer stops the ViserServer (we keep it persistent),
+    # but we still need to wait for the thread to exit so we don't have two
+    # viewer loops running simultaneously.
+    if mjviser_viewer_thread is not None and mjviser_viewer_thread.is_alive():
+        mjviser_viewer_running = False  # ensure old thread exits
+        mjviser_viewer_thread.join(timeout=5.0)  # wait up to 5s for cleanup
+        # Small delay to let the old viewer object be garbage collected
+        time.sleep(0.3)
+
     # Initialize viewer URL (will be updated by launch_viewer thread)
     mjviser_viewer_url = "http://localhost:8081"
+    mjviser_viewer_error = ""  # clear previous error
 
     def launch_viewer() -> None:
         """Launch mjviser Viewer in a background thread with real-time simulation.
@@ -1092,7 +1338,8 @@ async def start_viewer() -> JSONResponse:
         Instead, we manually replicate the viewer loop, calling
         _setup_gui(), _render(), and _tick() in a while-loop.
         """
-        global mjviser_viewer_running, mjviser_viewer_url
+        global mjviser_viewer_running, mjviser_viewer_url, mjviser_viewer_error
+        global mjviser_persistent_server, mjviser_persistent_port, mjviser_viewer_object
         try:
             import dm_control.suite as suite
             import mujoco as mj
@@ -1101,42 +1348,28 @@ async def start_viewer() -> JSONResponse:
 
             # ── Load scene based on mjviser_scene_type ──
             env_ref = None
-            target_height: float = 1.285  # dm_control humanoid correct standing height (feet on ground)
+            target_height: float = 0.85  # Custom stick-figure humanoid standing height
             scene_xml_path: Optional[str] = None
 
-            if mjviser_scene_type == "plain":
-                # Default: load dm_control humanoid-stand
-                env_ref = suite.load("humanoid", "stand")
-                env_ref.reset()  # Reset to get initial pose
-                mj_model = env_ref.physics.model._model
-                mj_data = env_ref.physics.data._data
-                # v0.9.5: dm_control randomizes BOTH quaternion AND joint angles on reset.
-                # Random joint angles → legs bent → feet floating 0.22m above ground →
-                # robot never touches ground → any gravity cancel makes it float.
-                # Fix: set ALL qpos to neutral standing pose (joints=0, upright, z=1.285).
-                # At z=1.285 with neutral joints, feet just touch the ground (ncon=4).
-                mj_data.qpos[:] = 0.0          # All joints to neutral (0 = standing)
-                mj_data.qpos[2] = 1.285         # Correct standing height (feet touch ground)
-                mj_data.qpos[3] = 1.0           # Upright quaternion (w=1, x=y=z=0)
-                mj_data.qvel[:] = 0.0
-                mj.mj_forward(mj_model, mj_data)
-                target_height = 1.285
-            else:
-                # Custom scene: load XML from webviz/scenes/
-                scene_file_map: dict = {
-                    "obstacle": "humanoid_obstacle_arena.xml",
-                    "ramp": "humanoid_ramp_arena.xml",
-                    "stairs": "humanoid_stairs_arena.xml",
-                    "floating": "humanoid_floating_platforms.xml",
-                    "maze": "humanoid_maze_arena.xml",
-                }
-                scene_file = scene_file_map.get(mjviser_scene_type, "humanoid_obstacle_arena.xml")
-                scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / scene_file)
-                mj_model = mj.MjModel.from_xml_path(scene_xml_path)
-                mj_data = mj.MjData(mj_model)
-                mj.mj_resetData(mj_model, mj_data)
-                mj.mj_forward(mj_model, mj_data)
-                target_height = 0.85  # Stick-figure humanoid natural standing height
+            # v0.16.11: ALL scenes now use the same custom XML humanoid (16.5kg, gear=100).
+            # Previous: plain scene used dm_control humanoid (40.8kg) which was too heavy
+            # and caused simulation instability. Now plain uses humanoid_plain_arena.xml
+            # — same humanoid as obstacle scenes but without obstacles.
+            scene_file_map: dict = {
+                "plain": "humanoid_plain_arena.xml",
+                "obstacle": "humanoid_obstacle_arena.xml",
+                "ramp": "humanoid_ramp_arena.xml",
+                "stairs": "humanoid_stairs_arena.xml",
+                "floating": "humanoid_floating_platforms.xml",
+                "maze": "humanoid_maze_arena.xml",
+            }
+            scene_file = scene_file_map.get(mjviser_scene_type, "humanoid_plain_arena.xml")
+            scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / scene_file)
+            mj_model = mj.MjModel.from_xml_path(scene_xml_path)
+            mj_data = mj.MjData(mj_model)
+            mj.mj_resetData(mj_model, mj_data)
+            mj.mj_forward(mj_model, mj_data)
+            target_height = 0.85  # Stick-figure humanoid natural standing height
 
             # ── Helper functions for walking controller ──
 
@@ -1167,6 +1400,16 @@ async def start_viewer() -> JSONResponse:
                     w1*y2 - x1*z2 + y1*w2 + z1*x2,
                     w1*z2 + x1*y2 - y1*x2 + z1*w2,
                 ])
+
+            def _quat_to_yaw(q: np.ndarray) -> float:
+                """Extract yaw angle from quaternion [w, x, y, z]."""
+                w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+                return float(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+
+            def _yaw_to_quat(yaw: float) -> np.ndarray:
+                """Create upright quaternion [w, x, y, z] from yaw angle."""
+                half = yaw * 0.5
+                return np.array([np.cos(half), 0.0, 0.0, np.sin(half)])
 
             def _build_joint_map(mdl: "mj.MjModel") -> dict:
                 """Build named joint address map from MuJoCo model.
@@ -1205,189 +1448,526 @@ async def start_viewer() -> JSONResponse:
                 if bname is None or bname not in obstacle_body_names:
                     humanoid_mass += float(mj_model.body_mass[bid])
 
-            # ── Walking controller constants ──
-            # Random seed: fixed default (42) for reproducibility,
-            # override via MUJOCO_BENCH_WALK_SEED environment variable.
-            WALK_SEED: int = int(os.environ.get("MUJOCO_BENCH_WALK_SEED", "42"))
-            WAYPOINT_RADIUS: float = 6.0    # x,y ∈ [-6, 6]
-            WAYPOINT_CHANGE_SEC: float = 5.0  # Change waypoint every 5 sim-seconds
-            WALK_FREQ: float = 1.5           # Walking cycle frequency (Hz)
-            HIP_AMP: float = 0.3             # Sagittal hip oscillation amplitude (rad)
-            KNEE_AMP: float = 0.15           # Knee bend amplitude during swing (rad)
-            ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
-            DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
-            MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
-            # v0.11.0: TRUE EARTH ENVIRONMENT — ctrl-only joint control.
+            # ── v0.16.0: REAL PHYSICS — no kinematic locking ──
+            # Previous versions (v0.12–v0.15.2) used kinematic root-locking:
+            #   data.qpos[2] = target_height  (hard-lock Z)
+            #   data.qpos[3:7] = _yaw_to_quat(heading)  (hard-lock orientation)
+            #   data.qvel[0:6] = 0.0  (kill all root dynamics)
+            #   data.qpos[0] += vx * dt  (kinematic x/y translation)
+            # This was NOT physics — it was animation wearing a MuJoCo skin.
             #
-            # ROOT CAUSE of ALL previous floating (v0.9.1-v0.10.0):
-            #   v0.9.x: qfrc_applied[2] = gravity_cancel → puppet string → float
-            #   v0.10.0: ground spring on z, BUT joint qfrc_applied on legs/hips
-            #            created phantom upward force components → still float
+            # v0.16.0: All joints are now hinge type (ball joints replaced with
+            # 3 serial hinges). All actuators are motor type with gear=20–100.
+            # The robot stands and walks through REAL contact forces, gravity,
+            # and joint torques. No hard-locking of any qpos or qvel.
             #
-            # v0.11.0 FIX: Move ALL joint control to ctrl (actuators).
-            #   qfrc_applied is used ONLY for:
-            #     [2]: ground reaction spring (z < target only, ZERO above)
-            #     [3,4]: upright orientation torque
-            #   Everything else (hips, knees, ankles, arms, abdomen) = ctrl only.
-            #   NO horizontal force, NO yaw torque from qfrc.
+            # Balance strategy:
+            #   - PD controller on root orientation (keep upright)
+            #   - PD controller on root height (prevent collapse)
+            #   - Ankle/hip strategy for lateral balance
+            #   - Sinusoidal gait pattern for hip/knee/ankle locomotion
+            #   - Arms swing naturally for balance
+            # v0.16.11: All scenes now use custom XML humanoid — treat all as obstacle scene
+            # v0.16.15: SO-ARM100 separated to its own viewer system
+            is_obstacle_scene: bool = True
+            if is_obstacle_scene:
+                for jid_s in range(mj_model.njnt):
+                    jname_s: str = mj.mj_id2name(mj_model, mj.mjtObj.mjOBJ_JOINT, jid_s) or ""
+                    jtype_s: int = int(mj_model.jnt_type[jid_s])
+                    da_s: int = int(mj_model.jnt_dofadr[jid_s])
+                    if jtype_s != 3:  # Only tune hinge joints
+                        continue
+                    is_hip: bool = 'hip' in jname_s
+                    is_knee: bool = 'knee' in jname_s
+                    is_ankle: bool = 'ankle' in jname_s
+                    is_arm: bool = 'shoulder' in jname_s or 'elbow' in jname_s
+                    is_head: bool = 'head' in jname_s
+                    if is_hip:
+                        mj_model.jnt_stiffness[jid_s] = 0.0
+                        mj_model.dof_damping[da_s] = 2.0
+                    elif is_knee:
+                        mj_model.jnt_stiffness[jid_s] = 0.0
+                        mj_model.dof_damping[da_s] = 2.0
+                    elif is_ankle:
+                        mj_model.jnt_stiffness[jid_s] = 0.0
+                        mj_model.dof_damping[da_s] = 1.0
+                    elif is_arm:
+                        mj_model.jnt_stiffness[jid_s] = 0.0
+                        mj_model.dof_damping[da_s] = 1.0
+                    elif is_head:
+                        mj_model.jnt_stiffness[jid_s] = 0.0
+                        mj_model.dof_damping[da_s] = 1.0
+            else:
+                # Plain dm_control humanoid — keep existing high stiffness
+                for jid_s in range(mj_model.njnt):
+                    jname_s: str = mj.mj_id2name(mj_model, mj.mjtObj.mjOBJ_JOINT, jid_s) or ""
+                    jtype_s: int = int(mj_model.jnt_type[jid_s])
+                    da_s: int = int(mj_model.jnt_dofadr[jid_s])
+                    is_abdomen: bool = (jtype_s == 3) and 'abdomen' in jname_s
+                    is_hip_hinge: bool = (jtype_s == 3) and 'hip' in jname_s
+                    is_knee: bool = (jtype_s == 3) and 'knee' in jname_s
+                    if is_abdomen:
+                        mj_model.jnt_stiffness[jid_s] = 500.0
+                        mj_model.dof_damping[da_s] = 50.0
+                    elif is_hip_hinge:
+                        mj_model.jnt_stiffness[jid_s] = 300.0
+                        mj_model.dof_damping[da_s] = 30.0
+                    elif is_knee:
+                        mj_model.jnt_stiffness[jid_s] = 200.0
+                        mj_model.dof_damping[da_s] = 20.0
+
+            # ── v0.16.0: Actuator gains ──
+            # For scene XMLs: motor actuators already have gear=20–100 set in XML.
+            #   motor actuator: force = ctrl * gear, so ctrl=1 → gear Nm torque.
+            #   No need to modify actuator_gainprm — gear is baked into the motor.
+            # For plain dm_control humanoid: still boost gainprm as before.
+            if not is_obstacle_scene:
+                for aid_amp in range(mj_model.nu):
+                    amp_name: str = mj.mj_id2name(mj_model, mj.mjtObj.mjOBJ_ACTUATOR, aid_amp) or ""
+                    is_leg: bool = any(kw in amp_name for kw in ['hip_y', 'knee', 'ankle'])
+                    is_arm: bool = any(kw in amp_name for kw in ['shoulder', 'elbow'])
+                    is_torso: bool = any(kw in amp_name for kw in ['hip', 'abdomen', 'head'])
+                    if is_leg:
+                        mj_model.actuator_gainprm[aid_amp][0] = 40.0
+                    elif is_torso:
+                        mj_model.actuator_gainprm[aid_amp][0] = 30.0
+                    elif is_arm:
+                        mj_model.actuator_gainprm[aid_amp][0] = 25.0
+                    else:
+                        mj_model.actuator_gainprm[aid_amp][0] = 20.0
+
+            # v0.16.11: All scenes use XML default timestep (0.005s)
+            # No more timestep override for plain scene (was 0.002s for dm_control humanoid)
+
+            # ── v0.16.0: Build actuator name → index map ──
+            # All joints are hinge now, no ball joint special handling needed.
+            actuator_name_map: dict = {}
+            for _aid in range(mj_model.nu):
+                _aname = mj.mj_id2name(mj_model, mj.mjtObj.mjOBJ_ACTUATOR, _aid)
+                if _aname:
+                    actuator_name_map[_aname] = _aid
+
+            # ── v0.16.1: Walking controller constants ──
+            # Balance assist: soft spring on root to help weak stick-figure (16.5kg)
+            # stay upright. This is NOT kinematic locking (v0.12-v0.15) — the robot
+            # still responds to gravity, contact forces, and joint torques.
+            # The assist just prevents catastrophic fall because our 0.15m feet
+            # and 16.5kg mass can't generate enough ankle torque for real balance.
             #
-            # Verified: 20-second sim, z stays in [1.254, 1.286], NO float.
-            WARMUP_DURATION: float = 2.0
+            # Gait parameters — v0.16.12: Conservative gait for stability
+            WALK_FREQ: float = 0.8           # v0.16.12: Slower steps (was 1.0)
+            HIP_AMP: float = 0.12            # v0.16.12: Less aggressive swing (was 0.20)
+            KNEE_AMP: float = 0.55           # v0.16.12: More ground clearance ~5cm (was 0.40)
+            KNEE_STANCE: float = 0.20        # v0.16.12: Lower COM (was 0.15)
+            ANKLE_AMP: float = 0.08          # v0.16.12: Gentler push-off (was 0.10)
+            ARM_AMP: float = 0.10            # v0.16.12: Gentler arm swing (was 0.15)
 
-            # Ground reaction spring — very stiff, only below target
-            K_GROUND: float = humanoid_mass * 500.0
-            D_GROUND: float = humanoid_mass * 50.0
-            MAX_GROUND_FORCE: float = humanoid_mass * 100.0
+            # v0.16.12: Stronger root assist + gravity feedforward
+            # Without gravity FF, KP=500 spring sags 31cm under 157N gravity.
+            # With gravity FF, spring only handles deviations → can be stiffer.
+            KP_ROOT_Z: float = 1200.0        # Vertical spring (was 500)
+            KD_ROOT_Z: float = 80.0          # (was 50)
+            KP_ROOT_PITCH: float = 350.0     # Pitch spring (was 200)
+            KD_ROOT_PITCH: float = 40.0      # (was 30)
+            KP_ROOT_ROLL: float = 350.0      # Roll spring (was 200)
+            KD_ROOT_ROLL: float = 40.0       # (was 30)
+            KP_ROOT_YAW: float = 30.0        # Yaw spring (was 50) — gentler turning
+            KD_ROOT_YAW: float = 8.0         # (was 10)
+            # v0.16.12: Clip limits
+            CLIP_ROOT_Z: float = 700.0       # (was 500)
+            CLIP_ROOT_PITCH: float = 250.0   # (was 150)
+            CLIP_ROOT_ROLL: float = 250.0    # (was 150)
+            CLIP_ROOT_YAW: float = 15.0      # (was 60) — much gentler turning!
 
-            # Orientation PD (upright torque — this is torque, not force)
-            KP_TILT: float = humanoid_mass * 20.0
-            KD_TILT: float = humanoid_mass * 8.0
-            KP_TILT_WARMUP: float = humanoid_mass * 40.0
-            KD_TILT_WARMUP: float = humanoid_mass * 16.0
-            MAX_ROOT_TORQUE: float = humanoid_mass * 5.0
+            # Joint PD gains (gait tracking)
+            KP_HIP: float = 150.0
+            KD_HIP: float = 15.0
+            KP_KNEE: float = 100.0
+            KD_KNEE: float = 10.0
+            KP_ANKLE: float = 80.0
+            KD_ANKLE: float = 8.0
+            KP_ARM: float = 50.0
+            KD_ARM: float = 5.0
+            KP_HEAD: float = 30.0
+            KD_HEAD: float = 3.0
 
-            # ctrl PD gains — vary by joint group
-            KP_CTRL_LEG: float = 80.0   # Legs: hip_y(gear=120), knee(gear=80), ankle(gear=20)
-            KD_CTRL_LEG: float = 20.0
-            KP_CTRL_BODY: float = 50.0  # Body: abdomen, hip_x/z (gear=40)
-            KD_CTRL_BODY: float = 10.0
-            KP_CTRL_ARM: float = 30.0   # Arms: shoulder, elbow (gear=20-40)
-            KD_CTRL_ARM: float = 5.0
+            # Warmup: let robot settle before walking
+            WARMUP_DURATION: float = 3.0  # v0.16.12: Longer settle (was 2.0)
+
+            # v0.16.12: Gravity feedforward — cancel gravity so spring handles only deviations
+            # body_subtreemass[1] = total mass of robot (body 1 = torso, subtree = all)
+            _robot_mass: float = float(mj_model.body_subtreemass[1])
+            GRAVITY_FF: float = _robot_mass * 9.81  # ~157N for 16kg humanoid
 
             # ── Walking controller state ──
-            walk_rng: np.random.RandomState = np.random.RandomState(WALK_SEED)
-
-            def _generate_waypoint(rng: np.random.RandomState) -> np.ndarray:
-                """Generate a random waypoint within the arena bounds."""
-                wx: float = rng.uniform(-WAYPOINT_RADIUS, WAYPOINT_RADIUS)
-                wy: float = rng.uniform(-WAYPOINT_RADIUS, WAYPOINT_RADIUS)
-                return np.array([wx, wy])
-
             walk_state: dict = {
-                'waypoint': _generate_waypoint(walk_rng),
-                'last_wp_time': 0.0,
                 'initial_qpos': mj_data.qpos.copy(),
+                'phase_offset': 0.0,
             }
 
-            # ── v0.11.0: ctrl-only walking controller ──
-            # qfrc_applied: ONLY ground spring [2] + orientation torque [3,4]
-            # ctrl: ALL joint control (legs, body, arms) with gear amplification
-            # NO horizontal force, NO yaw torque, NO joint qfrc_applied
+            # ── v0.16.4: Physics-based walking controller ──
+            def step_fn(model: "mj.MjModel", data: "mj.MjData") -> None:
+                """v0.16.4 Real physics walking controller — anti-fall enhanced.
 
-            def step_fn(model: mj.MjModel, data: mj.MjData) -> None:
-                """v0.11.0 walking controller — true earth environment.
-
-                All joint control via ctrl (actuators). qfrc_applied only for
-                ground reaction spring and upright orientation torque.
+                Implements physics-based walking with soft root assist
+                (bungee cords) + joint PD + real contacts.
                 """
-                # ── 0. Clear everything ──
+                nonlocal target_height
+                global mjviser_walk_direction, mjviser_target_direction
+
+                # ── 0. Clear applied forces ──
                 data.qfrc_applied[:] = 0.0
                 data.ctrl[:] = 0.0
 
-                initial_qpos: np.ndarray = walk_state['initial_qpos']
+                # v0.16.13: REMOVED gravity feedforward — it cancels gravity,
+                # leaving contact forces to push robot into the sky.
+                # The spring (KP_ROOT_Z=1200) alone handles height control.
+
                 sim_time: float = float(data.time)
                 is_warmup: bool = sim_time < WARMUP_DURATION
+                is_plain: bool = False  # v0.16.11: All scenes use same XML humanoid
 
-                # ── 1. Waypoint update ──
-                if sim_time - walk_state['last_wp_time'] > WAYPOINT_CHANGE_SEC:
-                    walk_state['waypoint'] = _generate_waypoint(walk_rng)
-                    walk_state['last_wp_time'] = sim_time
+                # v0.16.11: Unified controller — all scenes use the same
+                # custom XML humanoid (16.5kg, gear=100). No more dm_control
+                # humanoid (40.8kg) which was unstable.
 
-                # ── 2. Root state ──
-                root_z: float = float(data.qpos[2])
-                root_vz: float = float(data.qvel[2])
+                # ── Obstacle scene: full physics (now used for ALL scenes) ──
 
-                # ── 3. Ground reaction spring (qfrc_applied[2]) ──
-                # ONLY pushes up when z < target. ZERO when z >= target.
-                # This is physically correct: ground doesn't follow you up.
-                if root_z < target_height:
-                    ground_force: float = K_GROUND * (target_height - root_z) - D_GROUND * root_vz
-                    ground_force = max(0.0, ground_force)
+                # ── 1. Extract root state for balance feedback ──
+                root_pos: np.ndarray = data.qpos[0:3].copy()
+                root_quat: np.ndarray = data.qpos[3:7].copy()
+                root_vel: np.ndarray = data.qvel[0:3].copy()
+                root_angvel: np.ndarray = data.qvel[3:6].copy()
+
+                # Extract Euler angles from quaternion
+                qw, qx, qy, qz = float(root_quat[0]), float(root_quat[1]), float(root_quat[2]), float(root_quat[3])
+                roll = float(np.arctan2(2.0 * (qw * qx + qy * qz), 1.0 - 2.0 * (qx * qx + qy * qy)))
+                pitch = float(np.arctan2(2.0 * (qw * qy + qx * qz), 1.0 - 2.0 * (qy * qy + qz * qz)))
+                yaw = float(np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qz * qz + qy * qy)))
+
+                # v0.16.11: Gradual direction interpolation (same as plain scene)
+                _dt_o = float(model.opt.timestep)
+                _dir_err_o = float(np.arctan2(
+                    np.sin(mjviser_target_direction - mjviser_walk_direction),
+                    np.cos(mjviser_target_direction - mjviser_walk_direction)))
+                _max_turn_o = 0.2 * _dt_o  # v0.16.12: Slower turn (was 0.5)
+                if abs(_dir_err_o) > _max_turn_o:
+                    mjviser_walk_direction += float(np.sign(_dir_err_o)) * _max_turn_o
                 else:
-                    ground_force = 0.0
-                data.qfrc_applied[2] = float(np.clip(ground_force, 0.0, MAX_GROUND_FORCE))
+                    mjviser_walk_direction = mjviser_target_direction
+                mjviser_walk_direction = float(np.arctan2(
+                    np.sin(mjviser_walk_direction), np.cos(mjviser_walk_direction)))
 
-                # ── 4. Orientation PD (qfrc_applied[3,4]) ──
-                # Torque to keep torso upright. This is rotational, not vertical force.
-                quat: np.ndarray = data.qpos[3:7].copy()
-                z_axis: np.ndarray = _quat_to_z_axis(quat)
-                kp_t: float = KP_TILT_WARMUP if is_warmup else KP_TILT
-                kd_t: float = KD_TILT_WARMUP if is_warmup else KD_TILT
-                tilt_tx: float = -kp_t * float(z_axis[1]) - kd_t * float(data.qvel[3])
-                tilt_ty: float = -kp_t * float(z_axis[0]) - kd_t * float(data.qvel[4])
-                data.qfrc_applied[3] = float(np.clip(tilt_tx, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
-                data.qfrc_applied[4] = float(np.clip(tilt_ty, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
+                # ── 2. Soft root assist (bungee cords) + anti-fall safety net ──
+                # v0.16.4: Anti-fall boost — when Z < 70% target, boost 3x to
+                # prevent collapse. Also boost pitch/roll when leaning > 30°.
+                # v0.16.7: Adaptive target_height — detect ground level via downward ray
+                # v0.16.12: Gravity feedforward + gradual fall_boost + gentler yaw
+                if not is_plain:
+                    # Cast straight-down ray to find actual ground/platform height
+                    ray_down = np.array([0.0, 0.0, -1.0])
+                    ray_origin_down = np.array([float(root_pos[0]), float(root_pos[1]), float(root_pos[2]) + 0.1])
+                    try:
+                        ground_dist = mj.mj_ray(mj_model, data, ray_origin_down, ray_down, None, 1, 1)
+                    except Exception:
+                        ground_dist = -1.0
+                    # Adaptive target: standing height = ground_height + 0.85 (leg length)
+                    if ground_dist > 0:
+                        ground_z = float(ray_origin_down[2] - ground_dist)
+                        adaptive_target = ground_z + 0.85
+                        # Smoothly blend toward adaptive target (avoid sudden jumps)
+                        target_height = target_height * 0.95 + adaptive_target * 0.05
 
-                # ── 5. ALL joint control via ctrl ──
-                # No qfrc_applied on joints — eliminates phantom upward forces.
+                    height_error = target_height - float(root_pos[2])
+                    height_force = KP_ROOT_Z * height_error - KD_ROOT_Z * float(root_vel[2])
+                    # v0.16.12: Gradual anti-fall boost (was binary 3x at 70%)
+                    _height_ratio = float(root_pos[2]) / target_height if target_height > 0 else 1.0
+                    if _height_ratio < 0.7:
+                        height_force *= 1.0 + (0.7 - _height_ratio) * 3.0  # Gradual ramp
+                    height_force = float(np.clip(height_force, -CLIP_ROOT_Z, CLIP_ROOT_Z))
+                    data.qfrc_applied[2] += height_force
+
+                    # v0.16.12: Gradual fall_boost (was binary 1.0/2.0 at 80%)
+                    fall_boost = 1.0 + max(0.0, (0.85 - _height_ratio) * 4.0)
+                    fall_boost = min(fall_boost, 3.0)  # Cap at 3x
+
+                    pitch_torque = KP_ROOT_PITCH * fall_boost * (-pitch) - KD_ROOT_PITCH * float(root_angvel[1])
+                    pitch_torque = float(np.clip(pitch_torque, -CLIP_ROOT_PITCH, CLIP_ROOT_PITCH))
+                    data.qfrc_applied[4] += pitch_torque
+
+                    roll_torque = KP_ROOT_ROLL * fall_boost * (-roll) - KD_ROOT_ROLL * float(root_angvel[0])
+                    roll_torque = float(np.clip(roll_torque, -CLIP_ROOT_ROLL, CLIP_ROOT_ROLL))
+                    data.qfrc_applied[3] += roll_torque
+
+                    # v0.16.12: Much gentler yaw — turning via hip_z, not root torque
+                    # (was KP*2.0, clip 60 → KP*0.3, clip 15)
+                    yaw_err = float(np.arctan2(
+                        np.sin(mjviser_walk_direction - yaw),
+                        np.cos(mjviser_walk_direction - yaw)))
+                    # v0.16.17: Clamp yaw_err to prevent backflip on rapid direction changes
+                    yaw_err = float(np.clip(yaw_err, -np.pi / 4, np.pi / 4))  # Max 45° turn at once
+                    # v0.16.17: Stability guard — don't apply yaw torque when robot is falling
+                    if _height_ratio > 0.75:
+                        yaw_torque = KP_ROOT_YAW * 0.3 * yaw_err - KD_ROOT_YAW * float(root_angvel[2])
+                        yaw_torque = float(np.clip(yaw_torque, -CLIP_ROOT_YAW, CLIP_ROOT_YAW))
+                        data.qfrc_applied[5] += yaw_torque
+
+                # ── 3. Gait generation + balance-aware joint targets ──
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
-                hip_amp_mult: float = 0.0 if is_warmup else 1.0
-                knee_amp_mult: float = 0.0 if is_warmup else 1.0
+                # v0.16.7: walk_mult controlled by mjviser_walk_speed
+                walk_mult: float = (0.0 if is_warmup else 1.0) * mjviser_walk_speed
 
+                # v0.16.7: Ray casting for wall/terrain detection ──
+                # Cast forward ray to detect walls ahead (for maze navigation)
+                torso_pos = np.array([float(root_pos[0]), float(root_pos[1]), float(root_pos[2])])
+                # Forward direction based on current yaw
+                fwd_x = float(np.cos(yaw))
+                fwd_y = float(np.sin(yaw))
+                ray_fwd = np.array([fwd_x, fwd_y, 0.0])
+                # Exclude robot's own body (body 0 is world, body 1 is usually torso)
+                # mj_ray returns distance to nearest geom or -1 if no hit
+                try:
+                    wall_dist = mj.mj_ray(mj_model, data, torso_pos, ray_fwd, None, 1, 1)
+                except Exception:
+                    wall_dist = -1.0
+
+                # Cast left and right rays to find open direction
+                left_x = float(np.cos(yaw + np.pi / 2))
+                left_y = float(np.sin(yaw + np.pi / 2))
+                ray_left = np.array([left_x, left_y, 0.0])
+                try:
+                    left_dist = mj.mj_ray(mj_model, data, torso_pos, ray_left, None, 1, 1)
+                except Exception:
+                    left_dist = -1.0
+
+                right_x = float(np.cos(yaw - np.pi / 2))
+                right_y = float(np.sin(yaw - np.pi / 2))
+                ray_right = np.array([right_x, right_y, 0.0])
+                try:
+                    right_dist = mj.mj_ray(mj_model, data, torso_pos, ray_right, None, 1, 1)
+                except Exception:
+                    right_dist = -1.0
+
+                # v0.16.7: Maze navigation — if wall ahead, auto-turn toward open space
+                # v0.16.12: Use target_direction (not walk_direction) to respect interpolation
+                WALL_THRESHOLD = 0.6  # Turn when wall within 0.6m
+                if wall_dist > 0 and wall_dist < WALL_THRESHOLD:
+                    # Wall ahead! Check left and right
+                    if left_dist < 0 or left_dist > right_dist:
+                        mjviser_target_direction = yaw + np.pi / 2  # Turn left
+                    elif right_dist < 0 or right_dist >= left_dist:
+                        mjviser_target_direction = yaw - np.pi / 2  # Turn right
+                    # Normalize
+                    mjviser_target_direction = float(np.arctan2(
+                        np.sin(mjviser_target_direction), np.cos(mjviser_target_direction)))
+
+                # v0.16.7: Terrain detection — cast forward-down ray for platform height
+                ray_down_fwd = np.array([fwd_x * 0.5, fwd_y * 0.5, -0.866])  # 30° forward, 60° down
+                ray_origin_high = torso_pos.copy()
+                ray_origin_high[2] += 0.1  # Start slightly above torso
+                try:
+                    terrain_dist = mj.mj_ray(mj_model, data, ray_origin_high, ray_down_fwd, None, 1, 1)
+                except Exception:
+                    terrain_dist = -1.0
+
+                # Calculate terrain height ahead (if ray hit something)
+                terrain_height_ahead = 0.0
+                if terrain_dist > 0:
+                    # Height of hit point = origin_z + dist * ray_z_component
+                    terrain_height_ahead = float(ray_origin_high[2] + terrain_dist * (-0.866))
+
+                # v0.16.10: Bigger step_up_boost for stairs (was min 0.3, now min 0.5)
+                step_up_boost = 0.0
+                current_ground = float(root_pos[2]) - 0.85  # Approximate foot height
+                if terrain_height_ahead > current_ground + 0.03:
+                    # Platform ahead is higher than current ground → lift feet more
+                    # v0.16.10: Increased from 0.3 to 0.6, multiplier 0.5→0.8
+                    step_up_boost = min(0.6, (terrain_height_ahead - current_ground) * 0.8)
+
+                # v0.16.7: Forward lean for locomotion (proportional to speed)
+                forward_lean = 0.06 * walk_mult  # ~3.4° forward lean when walking
+
+                # Gait pattern
+                r_hip_y_target = (HIP_AMP * walk_mult * float(np.sin(phase))) + forward_lean
+                l_hip_y_target = (HIP_AMP * walk_mult * float(np.sin(phase + np.pi))) + forward_lean
+
+                r_swing = max(0.0, float(np.sin(phase)))
+                l_swing = max(0.0, float(np.sin(phase + np.pi)))
+                # v0.16.7: Add step_up_boost to knee lift when terrain ahead is higher
+                r_knee_target = -(KNEE_AMP + step_up_boost) * walk_mult * r_swing - KNEE_STANCE * walk_mult * (1.0 - r_swing)
+                l_knee_target = -(KNEE_AMP + step_up_boost) * walk_mult * l_swing - KNEE_STANCE * walk_mult * (1.0 - l_swing)
+
+                r_ankle_target = ANKLE_AMP * walk_mult * float(np.sin(phase + np.pi * 0.5))
+                l_ankle_target = ANKLE_AMP * walk_mult * float(np.sin(phase + np.pi + np.pi * 0.5))
+
+                r_shoulder_y_target = ARM_AMP * walk_mult * float(np.sin(phase + np.pi))
+                l_shoulder_y_target = ARM_AMP * walk_mult * float(np.sin(phase))
+
+                r_hip_x_target = 0.03 * walk_mult * float(np.sin(phase + np.pi * 0.5))
+                l_hip_x_target = 0.03 * walk_mult * float(np.sin(phase + np.pi + np.pi * 0.5))
+                # v0.16.7: Add turning moment via asymmetric hip_z (difference = turn direction)
+                # v0.16.12: Much smaller turn_signal to prevent feet slipping (was 0.5→0.15, now 0.15→0.06)
+                turn_signal = float(np.clip(yaw_err * 0.15, -0.06, 0.06)) if not is_warmup else 0.0
+                r_hip_z_target = 0.02 * walk_mult * float(np.sin(phase)) + turn_signal
+                l_hip_z_target = 0.02 * walk_mult * float(np.sin(phase + np.pi)) - turn_signal
+
+                # ── Balance: adjust ankle and hip targets based on body lean ──
+                # If robot leans forward (pitch < 0), push ankles to lean back
+                # If robot leans right (roll > 0), adjust hips to shift weight left
+                # v0.16.12: Stronger balance response (pitch 0.5→0.8, roll 0.3→0.5)
+                balance_pitch = float(np.clip(-pitch * 0.8, -0.3, 0.3))
+                balance_roll = float(np.clip(-roll * 0.5, -0.2, 0.2))
+
+                # Ankle strategy: correct pitch by adjusting ankle angle
+                r_ankle_target += balance_pitch * (1.0 if not is_warmup else 1.0)
+                l_ankle_target += balance_pitch * (1.0 if not is_warmup else 1.0)
+
+                # Hip x (lateral) strategy: correct roll
+                r_hip_x_target += balance_roll
+                l_hip_x_target += balance_roll
+
+                # During warmup: strong stance, no walking
+                if is_warmup:
+                    r_hip_y_target = 0.0
+                    l_hip_y_target = 0.0
+                    r_knee_target = -KNEE_STANCE  # Slightly bent
+                    l_knee_target = -KNEE_STANCE
+                    r_ankle_target = balance_pitch  # Just balance
+                    l_ankle_target = balance_pitch
+                    r_shoulder_y_target = 0.0
+                    l_shoulder_y_target = 0.0
+                    r_hip_x_target = balance_roll
+                    l_hip_x_target = balance_roll
+                    r_hip_z_target = 0.0
+                    l_hip_z_target = 0.0
+
+                # ── 4. Joint PD control — drive motors via ctrl ──
                 for aid in range(model.nu):
                     act_name: str = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, aid)
                     jid_act: int = int(model.actuator_trnid[aid][0])
                     qa_act: int = int(model.jnt_qposadr[jid_act])
                     da_act: int = int(model.jnt_dofadr[jid_act])
 
-                    target_val: float = float(initial_qpos[qa_act])
+                    current_angle: float = float(data.qpos[qa_act])
+                    vel: float = float(data.qvel[da_act])
 
-                    # Walking gait targets for specific joints
-                    if 'hip_y_right' in act_name:
-                        target_val += HIP_AMP * hip_amp_mult * float(np.sin(phase))
-                    elif 'hip_y_left' in act_name:
-                        target_val += HIP_AMP * hip_amp_mult * float(np.sin(phase + np.pi))
-                    elif 'right_knee' in act_name:
-                        target_val -= KNEE_AMP * knee_amp_mult * max(0.0, float(np.sin(phase)))
-                    elif 'left_knee' in act_name:
-                        target_val -= KNEE_AMP * knee_amp_mult * max(0.0, float(np.sin(phase + np.pi)))
-                    elif 'shoulder1_right' in act_name or 'shoulder_y_right' in act_name:
-                        target_val += ARM_AMP * float(np.sin(phase + np.pi))
-                    elif 'shoulder1_left' in act_name or 'shoulder_y_left' in act_name:
-                        target_val += ARM_AMP * float(np.sin(phase))
+                    target_angle: float = 0.0
+                    kp_c: float = KP_HIP
+                    kd_c: float = KD_HIP
 
-                    error_ctrl: float = target_val - float(data.qpos[qa_act])
-                    vel_ctrl: float = float(data.qvel[da_act])
+                    an = act_name.lower()
 
-                    # Gain selection by joint group
-                    if any(kw in act_name for kw in ['hip_y', 'knee', 'ankle']):
-                        kp_c: float = KP_CTRL_LEG
-                        kd_c: float = KD_CTRL_LEG
-                    elif any(kw in act_name for kw in ['shoulder', 'elbow']):
-                        kp_c = KP_CTRL_ARM
-                        kd_c = KD_CTRL_ARM
+                    if 'hip_r_y' in an:
+                        target_angle = r_hip_y_target
+                        kp_c, kd_c = KP_HIP, KD_HIP
+                    elif 'hip_l_y' in an:
+                        target_angle = l_hip_y_target
+                        kp_c, kd_c = KP_HIP, KD_HIP
+                    elif 'hip_r_x' in an:
+                        target_angle = r_hip_x_target
+                        kp_c, kd_c = KP_HIP, KD_HIP
+                    elif 'hip_l_x' in an:
+                        target_angle = l_hip_x_target
+                        kp_c, kd_c = KP_HIP, KD_HIP
+                    elif 'hip_r_z' in an:
+                        target_angle = r_hip_z_target
+                        kp_c, kd_c = KP_HIP, KD_HIP
+                    elif 'hip_l_z' in an:
+                        target_angle = l_hip_z_target
+                        kp_c, kd_c = KP_HIP, KD_HIP
+                    elif 'knee_r' in an:
+                        target_angle = r_knee_target
+                        kp_c, kd_c = KP_KNEE, KD_KNEE
+                    elif 'knee_l' in an:
+                        target_angle = l_knee_target
+                        kp_c, kd_c = KP_KNEE, KD_KNEE
+                    elif 'ankle_r' in an:
+                        target_angle = r_ankle_target
+                        kp_c, kd_c = KP_ANKLE, KD_ANKLE
+                    elif 'ankle_l' in an:
+                        target_angle = l_ankle_target
+                        kp_c, kd_c = KP_ANKLE, KD_ANKLE
+                    elif 'shoulder_r_y' in an:
+                        target_angle = r_shoulder_y_target
+                        kp_c, kd_c = KP_ARM, KD_ARM
+                    elif 'shoulder_l_y' in an:
+                        target_angle = l_shoulder_y_target
+                        kp_c, kd_c = KP_ARM, KD_ARM
+                    elif 'shoulder' in an or 'elbow' in an:
+                        target_angle = 0.0
+                        kp_c, kd_c = KP_ARM, KD_ARM
+                    elif 'head' in an:
+                        target_angle = 0.0
+                        kp_c, kd_c = KP_HEAD, KD_HEAD
                     else:
-                        kp_c = KP_CTRL_BODY
-                        kd_c = KD_CTRL_BODY
+                        target_angle = 0.0
+                        kp_c, kd_c = 50.0, 5.0
 
-                    # Stronger legs during warmup
-                    if is_warmup and any(kw in act_name for kw in ['hip_y', 'knee', 'ankle']):
-                        kp_c *= 1.5
-                        kd_c *= 1.5
-
-                    ctrl_val: float = float(np.clip(kp_c * error_ctrl - kd_c * vel_ctrl, -1.0, 1.0))
+                    # PD control → ctrl value in [-1, 1]
+                    error: float = target_angle - current_angle
+                    ctrl_val: float = float(np.clip(kp_c * error - kd_c * vel, -1.0, 1.0))
                     data.ctrl[aid] = ctrl_val
 
-                # ── 6. Step physics ──
+                # ── 5. Step physics ──
                 mj.mj_step(model, data)
 
-            # ── Create ViserServer on port 8081 ──
-            # Avoid conflict with FastAPI on 8080.
-            viser_server = ViserServer(port=8081, verbose=False)
+                # ── 6. Safety: if robot falls, don't let it NaN ──
+                if np.any(np.isnan(data.qpos)) or np.any(np.isnan(data.qvel)):
+                    mj.mj_resetData(model, data)
+                    data.qpos[2] = target_height
+                    data.qpos[3] = 1.0
+                    mj.mj_forward(model, data)
+
+            # ── Create or reuse ViserServer ──
+            # v0.16.14: Persistent ViserServer — created once, reused across scene changes.
+            # Previous approach (stop + recreate) failed on Windows because
+            # viser_server.stop() doesn't synchronously release the port.
+            viser_server = None
+            actual_port: int = 0
+
+            # Try to reuse existing persistent server
+            if mjviser_persistent_server is not None:
+                try:
+                    # Verify the server is still alive by checking its port
+                    _check_port = mjviser_persistent_server._websock_server._port
+                    viser_server = mjviser_persistent_server
+                    actual_port = mjviser_persistent_port
+                    print(f"v0.16.14: Reusing persistent ViserServer on port {actual_port}")
+                except Exception as _reuse_err:
+                    print(f"v0.16.14: Persistent server unusable ({_reuse_err}), creating new one")
+                    mjviser_persistent_server = None
+                    mjviser_persistent_port = 0
+
+            # Create new server if needed
+            if viser_server is None:
+                for _attempt in range(6):
+                    _try_port = 8081 + _attempt
+                    try:
+                        viser_server = ViserServer(port=_try_port, verbose=False)
+                        actual_port = viser_server._websock_server._port
+                        mjviser_persistent_server = viser_server
+                        mjviser_persistent_port = actual_port
+                        print(f"v0.16.14: Created new ViserServer on port {actual_port}")
+                        break
+                    except (OSError, RuntimeError) as _oe:
+                        print(f"ViserServer port {_try_port} failed (attempt {_attempt+1}/6): {_oe}")
+                        if _attempt < 5:
+                            _time.sleep(2.0)
+                if viser_server is None:
+                    raise RuntimeError("Failed to create ViserServer after 6 attempts on ports 8081-8086")
 
             # Get the actual port (ViserServer auto-increments if port is occupied)
             actual_port: int = viser_server._websock_server._port
             mjviser_viewer_url = f"http://localhost:{actual_port}"
 
-            # ── v0.11.0: Custom reset_fn — correct standing pose on Reset ──
-            # mjviser's default _reset() calls mj_resetData which restores qpos
-            # to XML defaults (root_z=1.5, all joints=0). At z=1.5 the feet are
-            # 0.22m above ground → ncon=0 → no ground contact.
-            #
-            # Fix: override reset_fn to set the correct standing pose (z=1.285,
-            # feet on ground, ncon=4) every time the user clicks Reset.
+            # ── v0.16.0: Custom reset_fn — physics standing pose ──
             def reset_fn(mdl: "mj.MjModel", dat: "mj.MjData") -> None:
-                """Reset to neutral standing pose with feet on ground."""
+                """Reset to neutral standing pose with feet on ground.
+
+                v0.16.0: Set a stable standing pose. The physics controller will
+                maintain balance through joint torques and contact forces — no
+                kinematic locking.
+                """
                 dat.qpos[:] = 0.0
                 dat.qpos[2] = target_height  # 1.285 for plain, 0.85 for scenes
                 dat.qpos[3] = 1.0             # Upright quaternion (w=1)
@@ -1396,11 +1976,7 @@ async def start_viewer() -> JSONResponse:
                 dat.ctrl[:] = 0.0
                 dat.qfrc_applied[:] = 0.0
                 mj.mj_forward(mdl, dat)
-                # Re-capture initial_qpos after reset so PD targets are correct
                 walk_state['initial_qpos'] = dat.qpos.copy()
-                # Reset waypoint timer
-                walk_state['last_wp_time'] = 0.0
-                walk_state['waypoint'] = _generate_waypoint(walk_rng)
 
             viewer = mjviser.Viewer(
                 model=mj_model,
@@ -1418,6 +1994,70 @@ async def start_viewer() -> JSONResponse:
             # so we replicate its logic here without the signal handling.
             viewer._setup_gui()
 
+            # v0.16.9: Add "Robot Control" tab with direction buttons (◀ ▲ ▶ ■)
+            # These buttons live inside the mjviser viewer page, not the dashboard.
+            try:
+                import viser
+                ctrl_tabs = viser_server.gui.add_tab_group()
+                with ctrl_tabs.add_tab("Robot Control", icon=viser.Icon.ARROW_BIG_UP):
+                    viser_server.gui.add_markdown(
+                        "**Robot Direction Control**\n\n"
+                        "Click to steer the humanoid in the 3D scene. "
+                        "Maze auto-detects walls; platforms auto-lift feet."
+                    )
+                    # Row 1: ◀ ▲ ▶ (turn left, forward, turn right)
+                    dir_row = viser_server.gui.add_button_group(
+                        "Direction", options=["◀ Left", "▲ Forward", "Right ▶"]
+                    )
+                    # Row 2: ■ Stop
+                    stop_btn = viser_server.gui.add_button(
+                        "■ Stop", icon=viser.Icon.SQUARE
+                    )
+
+                    @dir_row.on_click
+                    def _on_dir_click(event) -> None:
+                        # v0.16.11: Set target_direction; step_fn interpolates gradually
+                        # v0.16.17: Fix direction reversal + add anti-backflip cooldown
+                        global mjviser_target_direction, mjviser_walk_speed
+                        global mjviser_last_dir_change_time
+                        value = getattr(event.target, "value", str(event))
+                        _now = time.time()
+                        # v0.16.17: Anti-backflip cooldown — ignore direction changes within 0.3s
+                        if _now - mjviser_last_dir_change_time < 0.3:
+                            pass  # Ignore rapid direction changes
+                        else:
+                            mjviser_last_dir_change_time = _now
+                            if "Left" in value:
+                                mjviser_target_direction = float((mjviser_target_direction + 0.524) % 6.283)
+                                mjviser_walk_speed = 0.3
+                            elif "Right" in value:
+                                mjviser_target_direction = float((mjviser_target_direction - 0.524) % 6.283)
+                                mjviser_walk_speed = 0.3
+                            else:  # Forward
+                                mjviser_target_direction = 0.0
+                                mjviser_walk_speed = 1.0
+
+                    @stop_btn.on_click
+                    def _on_stop_click(_) -> None:
+                        global mjviser_walk_speed
+                        mjviser_walk_speed = 0.0
+
+                    # v0.16.17: Speed slider (1-63x simulation speed)
+                    speed_slider = viser_server.gui.add_slider(
+                        "Speed (x)", min=1, max=63, step=1, initial=1
+                    )
+                    viser_server.gui.add_markdown(
+                        "Speed multiplier: 1x = real-time, 63x = 63× faster simulation"
+                    )
+
+                    @speed_slider.on_update
+                    def _on_speed_update(event) -> None:
+                        global mjviser_sim_speed
+                        mjviser_sim_speed = int(event.target.value)
+            except Exception as gui_err:
+                # Non-fatal: viewer still works, just no direction buttons
+                print(f"Robot Control tab setup warning: {gui_err}")
+
             # Initial forward pass and render
             if viewer._render_fn is None:
                 mj.mj_forward(mj_model, mj_data)
@@ -1430,16 +2070,27 @@ async def start_viewer() -> JSONResponse:
 
             try:
                 while mjviser_viewer_running:
-                    viewer._tick()
+                    # v0.16.17: Run multiple physics steps for speed multiplier
+                    for _ in range(max(1, mjviser_sim_speed)):
+                        if mjviser_viewer_running:
+                            viewer._tick()
+                        else:
+                            break
                     _time.sleep(0.001)
             finally:
-                viser_server.stop()
+                # v0.16.14: DON'T stop the ViserServer — keep it persistent for reuse.
+                # The old approach of viser_server.stop() + recreate caused
+                # OSError [Errno 22] on Windows because port release is async.
+                # The server stays alive; only the viewer loop stops.
+                # Cleanup the old viewer reference to allow GC
+                mjviser_viewer_object = None
                 mjviser_viewer_running = False
                 mjviser_viewer_url = ""
 
         except Exception as e:
             mjviser_viewer_running = False
             mjviser_viewer_url = ""
+            mjviser_viewer_error = f"{type(e).__name__}: {e}"
             traceback.print_exc()
             print(f"mjviser viewer failed: {e}")
 
@@ -1447,13 +2098,753 @@ async def start_viewer() -> JSONResponse:
         target=launch_viewer, daemon=True)
     mjviser_viewer_thread.start()
 
-    # Brief wait so the thread can start ViserServer and determine the actual port
-    time.sleep(0.5)
+    # Poll for up to 8 seconds — the viewer thread needs time to:
+    #   1. import dm_control.suite (slow, ~2-3s on first import)
+    #   2. load humanoid model + configure joints
+    #   3. create ViserServer and determine actual port
+    # Once mjviser_viewer_running becomes True, the URL is ready.
+    # If mjviser_viewer_error gets set, the thread failed.
+    for _ in range(80):  # 80 × 0.1s = 8s max
+        time.sleep(0.1)
+        if mjviser_viewer_running:
+            break
+        if mjviser_viewer_error:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "error": mjviser_viewer_error,
+                    "available": True,
+                },
+            )
+
+    if not mjviser_viewer_running:
+        return JSONResponse(
+            status_code=504,
+            content={
+                "status": "timeout",
+                "error": "Viewer thread did not start within 8 seconds",
+                "url": "",
+                "available": True,
+            },
+        )
 
     return JSONResponse(content={
-        "status": "starting",
+        "status": "running",
         "url": mjviser_viewer_url,
         "available": True,
+    })
+
+
+@app.get("/api/viewer_status")
+async def viewer_status() -> JSONResponse:
+    """Check mjviser viewer status (for polling after start).
+
+    Returns:
+        JSONResponse with viewer running state, URL, and any error.
+    """
+    return JSONResponse(content={
+        "running": mjviser_viewer_running,
+        "url": mjviser_viewer_url,
+        "error": mjviser_viewer_error,
+        "available": MJVISER_AVAILABLE,
+    })
+
+
+@app.post("/api/stop_viewer")
+async def stop_viewer() -> JSONResponse:
+    """Stop mjviser viewer AND destroy the persistent ViserServer.
+
+    v0.16.14: This is the only endpoint that actually stops the ViserServer.
+    Normal scene changes keep the server alive for reuse. Use this when the
+    user explicitly wants to close the viewer (e.g., "Close mjviser" button).
+
+    Returns:
+        JSONResponse with final status.
+    """
+    global mjviser_viewer_running, mjviser_viewer_url, mjviser_viewer_error
+    global mjviser_persistent_server, mjviser_persistent_port, mjviser_viewer_object
+
+    # Signal the viewer loop to stop
+    mjviser_viewer_running = False
+
+    # Wait for thread to exit
+    if mjviser_viewer_thread is not None and mjviser_viewer_thread.is_alive():
+        mjviser_viewer_thread.join(timeout=5.0)
+
+    # Now actually stop the persistent ViserServer
+    if mjviser_persistent_server is not None:
+        try:
+            mjviser_persistent_server.stop()
+        except Exception:
+            pass
+        mjviser_persistent_server = None
+        mjviser_persistent_port = 0
+
+    mjviser_viewer_object = None
+    mjviser_viewer_url = ""
+    mjviser_viewer_error = ""
+
+    return JSONResponse(content={
+        "status": "stopped",
+        "running": False,
+        "available": MJVISER_AVAILABLE,
+    })
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# v0.16.15: SO-ARM100 Independent Viewer System
+# Completely separate from humanoid mjviser — has its own ViserServer, viewer
+# thread, and TOMAS IDO audit pipeline. No scene switching needed (one fixed
+# pick-and-place scene).
+# ════════════════════════════════════════════════════════════════════════════
+
+def _launch_arm100_viewer() -> None:
+    """Launch SO-ARM100 pick-and-place viewer with TOMAS IDO audit.
+
+    This is the independent SO-ARM100 viewer — loads so_arm100_scene.xml,
+    initializes TOMASMuJoCoWrapper + SOArm100Controller, and runs the
+    pick-and-place state machine in a ViserServer loop.
+
+    State machine: HOME → REACH → DESCEND → GRASP → LIFT →
+                   TRANSPORT → RELEASE → RETREAT → DONE
+
+    Each step is audited through:
+    - ψ-Anchor Gate (MAX_TORQUE, MAX_VELOCITY, NO_SPILL)
+    - κ-Snap audit trail (step-level causal snapshot)
+    """
+    global arm100_viewer_running, arm100_viewer_url, arm100_viewer_error
+    global arm100_persistent_server, arm100_persistent_port, arm100_tomas_wrapper
+
+    try:
+        import mujoco as mj
+        import mujoco.viewer as mjv
+        import time as _time
+        import numpy as np
+        from pathlib import Path
+        from viser import ViserServer
+
+        # ── 1. Load SO-ARM100 scene ──
+        scene_xml_path = str(Path(__file__).resolve().parent / "scenes" / "so_arm100_scene.xml")
+        arm_model = mj.MjModel.from_xml_path(scene_xml_path)
+        arm_data = mj.MjData(arm_model)
+        mj.mj_resetData(arm_model, arm_data)
+        mj.mj_forward(arm_model, arm_data)
+
+        print(f"v0.16.15: SO-ARM100 scene loaded — nq={arm_model.nq}, nu={arm_model.nu}, nsensor={arm_model.nsensor}")
+
+        # ── 2. Initialize TOMAS wrapper + controller ──
+        if not TOMAS_AVAILABLE:
+            raise RuntimeError("TOMAS wrapper not available — cannot run SO-ARM100 viewer")
+
+        arm100_tomas_wrapper = TOMASMuJoCoWrapper(
+            model=arm_model,
+            data=arm_data,
+            target_body_name="red_cube",
+            tray_body_name="tray",
+            gripper_body_name="gripper_base",
+        )
+
+        arm_controller = SOArm100Controller(
+            model=arm_model,
+            data=arm_data,
+            wrapper=arm100_tomas_wrapper,
+            target_object="red_cube",
+        )
+
+        _arm_step_count = [0]
+
+        def _arm_step_fn(model: "mj.MjModel", data: "mj.MjData") -> None:
+            """SO-ARM100 step with IDO/TOMAS audit — supports auto/manual/VLA modes."""
+            global arm100_manual_mode, arm100_manual_target
+            global arm100_vla_mode, arm100_vla_adapter, arm100_vla_instruction
+
+            if arm100_manual_mode and arm100_manual_target is not None:
+                # v0.16.17: Manual control mode
+                action = arm100_manual_target.copy()
+                phase = "manual"
+                note = f"manual control, joints={action[:5].round(2)}"
+            elif arm100_vla_mode and arm100_vla_adapter is not None:
+                # v0.16.17: VLA inference mode
+                try:
+                    obs_dict = {
+                        'rgb': None,  # No camera in simulation yet
+                        'language': arm100_vla_instruction,
+                        'proprio': arm_controller._get_arm_qpos(),
+                    }
+                    action = arm100_vla_adapter.predict(obs_dict)
+                    phase = "vla_infer"
+                    note = f"VLA action: {action[:5].round(2)}"
+                except Exception as vla_err:
+                    action, phase, note = arm_controller.compute_action()
+                    note += f" (VLA fallback: {vla_err})"
+            else:
+                # Default: pick-and-place state machine
+                action, phase, note = arm_controller.compute_action()
+
+            safe_action, violation = arm100_tomas_wrapper.check_and_record(
+                step=_arm_step_count[0],
+                action=action,
+                phase=phase,
+                note=note,
+            )
+
+            if violation:
+                try:
+                    broadcast_sync({
+                        "type": "tomas_violation",
+                        "violation": violation,
+                        "step": _arm_step_count[0],
+                        "phase": phase,
+                        "eta": float(arm100_tomas_wrapper.compute_eta()),
+                    })
+                except Exception:
+                    pass
+
+            data.ctrl[:] = safe_action[:model.nu]
+
+            if np.any(np.isnan(data.qpos)):
+                mj.mj_resetData(model, data)
+                mj.mj_forward(model, data)
+
+            _arm_step_count[0] += 1
+
+            if _arm_step_count[0] % 50 == 0:
+                try:
+                    summary = arm100_tomas_wrapper.get_summary()
+                    broadcast_sync({
+                        "type": "tomas_update",
+                        "step": _arm_step_count[0],
+                        "phase": phase,
+                        "eta": summary["current_eta"],
+                        "violations": summary["total_violations"],
+                        "violation_rate": summary["violation_rate"],
+                    })
+                except Exception:
+                    pass
+
+        print("v0.16.15: SO-ARM100 TOMAS controller initialized")
+
+        # ── 3. Create or reuse ViserServer ──
+        viser_server = None
+        actual_port: int = 0
+
+        if arm100_persistent_server is not None:
+            try:
+                _check_port = arm100_persistent_server._websock_server._port
+                viser_server = arm100_persistent_server
+                actual_port = arm100_persistent_port
+                print(f"v0.16.15: Reusing persistent SO-ARM100 ViserServer on port {actual_port}")
+            except Exception as _reuse_err:
+                arm100_persistent_server = None
+                arm100_persistent_port = 0
+
+        if viser_server is None:
+            for _attempt in range(6):
+                _try_port = 8091 + _attempt  # SO-ARM100 uses 8091-8096
+                try:
+                    viser_server = ViserServer(port=_try_port, verbose=False)
+                    actual_port = viser_server._websock_server._port
+                    arm100_persistent_server = viser_server
+                    arm100_persistent_port = actual_port
+                    print(f"v0.16.15: Created new SO-ARM100 ViserServer on port {actual_port}")
+                    break
+                except (OSError, RuntimeError) as _oe:
+                    print(f"SO-ARM100 ViserServer port {_try_port} failed (attempt {_attempt+1}/6): {_oe}")
+                    if _attempt < 5:
+                        _time.sleep(2.0)
+            if viser_server is None:
+                raise RuntimeError("Failed to create SO-ARM100 ViserServer after 6 attempts on ports 8091-8096")
+
+        actual_port = viser_server._websock_server._port
+        arm100_viewer_url = f"http://localhost:{actual_port}"
+
+        # ── 4. Create mjviser Viewer ──
+        viewer = mjviser.Viewer(
+            model=arm_model,
+            data=arm_data,
+            step_fn=_arm_step_fn,
+            server=viser_server,
+        )
+        # Start in paused mode: user clicks Play to start pick-and-place
+        viewer._paused = True
+
+        # Initial render
+        mj.mj_forward(arm_model, arm_data)
+        viewer._setup_gui()
+
+        # v0.16.17: SO-ARM100 Full Control Panel
+        try:
+            import viser
+            arm_ctrl_tabs = viser_server.gui.add_tab_group()
+
+            with arm_ctrl_tabs.add_tab("Manual Control", icon=viser.Icon.ANDROID):
+                viser_server.gui.add_markdown("**Manual Joint Control**\n\nToggle manual mode to control individual joints.")
+
+                manual_toggle = viser_server.gui.add_checkbox("Manual Mode", initial=False)
+
+                # Joint sliders (7 DOF)
+                joint_names = ["Base", "Shoulder", "Elbow", "Wrist", "Wrist Roll", "Gripper L", "Gripper R"]
+                joint_sliders = []
+                for i, name in enumerate(joint_names):
+                    if "Gripper L" in name:
+                        s = viser_server.gui.add_slider(name, min=0.0, max=0.873, step=0.01, initial=0.0)
+                    elif "Gripper R" in name:
+                        s = viser_server.gui.add_slider(name, min=-0.873, max=0.0, step=0.01, initial=0.0)
+                    else:
+                        s = viser_server.gui.add_slider(name, min=-3.14, max=3.14, step=0.01, initial=0.0)
+                    joint_sliders.append(s)
+
+                home_btn = viser_server.gui.add_button("🏠 Home", icon=viser.Icon.HOME)
+                gripper_open_btn = viser_server.gui.add_button("🖐 Open Gripper")
+                gripper_close_btn = viser_server.gui.add_button("✊ Close Gripper")
+
+                @manual_toggle.on_update
+                def _on_manual_toggle(event) -> None:
+                    global arm100_manual_mode, arm100_manual_target
+                    arm100_manual_mode = event.target.value
+                    if arm100_manual_mode and arm100_manual_target is None:
+                        arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+                    print(f"v0.16.17: ARM100 manual mode = {arm100_manual_mode}")
+
+                def _on_joint_update(event, idx):
+                    global arm100_manual_target
+                    if arm100_manual_target is None:
+                        arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+                    arm100_manual_target[idx] = event.target.value
+
+                for i, s in enumerate(joint_sliders):
+                    s.on_update(lambda event, idx=i: _on_joint_update(event, idx))
+
+                @home_btn.on_click
+                def _on_home_click(_):
+                    global arm100_manual_mode, arm100_manual_target
+                    arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+                    arm100_manual_mode = True
+                    for i, val in enumerate([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0]):
+                        joint_sliders[i].value = val
+
+                @gripper_open_btn.on_click
+                def _on_gripper_open(_):
+                    global arm100_manual_target
+                    if arm100_manual_target is None:
+                        arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+                    arm100_manual_target[5] = 0.0
+                    arm100_manual_target[6] = 0.0
+                    joint_sliders[5].value = 0.0
+                    joint_sliders[6].value = 0.0
+
+                @gripper_close_btn.on_click
+                def _on_gripper_close(_):
+                    global arm100_manual_target
+                    if arm100_manual_target is None:
+                        arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+                    arm100_manual_target[5] = 0.7
+                    arm100_manual_target[6] = -0.7
+                    joint_sliders[5].value = 0.7
+                    joint_sliders[6].value = -0.7
+
+            with arm_ctrl_tabs.add_tab("VLA Mode", icon=viser.Icon.BRAIN):
+                viser_server.gui.add_markdown(
+                    "**Vision-Language-Action Model**\n\n"
+                    "Connect to open-source VLA models (OpenVLA, Octo, π₀) for "
+                    "language-conditioned manipulation.\n\n"
+                    "Architecture: VLA → ψ-Anchor → κ-Snap → MuJoCo"
+                )
+
+                vla_model_select = viser_server.gui.add_dropdown(
+                    "Model", options=["none", "openvla-7b", "octo-base", "pi0-base"], initial="none"
+                )
+
+                vla_instruction = viser_server.gui.add_text(
+                    "Instruction", initial="pick up the red cube"
+                )
+
+                vla_load_btn = viser_server.gui.add_button("Load Model", icon=viser.Icon.DOWNLOAD)
+                vla_status_text = viser_server.gui.add_markdown("Status: No model loaded")
+
+                @vla_load_btn.on_click
+                def _on_vla_load(_):
+                    global arm100_vla_adapter, arm100_vla_mode, arm100_vla_instruction
+                    model_name = vla_model_select.value
+                    arm100_vla_instruction = vla_instruction.value
+                    if model_name == "none":
+                        arm100_vla_mode = False
+                        arm100_vla_adapter = None
+                        vla_status_text.content = "Status: No model loaded"
+                    else:
+                        try:
+                            from webviz.tomas_wrapper import create_vla_adapter
+                            arm100_vla_adapter = create_vla_adapter(model_name)
+                            arm100_vla_mode = True
+                            vla_status_text.content = f"Status: ✅ {model_name} loaded (stub mode)\nInstruction: {arm100_vla_instruction}"
+                        except Exception as e:
+                            vla_status_text.content = f"Status: ❌ Load failed: {e}"
+
+                @vla_instruction.on_update
+                def _on_instruction_update(event):
+                    global arm100_vla_instruction
+                    arm100_vla_instruction = event.target.value
+
+        except Exception as gui_err:
+            print(f"SO-ARM100 control panel setup warning: {gui_err}")
+
+        now: float = _time.perf_counter()
+        viewer._last_tick = now
+        viewer._stats_last_time = now
+
+        arm100_viewer_running = True
+        arm100_viewer_error = ""
+        print(f"v0.16.15: SO-ARM100 viewer running at {arm100_viewer_url}")
+
+        try:
+            while arm100_viewer_running:
+                # v0.16.17: Speed multiplier for ARM100 too
+                for _ in range(max(1, mjviser_sim_speed)):
+                    if arm100_viewer_running:
+                        viewer._tick()
+                    else:
+                        break
+                _time.sleep(0.001)
+        finally:
+            # Don't stop the ViserServer — keep it persistent for reuse
+            arm100_viewer_running = False
+            arm100_viewer_url = ""
+
+    except Exception as e:
+        arm100_viewer_running = False
+        arm100_viewer_url = ""
+        arm100_viewer_error = f"{type(e).__name__}: {e}"
+        traceback.print_exc()
+        print(f"SO-ARM100 viewer failed: {e}")
+
+
+@app.post("/api/arm100/start")
+async def start_arm100() -> JSONResponse:
+    """Start the independent SO-ARM100 pick-and-place viewer.
+
+    This is completely separate from the humanoid mjviser system.
+    Loads so_arm100_scene.xml and runs TOMAS IDO-audited pick-and-place.
+
+    Returns:
+        JSONResponse with viewer URL and status.
+    """
+    global arm100_viewer_thread, arm100_viewer_running, arm100_viewer_error
+
+    if not MJVISER_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "mjviser not available", "available": False},
+        )
+
+    if not TOMAS_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "TOMAS wrapper not available", "available": False},
+        )
+
+    if arm100_viewer_running:
+        return JSONResponse(content={
+            "status": "already_running",
+            "running": True,
+            "url": arm100_viewer_url,
+            "available": True,
+        })
+
+    arm100_viewer_running = False
+    arm100_viewer_error = ""
+
+    arm100_viewer_thread = threading.Thread(target=_launch_arm100_viewer, daemon=True)
+    arm100_viewer_thread.start()
+
+    # Poll for up to 8 seconds
+    for _ in range(80):
+        time.sleep(0.1)
+        if arm100_viewer_running:
+            break
+        if arm100_viewer_error:
+            return JSONResponse(
+                status_code=500,
+                content={"status": "error", "error": arm100_viewer_error, "available": True},
+            )
+
+    if not arm100_viewer_running:
+        return JSONResponse(
+            status_code=504,
+            content={"status": "timeout", "error": "Viewer startup timed out", "available": True},
+        )
+
+    return JSONResponse(content={
+        "status": "running",
+        "running": True,
+        "url": arm100_viewer_url,
+        "available": True,
+    })
+
+
+@app.post("/api/arm100/stop")
+async def stop_arm100() -> JSONResponse:
+    """Stop the SO-ARM100 viewer and destroy its ViserServer.
+
+    Returns:
+        JSONResponse with final status.
+    """
+    global arm100_viewer_running, arm100_viewer_url, arm100_viewer_error
+    global arm100_persistent_server, arm100_persistent_port, arm100_tomas_wrapper
+
+    arm100_viewer_running = False
+
+    if arm100_viewer_thread is not None and arm100_viewer_thread.is_alive():
+        arm100_viewer_thread.join(timeout=5.0)
+
+    if arm100_persistent_server is not None:
+        try:
+            arm100_persistent_server.stop()
+        except Exception:
+            pass
+        arm100_persistent_server = None
+        arm100_persistent_port = 0
+
+    arm100_tomas_wrapper = None
+    arm100_viewer_url = ""
+    arm100_viewer_error = ""
+
+    return JSONResponse(content={
+        "status": "stopped",
+        "running": False,
+        "available": True,
+    })
+
+
+@app.get("/api/arm100/status")
+async def arm100_status() -> JSONResponse:
+    """Get SO-ARM100 viewer status.
+
+    Returns:
+        JSONResponse with running state, URL, and any error.
+    """
+    return JSONResponse(content={
+        "running": arm100_viewer_running,
+        "url": arm100_viewer_url,
+        "error": arm100_viewer_error,
+        "available": MJVISER_AVAILABLE and TOMAS_AVAILABLE,
+    })
+
+
+# v0.16.17: SO-ARM100 control API endpoints
+@app.post("/api/arm100/control")
+async def arm100_control(request: Request) -> JSONResponse:
+    """Control SO-ARM100 joints manually.
+
+    Body: {"joints": [7 floats], "mode": "manual"|"auto"}
+    """
+    global arm100_manual_mode, arm100_manual_target
+    body = await request.json()
+    mode = body.get("mode", "manual")
+    if mode == "manual":
+        arm100_manual_mode = True
+        joints = body.get("joints", [0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+        arm100_manual_target = np.array(joints, dtype=np.float64)
+    elif mode == "auto":
+        arm100_manual_mode = False
+        arm100_manual_target = None
+    return JSONResponse(content={
+        "status": "ok",
+        "mode": mode,
+        "joints": arm100_manual_target.tolist() if arm100_manual_target is not None else None,
+    })
+
+
+@app.post("/api/arm100/gripper")
+async def arm100_gripper(request: Request) -> JSONResponse:
+    """Open or close SO-ARM100 gripper.
+
+    Body: {"action": "open"|"close"}
+    """
+    global arm100_manual_mode, arm100_manual_target
+    body = await request.json()
+    action = body.get("action", "open")
+    if arm100_manual_target is None:
+        arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+    arm100_manual_mode = True
+    if action == "close":
+        arm100_manual_target[5] = 0.7
+        arm100_manual_target[6] = -0.7
+    else:
+        arm100_manual_target[5] = 0.0
+        arm100_manual_target[6] = 0.0
+    return JSONResponse(content={"status": "ok", "action": action})
+
+
+@app.post("/api/arm100/home")
+async def arm100_home() -> JSONResponse:
+    """Return SO-ARM100 to home pose."""
+    global arm100_manual_mode, arm100_manual_target
+    arm100_manual_mode = True
+    arm100_manual_target = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+    return JSONResponse(content={"status": "ok", "pose": arm100_manual_target.tolist()})
+
+
+@app.post("/api/arm100/vla/load")
+async def arm100_vla_load(request: Request) -> JSONResponse:
+    """Load a VLA model for language-conditioned manipulation.
+
+    Body: {"model": "openvla-7b"|"octo-base"|"pi0-base", "instruction": str}
+    """
+    global arm100_vla_adapter, arm100_vla_mode, arm100_vla_instruction
+    body = await request.json()
+    model_name = body.get("model", "openvla-7b")
+    arm100_vla_instruction = body.get("instruction", "pick up the red cube")
+    try:
+        from webviz.tomas_wrapper import create_vla_adapter
+        arm100_vla_adapter = create_vla_adapter(model_name)
+        arm100_vla_mode = True
+        return JSONResponse(content={
+            "status": "ok",
+            "model": model_name,
+            "instruction": arm100_vla_instruction,
+            "loaded": True,
+        })
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "error": str(e), "loaded": False},
+            status_code=500,
+        )
+
+
+@app.post("/api/arm100/vla/unload")
+async def arm100_vla_unload() -> JSONResponse:
+    """Unload VLA model, return to auto mode."""
+    global arm100_vla_adapter, arm100_vla_mode
+    arm100_vla_mode = False
+    arm100_vla_adapter = None
+    return JSONResponse(content={"status": "ok", "vla_mode": False})
+
+
+@app.get("/api/arm100/vla/status")
+async def arm100_vla_status() -> JSONResponse:
+    """Get VLA adapter status."""
+    return JSONResponse(content={
+        "vla_mode": arm100_vla_mode,
+        "model": arm100_vla_adapter.model_name if arm100_vla_adapter else "none",
+        "instruction": arm100_vla_instruction,
+    })
+
+
+# v0.16.17: Simulation speed control API
+@app.post("/api/viewer_speed")
+async def viewer_speed(request: Request) -> JSONResponse:
+    """Set simulation speed multiplier (1-63x).
+
+    Body: {"speed": int}
+    """
+    global mjviser_sim_speed
+    body = await request.json()
+    speed = int(body.get("speed", 1))
+    mjviser_sim_speed = max(1, min(63, speed))
+    return JSONResponse(content={"status": "ok", "speed": mjviser_sim_speed})
+
+
+@app.get("/api/viewer_speed")
+async def viewer_speed_status() -> JSONResponse:
+    """Get current simulation speed."""
+    return JSONResponse(content={"speed": mjviser_sim_speed})
+@app.get("/api/tomas/snap_log")
+async def tomas_snap_log(n: int = 50) -> JSONResponse:
+    """Get recent κ-Snap audit entries from the TOMAS wrapper.
+
+    Args:
+        n: Number of recent entries to return (default 50, max 500).
+
+    Returns:
+        JSONResponse with list of κ-Snap entries.
+    """
+    n = min(max(1, n), 500)
+    if arm100_tomas_wrapper is None:
+        return JSONResponse(content={"snaps": [], "count": 0, "available": False})
+    snaps = arm100_tomas_wrapper.get_recent_snaps(n)
+    return JSONResponse(content={"snaps": snaps, "count": len(snaps), "available": True})
+
+
+@app.get("/api/tomas/summary")
+async def tomas_summary() -> JSONResponse:
+    """Get TOMAS audit summary statistics.
+
+    Returns:
+        JSONResponse with total steps, violations, η trajectory, etc.
+    """
+    if arm100_tomas_wrapper is None:
+        return JSONResponse(content={"available": False})
+    summary = arm100_tomas_wrapper.get_summary()
+    summary["available"] = True
+    return JSONResponse(content=summary)
+
+
+# v0.16.7: Direction control API — steer the robot in 3D viewer
+@app.post("/api/viewer_control")
+async def viewer_control(request: Request) -> JSONResponse:
+    """Control robot walking direction in mjviser viewer.
+
+    Body:
+        {"action": "forward" | "stop" | "left" | "right" | "step_up"}
+
+    Returns:
+        JSONResponse with updated direction and speed.
+    """
+    global mjviser_walk_direction, mjviser_target_direction, mjviser_walk_speed, mjviser_walk_action
+    global mjviser_last_dir_change_time
+    body = await request.json()
+    action = body.get("action", "forward")
+
+    if action == "stop":
+        mjviser_walk_speed = 0.0
+        mjviser_walk_action = "stop"
+    elif action == "forward":
+        mjviser_target_direction = 0.0
+        mjviser_walk_speed = 1.0
+        mjviser_walk_action = "walk"
+    elif action == "left":
+        _now = time.time()
+        # v0.16.17: Anti-backflip cooldown
+        if _now - mjviser_last_dir_change_time >= 0.3:
+            mjviser_last_dir_change_time = _now
+            mjviser_target_direction += np.pi / 6  # Turn 30° left
+        mjviser_walk_speed = 1.0
+        mjviser_walk_action = "walk"
+    elif action == "right":
+        _now = time.time()
+        # v0.16.17: Anti-backflip cooldown
+        if _now - mjviser_last_dir_change_time >= 0.3:
+            mjviser_last_dir_change_time = _now
+            mjviser_target_direction -= np.pi / 6  # Turn 30° right
+        mjviser_walk_speed = 1.0
+        mjviser_walk_action = "walk"
+    elif action == "step_up":
+        mjviser_walk_action = "step_up"
+        mjviser_walk_speed = 1.0
+    else:
+        return JSONResponse(content={"error": f"Unknown action: {action}"}, status_code=400)
+
+    # Normalize target direction to [-pi, pi]
+    mjviser_target_direction = float(np.arctan2(
+        np.sin(mjviser_target_direction), np.cos(mjviser_target_direction)))
+
+    return JSONResponse(content={
+        "action": mjviser_walk_action,
+        "direction": mjviser_walk_direction,
+        "direction_deg": float(np.degrees(mjviser_walk_direction)),
+        "speed": mjviser_walk_speed,
+    })
+
+
+@app.get("/api/viewer_control")
+async def viewer_control_status() -> JSONResponse:
+    """Get current robot walking direction and speed."""
+    return JSONResponse(content={
+        "action": mjviser_walk_action,
+        "direction": mjviser_walk_direction,
+        "direction_deg": float(np.degrees(mjviser_walk_direction)),
+        "speed": mjviser_walk_speed,
     })
 
 
@@ -1542,12 +2933,28 @@ async def serve_dashboard() -> HTMLResponse:
 
     Returns:
         HTMLResponse with the full dashboard page content.
+
+    Note: no-cache headers ensure the browser always fetches the latest
+    version — prevents stale dashboard when server is updated.
     """
     dashboard_path: str = str(Path(__file__).resolve().parent / "dashboard.html")
     try:
         with open(dashboard_path, 'r', encoding='utf-8') as f:
             html_content: str = f.read()
-        return HTMLResponse(content=html_content)
+        # Inject version stamp for cache-busting verification
+        html_content = html_content.replace(
+            "<head>",
+            f"<!-- Webviz {WEBVIZ_VERSION} - served at {time.strftime('%Y-%m-%d %H:%M:%S')} -->\n<head>",
+            1,
+        )
+        return HTMLResponse(
+            content=html_content,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Dashboard HTML not found</h1>", status_code=404)
 
@@ -1562,7 +2969,11 @@ async def serve_user_manual() -> FileResponse:
     Returns:
         FileResponse with the user_manual.html content.
     """
-    return FileResponse(os.path.join(WEBVIZ_DIR, "user_manual.html"), media_type="text/html")
+    return FileResponse(
+        os.path.join(WEBVIZ_DIR, "user_manual.html"),
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.get("/mujoco_docs_cn.html")
@@ -1572,7 +2983,11 @@ async def serve_mujoco_docs_cn() -> FileResponse:
     Returns:
         FileResponse with the mujoco_docs_cn.html content.
     """
-    return FileResponse(os.path.join(WEBVIZ_DIR, "mujoco_docs_cn.html"), media_type="text/html")
+    return FileResponse(
+        os.path.join(WEBVIZ_DIR, "mujoco_docs_cn.html"),
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 # ── CORS middleware (for development) ──

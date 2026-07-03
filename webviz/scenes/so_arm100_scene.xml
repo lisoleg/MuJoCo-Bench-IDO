@@ -1,0 +1,203 @@
+<mujoco model="so_arm100_ido">
+  <!--
+    SO-ARM100 MuJoCo IDO Scene
+    Based on: "From VLA to Embodied Consciousness" (Zhang Feng, 2026)
+    Hardware: SO-ARM100 with ST3215 bus servos, < ¥5,000 platform
+    IDO Integration: ψ-Anchor (MAX_TORQUE=0.05 N·m), κ-Snap audit trail
+
+    Joint Configuration (6-DOF + Gripper):
+      1. Rotation  — base yaw     (gear=50, ±180°)
+      2. Pitch      — shoulder     (gear=50, ±90°)
+      3. Elbow      — elbow        (gear=50, -90°~135°)
+      4. Wrist_Pitch — wrist pitch (gear=30, ±90°)
+      5. Wrist_Roll  — wrist roll  (gear=30, ±180°)
+      6. Gripper     — parallel jaw (gear=20, 0~50mm)
+
+    ST3215 Stall Torque: 0.05 N·m → gear=50 gives ~2.5 N·m at joint
+  -->
+
+  <compiler angle="radian" coordinate="local"/>
+
+  <option>
+    <flag gravity="enable"/>
+  </option>
+
+  <default>
+    <joint armature="0.01" damping="0.5" limited="true"/>
+    <geom contype="1" conaffinity="1" condim="4" friction="0.8 0.02 0.01"/>
+    <position kp="50" kv="5" forcerange="-2.5 2.5"/>
+    <default class="arm_link">
+      <geom type="mesh" rgba="0.3 0.3 0.35 1" group="1"/>
+    </default>
+    <default class="finger">
+      <geom type="box" rgba="0.2 0.6 0.2 1" group="1" friction="1.2 0.05 0.02"/>
+    </default>
+    <default class="object">
+      <geom group="2"/>
+    </default>
+  </default>
+
+  <asset>
+    <material name="mat_base"     rgba="0.15 0.15 0.18 1"/>
+    <material name="mat_arm"      rgba="0.35 0.35 0.40 1"/>
+    <material name="mat_joint"    rgba="0.5 0.5 0.55 1"/>
+    <material name="mat_gripper"  rgba="0.2 0.7 0.2 1"/>
+    <material name="mat_red"      rgba="0.8 0.15 0.15 1"/>
+    <material name="mat_blue"     rgba="0.15 0.4 0.8 1"/>
+    <material name="mat_white"    rgba="0.85 0.85 0.85 1"/>
+    <material name="mat_table"    rgba="0.4 0.3 0.2 1"/>
+    <material name="mat_tray"     rgba="0.2 0.2 0.25 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Ground plane -->
+    <geom name="ground" type="plane" size="2.0 2.0 0.1" material="mat_base" condim="3"/>
+
+    <!-- Lighting -->
+    <light directional="true" diffuse="0.8 0.8 0.8" pos="0 0 3" dir="0 0 -1"/>
+    <light pos="1.5 -1.5 2" diffuse="0.4 0.4 0.4" dir="-0.5 0.5 -1"/>
+
+    <!-- Table -->
+    <body name="table" pos="0.4 0 0.0">
+      <geom name="table_top" type="box" size="0.25 0.35 0.01" pos="0 0 0.40" material="mat_table" condim="3"/>
+      <geom name="table_leg1" type="box" size="0.02 0.02 0.20" pos="0.22 0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
+      <geom name="table_leg2" type="box" size="0.02 0.02 0.20" pos="0.22 -0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
+      <geom name="table_leg3" type="box" size="0.02 0.02 0.20" pos="-0.22 0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
+      <geom name="table_leg4" type="box" size="0.02 0.02 0.20" pos="-0.22 -0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Tray (target placement) -->
+    <body name="tray" pos="0.4 -0.25 0.41">
+      <geom name="tray_geom" type="box" size="0.08 0.08 0.005" material="mat_tray" condim="3"/>
+    </body>
+
+    <!-- Objects to grasp -->
+    <!-- Task A: Red Cube (50g, 5cm) -->
+    <body name="red_cube" pos="0.4 0.15 0.435">
+      <freejoint name="cube_joint"/>
+      <geom name="cube_geom" type="box" size="0.025 0.025 0.025" mass="0.05" material="mat_red" class="object" friction="0.6 0.02 0.01"/>
+    </body>
+
+    <!-- Task B: Blue Ball (2.7g, ping-pong ball) -->
+    <body name="blue_ball" pos="0.4 0.05 0.425">
+      <freejoint name="ball_joint"/>
+      <geom name="ball_geom" type="sphere" size="0.02" mass="0.0027" material="mat_blue" class="object" friction="0.3 0.01 0.005"/>
+    </body>
+
+    <!-- Task C: White Tissue (0.5g, soft) -->
+    <body name="white_tissue" pos="0.4 -0.05 0.422">
+      <freejoint name="tissue_joint"/>
+      <geom name="tissue_geom" type="box" size="0.015 0.015 0.008" mass="0.0005" material="mat_white" class="object" friction="0.15 0.005 0.002"/>
+    </body>
+
+    <!-- ── SO-ARM100 Robot Arm ── -->
+    <body name="arm_base" pos="0 0 0.40">
+      <!-- Base mount -->
+      <geom name="base_plate" type="cylinder" size="0.05 0.015" zaxis="0 0 1" material="mat_base" condim="3"/>
+
+      <body name="shoulder" pos="0 0 0.02">
+        <!-- Joint 1: Rotation (base yaw) -->
+        <joint name="Rotation" type="hinge" axis="0 0 1" range="-3.14 3.14" class="arm_link"/>
+        <geom name="shoulder_geom" type="cylinder" size="0.035 0.02" zaxis="0 0 1" material="mat_joint"/>
+
+        <body name="upper_arm" pos="0 0 0.025">
+          <!-- Joint 2: Pitch (shoulder) -->
+          <joint name="Pitch" type="hinge" axis="1 0 0" range="-1.571 1.571" class="arm_link"/>
+          <geom name="upper_arm_geom" type="box" size="0.02 0.015 0.075" pos="0 0 0.04" material="mat_arm"/>
+
+          <body name="forearm" pos="0 0 0.12">
+            <!-- Joint 3: Elbow -->
+            <joint name="Elbow" type="hinge" axis="1 0 0" range="-1.571 2.356" class="arm_link"/>
+            <geom name="forearm_geom" type="box" size="0.018 0.013 0.07" pos="0 0 0.04" material="mat_arm"/>
+
+            <body name="wrist_pitch" pos="0 0 0.115">
+              <!-- Joint 4: Wrist Pitch -->
+              <joint name="Wrist_Pitch" type="hinge" axis="1 0 0" range="-1.571 1.571" class="arm_link"/>
+              <geom name="wrist_pitch_geom" type="box" size="0.015 0.012 0.03" pos="0 0 0.015" material="mat_joint"/>
+
+              <body name="wrist_roll" pos="0 0 0.04">
+                <!-- Joint 5: Wrist Roll -->
+                <joint name="Wrist_Roll" type="hinge" axis="0 0 1" range="-3.14 3.14" class="arm_link"/>
+                <geom name="wrist_roll_geom" type="cylinder" size="0.014 0.012" zaxis="0 0 1" material="mat_joint"/>
+
+                <body name="gripper_base" pos="0 0 0.025">
+                  <geom name="gripper_base_geom" type="box" size="0.012 0.02 0.01" material="mat_gripper"/>
+
+                  <!-- Left finger -->
+                  <body name="left_finger" pos="0 0.012 0.012">
+                    <joint name="Gripper_Left" type="hinge" axis="0 1 0" range="0 0.873" class="finger"/>
+                    <geom name="left_finger_geom" type="box" size="0.005 0.003 0.04" pos="0 0 0.02" class="finger"/>
+                    <site name="fsr_left" pos="0 0 0.038" size="0.004" rgba="1 0 0 0.3"/>
+                  </body>
+
+                  <!-- Right finger -->
+                  <body name="right_finger" pos="0 -0.012 0.012">
+                    <joint name="Gripper_Right" type="hinge" axis="0 1 0" range="-0.873 0" class="finger"/>
+                    <geom name="right_finger_geom" type="box" size="0.005 0.003 0.04" pos="0 0 0.02" class="finger"/>
+                    <site name="fsr_right" pos="0 0 0.038" size="0.004" rgba="1 0 0 0.3"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- Contact exclusions: don't self-collide within arm segments -->
+  <contact>
+    <exclude body1="arm_base" body2="shoulder"/>
+    <exclude body1="shoulder" body2="upper_arm"/>
+    <exclude body1="upper_arm" body2="forearm"/>
+    <exclude body1="forearm" body2="wrist_pitch"/>
+    <exclude body1="wrist_pitch" body2="wrist_roll"/>
+    <exclude body1="wrist_roll" body2="gripper_base"/>
+    <exclude body1="gripper_base" body2="left_finger"/>
+    <exclude body1="gripper_base" body2="right_finger"/>
+  </contact>
+
+  <!-- Actuators: ST3215 servos with gear ratios -->
+  <!-- Main joints: gear=50 → 0.05 N·m stall × 50 = 2.5 N·m -->
+  <!-- Wrist joints: gear=30 → 0.05 N·m stall × 30 = 1.5 N·m -->
+  <!-- Gripper: gear=20 → 0.05 N·m stall × 20 = 1.0 N·m -->
+  <actuator>
+    <position name="Rotation"    joint="Rotation"     gear="50" kp="50" kv="5" forcerange="-2.5 2.5" ctrlrange="-3.14 3.14"/>
+    <position name="Pitch"       joint="Pitch"         gear="50" kp="50" kv="5" forcerange="-2.5 2.5" ctrlrange="-1.571 1.571"/>
+    <position name="Elbow"       joint="Elbow"         gear="50" kp="50" kv="5" forcerange="-2.5 2.5" ctrlrange="-1.571 2.356"/>
+    <position name="Wrist_Pitch" joint="Wrist_Pitch"   gear="30" kp="30" kv="3" forcerange="-1.5 1.5" ctrlrange="-1.571 1.571"/>
+    <position name="Wrist_Roll"  joint="Wrist_Roll"    gear="30" kp="30" kv="3" forcerange="-1.5 1.5" ctrlrange="-3.14 3.14"/>
+    <position name="Gripper_L"   joint="Gripper_Left"  gear="20" kp="20" kv="2" forcerange="-1.0 1.0" ctrlrange="0 0.873"/>
+    <position name="Gripper_R"   joint="Gripper_Right" gear="20" kp="20" kv="2" forcerange="-1.0 1.0" ctrlrange="-0.873 0"/>
+  </actuator>
+
+  <!-- Sensors for IDO κ-Snap audit -->
+  <sensor>
+    <jointpos name="jp_Rotation"   joint="Rotation"/>
+    <jointpos name="jp_Pitch"      joint="Pitch"/>
+    <jointpos name="jp_Elbow"      joint="Elbow"/>
+    <jointpos name="jp_Wrist_P"    joint="Wrist_Pitch"/>
+    <jointpos name="jp_Wrist_R"    joint="Wrist_Roll"/>
+    <jointpos name="jp_Gripper_L"  joint="Gripper_Left"/>
+    <jointpos name="jp_Gripper_R"  joint="Gripper_Right"/>
+
+    <jointvel name="jv_Rotation"   joint="Rotation"/>
+    <jointvel name="jv_Pitch"      joint="Pitch"/>
+    <jointvel name="jv_Elbow"      joint="Elbow"/>
+    <jointvel name="jv_Wrist_P"    joint="Wrist_Pitch"/>
+    <jointvel name="jv_Wrist_R"    joint="Wrist_Roll"/>
+
+    <touch name="touch_L" site="fsr_left"/>
+    <touch name="touch_R" site="fsr_right"/>
+  </sensor>
+
+  <!-- Custom numeric: ψ-Anchor configuration -->
+  <custom>
+    <numeric name="ST3215_MAX_TORQUE" data="0.05"/>
+    <numeric name="MAX_GRIP_FORCE"    data="2.0"/>
+    <numeric name="NO_SPILL_ANGLE"    data="0.524"/>  <!-- 30 degrees in radians -->
+  </custom>
+
+  <!-- FSR sensor sites on fingertips -->
+  <!-- Placed at the end of each finger for force sensing -->
+</mujoco>

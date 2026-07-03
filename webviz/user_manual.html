@@ -370,6 +370,54 @@ python benchmarks/run_mujoco_bench.py --task humanoid-stand --eval-mode sip --ep
 
 # Web 仪表盘方式
 勾选 "SIP-Bench" toggle → 设置 evolution rounds → 点击 Run</code></pre>
+
+  <h3 class="sub-title" data-i18n="sec6_why_phases">为什么需要 T0/T1/T2 三个阶段？</h3>
+  <div class="quote-block">
+    <p data-i18n="sec6_why_phases_desc"><strong>通俗理解</strong>：就像学骑自行车——T0 测你<strong>初始能力</strong>（还没学过，能骑多远？），T1 测你<strong>学习+演化能力</strong>（经过练习和调整，进步了多少？），T2 测你的<strong>遗忘曲线</strong>（学到的技能能不能保持住，还是很快就忘了？）。三个阶段缺一不可：只有 T0 不知道能否进步，只有 T1 不知道能否保持，只有 T2 无法对比基线。</p>
+  </div>
+  <ul>
+    <li data-i18n="sec6_why_t0"><strong>T0（初始基线）</strong>：测试 Agent 的"出厂能力"，ψ-Anchor 只观察不干预，记录最原始的 η、步数和违规次数</li>
+    <li data-i18n="sec6_why_t1"><strong>T1（迭代演化）</strong>：ψ-Anchor 主动出手，通过 light/freeze 循环调整 δ_K 和 Motor Primitive IC-Value，相当于"教练根据比赛数据调整战术"</li>
+    <li data-i18n="sec6_why_t2"><strong>T2（保持测试）</strong>：使用 T1 演化后的策略，但 ψ-Anchor 不再进一步演化——测试"学到的改善是否持久"，还是只是昙花一现</li>
+  </ul>
+
+  <h3 class="sub-title" data-i18n="sec6_retention_interpret">Retention Gain 解读</h3>
+  <p data-i18n="sec6_retention_formula2"><strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps（T2 保持阶段的平均步数 vs T0 初始阶段的平均步数）</p>
+  <table>
+    <thead><tr><th data-i18n="th_range">范围</th><th data-i18n="th_meaning">含义</th><th data-i18n="th_judgment">判定</th></tr></thead>
+    <tbody>
+      <tr><td><strong>&gt; 1.0</strong></td><td data-i18n="sec6_rg_good_desc">T2 比 T0 更快到达目标（演化后表现改善且保持）</td><td style="color:#22c55e;" data-i18n="sec6_rg_good">✅ 良好</td></tr>
+      <tr><td><strong>= 1.0</strong></td><td data-i18n="sec6_rg_neutral_desc">T2 和 T0 表现相同（演化未带来改善或改善未保持）</td><td style="color:#f59e0b;" data-i18n="sec6_rg_neutral">⚠️ 无变化</td></tr>
+      <tr><td><strong>&lt; 1.0</strong></td><td data-i18n="sec6_rg_bad_desc">T2 比 T0 更慢（演化反而导致退步，遗忘严重）</td><td style="color:#ef4444;" data-i18n="sec6_rg_bad">❌ 退步</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title" data-i18n="sec6_stability_interpret">Stability Index 解读</h3>
+  <p data-i18n="sec6_stability_formula2"><strong>Stability Index</strong> = T2_std_steps / T0_std_steps（T2 步数标准差 vs T0 步数标准差）</p>
+  <table>
+    <thead><tr><th data-i18n="th_range">范围</th><th data-i18n="th_meaning">含义</th><th data-i18n="th_judgment">判定</th></tr></thead>
+    <tbody>
+      <tr><td><strong>&lt; 1.0</strong></td><td data-i18n="sec6_si_good_desc">T2 比 T0 更稳定（方差降低，表现更一致）</td><td style="color:#22c55e;" data-i18n="sec6_si_good">✅ 更稳定</td></tr>
+      <tr><td><strong>= 1.0</strong></td><td data-i18n="sec6_si_neutral_desc">T2 和 T0 稳定性相同</td><td style="color:#f59e0b;" data-i18n="sec6_si_neutral">⚠️ 同等</td></tr>
+      <tr><td><strong>&gt; 1.0</strong></td><td data-i18n="sec6_si_bad_desc">T2 波动更大（演化后反而不稳定）</td><td style="color:#ef4444;" data-i18n="sec6_si_bad">❌ 更不稳定</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub-title" data-i18n="sec6_example">SIP 结果解读示例</h3>
+  <p data-i18n="sec6_example_intro">以下用两个具体任务的 SIP 结果作为示例，展示如何解读指标：</p>
+  <table>
+    <thead><tr><th data-i18n="th_metric">指标</th><th>humanoid-stand</th><th>cheetah-run</th><th data-i18n="th_interpretation">解读</th></tr></thead>
+    <tbody>
+      <tr><td><strong>T0 avg_steps</strong></td><td>850</td><td>600</td><td data-i18n="sec6_ex_t0">T0 基线步数：humanoid 较多（站立难），cheetah 较少（奔跑周期短）</td></tr>
+      <tr><td><strong>T1 avg_steps</strong></td><td>620</td><td>480</td><td data-i18n="sec6_ex_t1">T1 演化后步数下降：ψ-Anchor 演化有效，Agent 学到了更高效的策略</td></tr>
+      <tr><td><strong>T2 avg_steps</strong></td><td>680</td><td>500</td><td data-i18n="sec6_ex_t2">T2 保持测试步数：略高于 T1（轻微遗忘），但仍优于 T0</td></tr>
+      <tr><td><strong>Retention Gain</strong></td><td>850/680 = <strong>1.25</strong></td><td>600/500 = <strong>1.20</strong></td><td data-i18n="sec6_ex_rg">两者均 &gt; 1.0，说明演化改善基本保持（✅ 良好）</td></tr>
+      <tr><td><strong>Stability Index</strong></td><td>0.85</td><td>0.72</td><td data-i18n="sec6_ex_si">两者均 &lt; 1.0，说明 T2 比 T0 更稳定（✅ 改善）</td></tr>
+    </tbody>
+  </table>
+  <div class="quote-block">
+    <p data-i18n="sec6_example_summary"><strong>总结</strong>：humanoid-stand 的 Retention Gain = 1.25 意味着 T2 阶段比 T0 快了 25%，且 Stability Index = 0.85 说明更稳定。这是一个典型的"学习成功+保持良好"案例。如果 Retention Gain &lt; 1.0，则说明 ψ-Anchor 演化策略需要调整——可能 δ_K 调整过于激进，导致 T2 阶段策略退化。</p>
+  </div>
 </div>
 
 <!-- ═══ Section 7: 核心概念通俗解释 ═══ -->
@@ -553,6 +601,47 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
     <li data-i18n="sec9_sb3_eval">evaluate：5 episodes评估，返回 episode_return + success_rate</li>
     <li data-i18n="sec9_sb3_action">choose_action：返回实际PPO/SAC策略动作</li>
   </ul>
+
+  <h3 class="sub-title" data-i18n="sec9_five_metrics">五项核心指标如何对比 Baseline</h3>
+  <p data-i18n="sec9_five_metrics_desc">Dashboard 顶部 5 个指标卡片下方现在显示 baseline 参考值（鼠标悬停 ⓘ 查看详细解释）。以下是每项指标的对比方法：</p>
+  <table>
+    <thead><tr><th data-i18n="th_metric">指标</th><th data-i18n="th_baseline">Baseline 参考</th><th data-i18n="th_ido_target">IDO 目标</th><th data-i18n="th_how_compare">如何对比</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>累计回报</strong></td>
+        <td data-i18n="sec9_bm_return">PPO ~220 / SAC ~180 (100k step)</td>
+        <td>&gt; 300</td>
+        <td data-i18n="sec9_hc_return">IDO episode_return 超过 PPO 即合格，超过 300 为优秀</td>
+      </tr>
+      <tr>
+        <td><strong>成功率</strong></td>
+        <td data-i18n="sec9_bm_success">PPO ~55% / SAC ~48%</td>
+        <td>&gt; 70%</td>
+        <td data-i18n="sec9_hc_success">IDO 成功率超过 PPO 即合格，超过 70% 为优秀</td>
+      </tr>
+      <tr>
+        <td><strong>H (EML残差)</strong></td>
+        <td data-i18n="sec9_bm_eta">PPO ~0.85</td>
+        <td>&lt; 0.5</td>
+        <td data-i18n="sec9_hc_eta">越低越好，&lt; 0.5 表明 η 接近目标。PPO 不直接优化 η 所以残差高</td>
+      </tr>
+      <tr>
+        <td><strong>NVR (Noether违规)</strong></td>
+        <td data-i18n="sec9_bm_nvr">传统 RL ~12 次/episode</td>
+        <td>&lt; 2</td>
+        <td data-i18n="sec9_hc_nvr">IDO 的 Noether-Check 机制使违规远低于传统 RL。&lt; 2 为优秀</td>
+      </tr>
+      <tr>
+        <td><strong>SER (Snap效率)</strong></td>
+        <td data-i18n="sec9_bm_ser">PPO ~0.45</td>
+        <td>&gt; 0.8</td>
+        <td data-i18n="sec9_hc_ser">Snap 效率比 = κ-Snap 触发步数 / 总步数。&gt; 0.8 说明大部分时间处于 PD 稳定模式</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="quote-block">
+    <p data-i18n="sec9_five_metrics_note"><strong>注意</strong>：baseline 参考值来自 dm_control PPO/SAC 100k step 后的典型分数（参考 paperswithcode 和 DeepMind DM Control 论文）。不同任务的 baseline 值不同，Dashboard 会根据当前选中的任务自动加载对应的 baseline 参考。未覆盖的任务使用通用参考值。</p>
+  </div>
 </div>
 
 <!-- ═══ Section 12: v0.5.0 评估基础设施改进 ═══ -->
@@ -914,6 +1003,55 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
       sec6_stability_good: "< 1 → T2 比 T0 更稳定 ✅", sec6_stability_neutral: "= 1 → 稳定性相同",
       sec6_stability_bad: "> 1 → T2 更不稳定",
       sec6_run: "运行 SIP-Bench",
+      sec6_why_phases: "为什么需要 T0/T1/T2 三个阶段？",
+      sec6_why_phases_desc: "<strong>通俗理解</strong>：就像学骑自行车——T0 测你<strong>初始能力</strong>（还没学过，能骑多远？），T1 测你<strong>学习+演化能力</strong>（经过练习和调整，进步了多少？），T2 测你的<strong>遗忘曲线</strong>（学到的技能能不能保持住，还是很快就忘了？）。三个阶段缺一不可：只有 T0 不知道能否进步，只有 T1 不知道能否保持，只有 T2 无法对比基线。",
+      sec6_why_t0: "<strong>T0（初始基线）</strong>：测试 Agent 的"出厂能力"，ψ-Anchor 只观察不干预，记录最原始的 η、步数和违规次数",
+      sec6_why_t1: "<strong>T1（迭代演化）</strong>：ψ-Anchor 主动出手，通过 light/freeze 循环调整 δ_K 和 Motor Primitive IC-Value，相当于"教练根据比赛数据调整战术"",
+      sec6_why_t2: "<strong>T2（保持测试）</strong>：使用 T1 演化后的策略，但 ψ-Anchor 不再进一步演化——测试"学到的改善是否持久"，还是只是昙花一现",
+      sec6_retention_interpret: "Retention Gain 解读",
+      sec6_retention_formula2: "<strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps（T2 保持阶段的平均步数 vs T0 初始阶段的平均步数）",
+      sec6_rg_good_desc: "T2 比 T0 更快到达目标（演化后表现改善且保持）",
+      sec6_rg_good: "✅ 良好",
+      sec6_rg_neutral_desc: "T2 和 T0 表现相同（演化未带来改善或改善未保持）",
+      sec6_rg_neutral: "⚠️ 无变化",
+      sec6_rg_bad_desc: "T2 比 T0 更慢（演化反而导致退步，遗忘严重）",
+      sec6_rg_bad: "❌ 退步",
+      sec6_stability_interpret: "Stability Index 解读",
+      sec6_stability_formula2: "<strong>Stability Index</strong> = T2_std_steps / T0_std_steps（T2 步数标准差 vs T0 步数标准差）",
+      sec6_si_good_desc: "T2 比 T0 更稳定（方差降低，表现更一致）",
+      sec6_si_good: "✅ 更稳定",
+      sec6_si_neutral_desc: "T2 和 T0 稳定性相同",
+      sec6_si_neutral: "⚠️ 同等",
+      sec6_si_bad_desc: "T2 波动更大（演化后反而不稳定）",
+      sec6_si_bad: "❌ 更不稳定",
+      sec6_example: "SIP 结果解读示例",
+      sec6_example_intro: "以下用两个具体任务的 SIP 结果作为示例，展示如何解读指标：",
+      sec6_ex_t0: "T0 基线步数：humanoid 较多（站立难），cheetah 较少（奔跑周期短）",
+      sec6_ex_t1: "T1 演化后步数下降：ψ-Anchor 演化有效，Agent 学到了更高效的策略",
+      sec6_ex_t2: "T2 保持测试步数：略高于 T1（轻微遗忘），但仍优于 T0",
+      sec6_ex_rg: "两者均 &gt; 1.0，说明演化改善基本保持（✅ 良好）",
+      sec6_ex_si: "两者均 &lt; 1.0，说明 T2 比 T0 更稳定（✅ 改善）",
+      sec6_example_summary: "<strong>总结</strong>：humanoid-stand 的 Retention Gain = 1.25 意味着 T2 阶段比 T0 快了 25%，且 Stability Index = 0.85 说明更稳定。这是一个典型的"学习成功+保持良好"案例。如果 Retention Gain &lt; 1.0，则说明 ψ-Anchor 演化策略需要调整——可能 δ_K 调整过于激进，导致 T2 阶段策略退化。",
+      th_range: "范围",
+      th_meaning: "含义",
+      th_judgment: "判定",
+      th_interpretation: "解读",
+      sec9_five_metrics: "五项核心指标如何对比 Baseline",
+      sec9_five_metrics_desc: "Dashboard 顶部 5 个指标卡片下方现在显示 baseline 参考值（鼠标悬停 ⓘ 查看详细解释）。以下是每项指标的对比方法：",
+      th_baseline: "Baseline 参考",
+      th_ido_target: "IDO 目标",
+      th_how_compare: "如何对比",
+      sec9_bm_return: "PPO ~220 / SAC ~180 (100k step)",
+      sec9_hc_return: "IDO episode_return 超过 PPO 即合格，超过 300 为优秀",
+      sec9_bm_success: "PPO ~55% / SAC ~48%",
+      sec9_hc_success: "IDO 成功率超过 PPO 即合格，超过 70% 为优秀",
+      sec9_bm_eta: "PPO ~0.85",
+      sec9_hc_eta: "越低越好，&lt; 0.5 表明 η 接近目标。PPO 不直接优化 η 所以残差高",
+      sec9_bm_nvr: "传统 RL ~12 次/episode",
+      sec9_hc_nvr: "IDO 的 Noether-Check 机制使违规远低于传统 RL。&lt; 2 为优秀",
+      sec9_bm_ser: "PPO ~0.45",
+      sec9_hc_ser: "Snap 效率比 = κ-Snap 触发步数 / 总步数。&gt; 0.8 说明大部分时间处于 PD 稳定模式",
+      sec9_five_metrics_note: "<strong>注意</strong>：baseline 参考值来自 dm_control PPO/SAC 100k step 后的典型分数（参考 paperswithcode 和 DeepMind DM Control 论文）。不同任务的 baseline 值不同，Dashboard 会根据当前选中的任务自动加载对应的 baseline 参考。未覆盖的任务使用通用参考值。",
       sec7_title: "7. 核心概念通俗解释",
       sec7_eta: "η (GaussEx) — 距离目标的度量",
       sec7_eta_quote: "<strong>通俗理解</strong>: η 就像是你离家还有多远。",
@@ -1236,6 +1374,55 @@ python benchmarks/train_baselines.py --tasks reacher-easy --algo ppo --steps 100
       sec6_stability_formula: "<strong>Stability Index</strong> = T2_std_steps / T0_std_steps",
       sec6_stability_good: "< 1 → T2 more stable ✅", sec6_stability_neutral: "= 1 → Same stability",
       sec6_stability_bad: "> 1 → T2 less stable", sec6_run: "Run SIP-Bench",
+      sec6_why_phases: "Why Three Phases: T0/T1/T2?",
+      sec6_why_phases_desc: "<strong>Analogy</strong>: Like learning to ride a bike — T0 tests your <strong>initial ability</strong> (how far can you go before learning?), T1 tests your <strong>learning + evolution ability</strong> (how much did you improve after practice and adjustment?), T2 tests your <strong>forgetting curve</strong> (can you retain what you learned, or does it fade quickly?). All three phases are essential: T0 alone doesn't show if you can improve, T1 alone doesn't show if you can retain, T2 alone can't compare to baseline.",
+      sec6_why_t0: "<strong>T0 (Initial Baseline)</strong>: Tests the Agent's 'out-of-box ability', ψ-Anchor only observes without intervention, records raw η, steps, and violation counts",
+      sec6_why_t1: "<strong>T1 (Iterated Evolution)</strong>: ψ-Anchor actively intervenes, adjusts δ_K and Motor Primitive IC-Value through light/freeze cycles — like a 'coach adjusting tactics based on game data'",
+      sec6_why_t2: "<strong>T2 (Retention Test)</strong>: Uses the evolved strategy from T1, but ψ-Anchor no longer evolves further — tests 'whether the learned improvements persist' or are just fleeting",
+      sec6_retention_interpret: "Retention Gain Interpretation",
+      sec6_retention_formula2: "<strong>Retention Gain</strong> = T0_avg_steps / T2_avg_steps (T2 retention phase avg steps vs T0 initial phase avg steps)",
+      sec6_rg_good_desc: "T2 reaches goal faster than T0 (improvement from evolution persisted)",
+      sec6_rg_good: "✅ Good",
+      sec6_rg_neutral_desc: "T2 performs same as T0 (no improvement or improvement not retained)",
+      sec6_rg_neutral: "⚠️ No change",
+      sec6_rg_bad_desc: "T2 is slower than T0 (evolution caused regression, severe forgetting)",
+      sec6_rg_bad: "❌ Regression",
+      sec6_stability_interpret: "Stability Index Interpretation",
+      sec6_stability_formula2: "<strong>Stability Index</strong> = T2_std_steps / T0_std_steps (T2 steps std dev vs T0 steps std dev)",
+      sec6_si_good_desc: "T2 is more stable than T0 (lower variance, more consistent performance)",
+      sec6_si_good: "✅ More stable",
+      sec6_si_neutral_desc: "T2 has same stability as T0",
+      sec6_si_neutral: "⚠️ Same",
+      sec6_si_bad_desc: "T2 has more variance (evolution made it less stable)",
+      sec6_si_bad: "❌ Less stable",
+      sec6_example: "SIP Result Interpretation Example",
+      sec6_example_intro: "Below are SIP results from two specific tasks as examples, showing how to interpret the metrics:",
+      sec6_ex_t0: "T0 baseline steps: humanoid higher (standing is hard), cheetah lower (running cycles are short)",
+      sec6_ex_t1: "T1 steps decreased after evolution: ψ-Anchor evolution was effective, Agent learned more efficient strategies",
+      sec6_ex_t2: "T2 retention test steps: slightly higher than T1 (mild forgetting), but still better than T0",
+      sec6_ex_rg: "Both &gt; 1.0, showing evolutionary improvements were largely retained (✅ Good)",
+      sec6_ex_si: "Both &lt; 1.0, showing T2 is more stable than T0 (✅ Improved)",
+      sec6_example_summary: "<strong>Summary</strong>: humanoid-stand's Retention Gain = 1.25 means T2 was 25% faster than T0, and Stability Index = 0.85 shows it's more stable. This is a typical 'successful learning + good retention' case. If Retention Gain &lt; 1.0, the ψ-Anchor evolution strategy needs adjustment — perhaps δ_K was adjusted too aggressively, causing strategy degradation in T2.",
+      th_range: "Range",
+      th_meaning: "Meaning",
+      th_judgment: "Judgment",
+      th_interpretation: "Interpretation",
+      sec9_five_metrics: "How to Compare 5 Core Metrics with Baseline",
+      sec9_five_metrics_desc: "The 5 metric cards at the top of the Dashboard now show baseline reference values below them (hover over ⓘ for detailed explanation). Here's how to compare each metric:",
+      th_baseline: "Baseline Ref",
+      th_ido_target: "IDO Target",
+      th_how_compare: "How to Compare",
+      sec9_bm_return: "PPO ~220 / SAC ~180 (100k step)",
+      sec9_hc_return: "IDO episode_return exceeding PPO is acceptable, exceeding 300 is excellent",
+      sec9_bm_success: "PPO ~55% / SAC ~48%",
+      sec9_hc_success: "IDO success rate exceeding PPO is acceptable, exceeding 70% is excellent",
+      sec9_bm_eta: "PPO ~0.85",
+      sec9_hc_eta: "Lower is better, &lt; 0.5 shows η approaching target. PPO doesn't optimize η directly so residual is high",
+      sec9_bm_nvr: "Traditional RL ~12 per episode",
+      sec9_hc_nvr: "IDO's Noether-Check mechanism keeps violations far below traditional RL. &lt; 2 is excellent",
+      sec9_bm_ser: "PPO ~0.45",
+      sec9_hc_ser: "Snap Efficiency Ratio = κ-Snap triggered steps / total steps. &gt; 0.8 means mostly in PD stabilization mode",
+      sec9_five_metrics_note: "<strong>Note</strong>: Baseline reference values come from dm_control PPO/SAC typical scores after 100k steps (referencing paperswithcode and DeepMind DM Control paper). Different tasks have different baseline values; the Dashboard auto-loads the corresponding baseline based on the selected task. Tasks not covered use generic reference values.",
       sec7_title: "7. Core Concepts Explained",
       sec7_eta: "η (GaussEx) — Distance to Goal",
       sec7_eta_quote: "<strong>Analogy</strong>: η is how far you are from home. Smaller η = closer to goal.",

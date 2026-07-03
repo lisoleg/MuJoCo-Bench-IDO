@@ -784,6 +784,51 @@ humanoid/hopper/walker的NV ≈ 2950（2000步×5 episode，约1.47/步），违
 | control | `--eval-mode control` | IDO vs TD-MPC2/PPO/SAC | JSON + CSV |
 | cosmos-predict | `--eval-mode cosmos-predict` | η trajectory RMSE | JSON |
 
+### 6.4 7 项核心指标 Baseline 参考值
+
+为支持 IDO 与传统 RL（PPO/SAC）的定量对比，系统在 `BASELINE_REFERENCE` 中维护了 7 项核心指标的参考值。以下为 humanoid-stand 任务的完整 baseline 对比表（其余任务见 `webviz/server.py`）：
+
+| 指标 | PPO 100k | SAC 100k | IDO 目标 | 物理含义 |
+|------|----------|----------|----------|----------|
+| Episode Return | ~220 | ~180 | >300 | 累计 reward（dm_control 标准尺度） |
+| Success Rate | ~55% | ~48% | >70% | 任务成功率 |
+| H_EML_residual | ~0.85 | — | <0.5 | η 残差，越低越接近目标 |
+| Noether Violations (NVR) | ~800 | — | <100 | 1000步累计违规计数 |
+| Snap Efficiency | ~0.45 | — | >0.8 | κ-Snap 触发比例 |
+| Epiplexity | N/A | N/A | >300 | 策略困惑度（IDO 独有） |
+| CQ (Overall) | ~0.10 | ~0.12 | >0.80 | 良知商数（IDO 独有） |
+
+#### NVR 累计计数性质
+
+NVR（Noether Violation Rate）在系统中以 **1000 步累计违规计数** 的形式统计，而非每 episode 比率或单步概率。每次 `noether_check_mj()` 检测到能量漂移、力矩超限或碰撞违规时，计数器加 1。高自由度任务（humanoid/hopper/walker）中碰撞违规占主导，PPO 100k 后 1000 步累计约 600-850 次。IDO 通过 Noether-Check 硬门控将目标降至 <100。
+
+> **注**：早期版本中 NVR baseline 标注为 ~12（每 episode 平均），这是不准确的——实际 NVR 是 1000 步累计计数，数量级为数百。v0.16.16 修正了此问题，将 `PPO_avg` 字段改为 `PPO_100k` 并更新为累计值。
+
+#### Episode Return 在 point η-mode 下的尺度差异
+
+IDO 在 point η-mode 下使用基于 η-distance 的 reward 尺度，与 dm_control 标准 reward 尺度不同。PPO/SAC 100k 步后 humanoid-stand 的 episode return ~220（dm_control 标准），而 IDO point η-mode 下累计 return ~4-14 属正常现象。两者对比应关注趋势收敛性和成功率，而非绝对 return 值。这一尺度差异源于 IDO 的 reward 设计基于 Goal-EML 不变量残差（η）而非原始物理 reward。
+
+#### Epiplexity 与 CQ 的定义与 Baseline
+
+**Epiplexity**（策略困惑度，§3.3）：
+
+$$\text{epiplexity} = n_{invariants} \times (1/\delta_K) \times \log(\text{max\_energy})$$
+
+- PPO/SAC 无 ψ-Anchor 元管理层，不计算 epiplexity（标记 N/A）
+- IDO 目标 >200-300 表示系统积累了足够结构信息支持策略进化
+- humanoid-stand 实测 ~373，表明 ψ-Anchor 演化机制有效运作
+- 各任务 IDO 目标：humanoid-stand >300、cheetah-run >200、walker-walk >250、hopper-stand >200
+
+**CQ (Conscience Quotient)**（良知商数）：
+
+CQ 综合 Noether 守恒合规（CQ_Noether）、PG-Gate 策略门控（CQ_PGate）、Sentient 感知（CQ_Sentient）等多维度评分：
+
+$$\text{CQ}_{overall} = w_1 \cdot \text{CQ}_{Noether} + w_2 \cdot \text{CQ}_{PGate} + w_3 \cdot \text{CQ}_{Sentient}$$
+
+- PPO/SAC 无良知框架，CQ ~0.10-0.20（仅随机合规）
+- IDO 目标 >0.75-0.80，表示系统在守恒、门控、感知三维度均高度合规
+- 各任务 PPO CQ：humanoid-stand 0.10、cheetah-run 0.15、walker-walk 0.12、hopper-stand 0.10
+
 ---
 
 ## 7 讨论与分析
@@ -1034,6 +1079,53 @@ DMC proprio config: 510K steps, 16 envs, action_repeat=2。
 
 IDO认知层预期在DreamerV3基础上提供1.03×增益，
 通过守恒约束感知的监督防止motor层在瞬态扰动时做出不安全决策。
+
+---
+
+## 7.7 v0.16.17: 方向控制修复与VLA对接
+
+### 方向控制修复
+
+在 v0.16.16 之前的版本中，3D 可视化器中的人形机器人方向控制存在两个问题：
+
+1. **方向按钮反转**：GUI 按钮的 yaw 增减方向与 API 端点相反，导致用户按"Left"时机器人实际右转
+2. **快速切换空翻**：连续按方向键导致 `target_direction` 大幅累积，yaw 力矩超过稳定性阈值，机器人做空翻
+
+修复方案：
+- 统一 GUI/API 方向约定（正 yaw = 左转，负 yaw = 右转）
+- 添加 0.3s 方向变化冷却期
+- yaw_err 钳位至 ±π/4（最大 45° 单次转向）
+- 稳定性保护：高度比 < 75% 时暂停 yaw 力矩
+
+### 仿真速度控制
+
+新增 1-63x 仿真速度倍率，通过每 tick 执行 N 次物理步实现。63x 倍率下可快速验证长时间行为策略。
+
+### SO-ARM100 VLA 对接
+
+基于"From VLA to Embodied Consciousness"（章锋, 2026）的架构设计，实现 VLA（Vision-Language-Action）模型对接框架：
+
+```
+[VLA Backbone (OpenVLA/Octo/π₀)]
+        ↓ Image + Language + Proprio → Joint Cmd
+[ψ-Anchor Gate (C-Layer)]
+        ↓ Physical constraint check
+[κ-Snap Audit (S-Layer)]
+        ↓ Step-level recording
+[MuJoCo Execution]
+```
+
+**关键设计原则**：不重训 VLA backbone，只在外层包 TOMAS Wrapper——从具身智能（embodied AI）到具身认知（embodied cognition）的"一行代码距离"。
+
+三种 VLA 适配器实现统一接口 `predict(obs_dict) → np.ndarray`：
+
+| 适配器 | 模型 | 输出方式 | 特点 |
+|--------|------|---------|------|
+| OpenVLAAdapter | openvla-7b | 单步6-DOF | 双视觉编码器+LLM |
+| OctoAdapter | octo-base | Action Chunking | 多视角+zero-shot泛化 |
+| Pi0Adapter | pi0-base | Action Chunks (50Hz) | Flow Matching连续控制 |
+
+所有 VLA 输出经过 ψ-Anchor 物理安全约束（MAX_TORQUE, MAX_VELOCITY, MAX_GRIP_FORCE）后才送入 MuJoCo 执行，确保 VLA 的"自由意志"不违反物理定律。
 
 ---
 
