@@ -161,7 +161,15 @@ class MotorPrimitives:
         """
         Kp: float = 30.0
         Kd: float = 3.0
-        err = target_pos - ee_pos
+        # v0.6.5: Shape safety — pad ee_pos / target_pos to same 3D shape
+        # before subtraction. Locomotion-mode tasks should bypass pd_stabilize
+        # entirely, but this prevents crashes if they don't.
+        if ee_pos.shape[0] < 3:
+            ee_pos = np.pad(ee_pos, (0, 3 - ee_pos.shape[0]), constant_values=0.0)
+        if target_pos.shape[0] < 3:
+            target_pos = np.pad(target_pos, (0, 3 - target_pos.shape[0]), constant_values=0.0)
+        min_dim = min(target_pos.shape[0], ee_pos.shape[0])
+        err = target_pos[:min_dim] - ee_pos[:min_dim]
         delta = Kp * err
         ctrl_delta = np.zeros_like(phy.data.ctrl)
         if self.n_joints >= 2:
@@ -407,6 +415,15 @@ class IDOMuJoCoAgent:
                     if not ee_pos_extracted:
                         obs['ee_pos'] = phys.data.qpos[:min(3, len(phys.data.qpos))].copy()
 
+        # ── v0.6.5: Shape safety — pad ee_pos to at least 3D ──
+        # Some 2D environments (swimmer, fish) produce 2D ee_pos via
+        # to_target or qpos[:2]. Downstream pd_stabilize and η computation
+        # expect 3D arrays. Pad with zeros so shape mismatch never crashes.
+        ee_arr = obs.get('ee_pos', np.zeros(3))
+        if ee_arr.shape[0] < 3:
+            ee_arr = np.pad(ee_arr, (0, 3 - ee_arr.shape[0]), constant_values=0.0)
+        obs['ee_pos'] = ee_arr[:3].copy()
+
         # Generalized positions and velocities (clipped to model dimensions)
         nq: int = min(phys.model.nq, len(phys.data.qpos))
         obs['qpos'] = phys.data.qpos[:nq].copy()
@@ -583,7 +600,9 @@ class IDOMuJoCoAgent:
                     self.macros, evo_policy)
 
         # ── Near-Goal: PD Stabilize + Task Controller ──
-        if eta < self.kappa_thresh:
+        # v0.6.5: locomotion-mode tasks skip pd_stabilize entirely —
+        # Cartesian ee→target PD is meaningless for velocity goals.
+        if eta < self.kappa_thresh and self.goal.eta_mode != 'locomotion':
             # Blend MotorPrimitives pd_stabilize with task controller
             # for near-goal refinement
             delta = self.mp.pd_stabilize(phys, self.goal.target_pos,

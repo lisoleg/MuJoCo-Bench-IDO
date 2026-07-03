@@ -58,6 +58,15 @@ from core.kappa_snap_mj import FlowMatchingEtaPredictor
 
 IDO_RUN_MUJOCO_BENCH_VERSION: str = "v0.3.0"
 
+# ── v0.6.5: dm_control name mapping ──
+# Our TASK_REGISTRY keys use '-' as separator, but some dm_control
+# task names differ from the split convention. This dict maps our
+# task key to the actual (domain, task_name) tuple for suite.load().
+DM_CONTROL_TASK_MAP: dict = {
+    'swimmer-swim6':   ('swimmer', 'swimmer6'),
+    'swimmer-swim15':  ('swimmer', 'swimmer15'),
+}
+
 TASK_REGISTRY: dict = {
     'humanoid-stand':            make_humanoid_stand_eml,
     'humanoid-walk':             make_humanoid_walk_eml,
@@ -141,6 +150,10 @@ def _import_env(task: str):
     calls dm_control.suite.load(). Falls back to error messages if
     dm_control is not installed or the task name is invalid.
 
+    v0.6.5: Uses DM_CONTROL_TASK_MAP for name mismatches between
+    our registry keys and dm_control's (domain, task) naming.
+    Example: 'swimmer-swim6' -> ('swimmer', 'swimmer6').
+
     Args:
         task: Task identifier string (e.g., 'humanoid-stand').
 
@@ -149,7 +162,10 @@ def _import_env(task: str):
     """
     try:
         import dm_control.suite as suite
-        domain, task_name = task.split('-', 1)
+        if task in DM_CONTROL_TASK_MAP:
+            domain, task_name = DM_CONTROL_TASK_MAP[task]
+        else:
+            domain, task_name = task.split('-', 1)
         return suite.load(domain_name=domain, task_name=task_name)
     except ImportError:
         print("ERROR: dm_control not installed. pip install dm_control mujoco")

@@ -663,6 +663,12 @@ def make_fish_swim_eml(physics,
         max_energy_inject=200.0,
         pos_tol=0.05,
         ori_tol=0.15,
+        # v0.6.5: locomotion η-mode for fish (forward swimming)
+        eta_mode='locomotion',
+        target_speed=0.3,
+        target_height=0.0,
+        target_upright=1.0,
+        eta_weights={'vel': 0.7, 'height': 0.0, 'upright': 0.3},
     )
 
 
@@ -864,6 +870,12 @@ def make_swimmer_swim6_eml(physics,
         pos_tol=0.10,
         ori_tol=0.0,
         collide_thresh=0.05,  # locomotion: body segments naturally close
+        # v0.6.5: locomotion η-mode for swimmer (forward velocity goal)
+        eta_mode='locomotion',
+        target_speed=0.3,     # dm_control swimmer target ~0.3 m/s forward
+        target_height=0.0,    # swimmer is 2D — height not meaningful
+        target_upright=1.0,   # always upright in 2D swimmer
+        eta_weights={'vel': 1.0, 'height': 0.0, 'upright': 0.0},  # only velocity matters
     )
 
 
@@ -890,4 +902,10 @@ def make_swimmer_swim15_eml(physics,
         pos_tol=0.10,
         ori_tol=0.0,
         collide_thresh=0.05,  # locomotion: body segments naturally close
+        # v0.6.5: locomotion η-mode for swimmer (forward velocity goal)
+        eta_mode='locomotion',
+        target_speed=0.3,
+        target_height=0.0,
+        target_upright=1.0,
+        eta_weights={'vel': 1.0, 'height': 0.0, 'upright': 0.0},
     )

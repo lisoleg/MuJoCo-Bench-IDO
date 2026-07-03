@@ -46,6 +46,7 @@ from benchmarks.run_mujoco_bench import (
     _aggregate_metrics,
     _import_env,
 )
+from benchmarks.run_mujoco_bench import DM_CONTROL_TASK_MAP
 from agent.mujoco_ido_agent import IDOMuJoCoAgent
 from agent.psi_anchor import PsiAnchor
 from core.goal_eml_mj import GoalEML
@@ -53,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.6.1"
+WEBVIZ_VERSION: str = "v0.6.5"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -315,6 +316,9 @@ def run_episode_with_streaming(
             ee_pos = [float(v) for v in ee_arr]
         except (KeyError, IndexError):
             ee_arr = z_i.get('ee_pos', np.zeros(3))
+            # v0.6.5: pad 2D ee_pos to 3D for swimmer/fish (2D environments)
+            if ee_arr.shape[0] < 3:
+                ee_arr = np.pad(ee_arr, (0, 3 - ee_arr.shape[0]), constant_values=0.0)
             ee_pos = [float(v) for v in ee_arr[:3]]
 
         # Target position
@@ -367,16 +371,24 @@ def run_episode_with_streaming(
         broadcast_sync(step_data)
 
         # Goal achievement check — only for point η-mode tasks (reacher/manipulator/humanoid)
-        # Locomotion η-mode tasks (walker/cheetah/hopper) use TASK_SUCCESS_CRITERIA instead
+        # Locomotion η-mode tasks (walker/cheetah/hopper/swimmer) use TASK_SUCCESS_CRITERIA instead
         if agent.goal.eta_mode != 'locomotion':
             ee: Optional[np.ndarray] = None
             try:
                 ee = env.physics.named.data.xpos['right_hand', :].copy()
             except (KeyError, IndexError):
-                ee = z_i.get('ee_pos', None)
+                ee_raw = z_i.get('ee_pos', None)
+                if ee_raw is not None:
+                    # v0.6.5: pad 2D ee to 3D for compatibility with 3D target_pos
+                    if ee_raw.shape[0] < 3:
+                        ee = np.pad(ee_raw, (0, 3 - ee_raw.shape[0]), constant_values=0.0)
+                    else:
+                        ee = ee_raw
 
             if ee is not None:
-                dist: float = np.linalg.norm(ee - agent.goal.target_pos)
+                # v0.6.5: ensure ee and target_pos have same shape before norm
+                min_dim = min(ee.shape[0], agent.goal.target_pos.shape[0])
+                dist: float = np.linalg.norm(ee[:min_dim] - agent.goal.target_pos[:min_dim])
                 if dist < agent.goal.pos_tol:
                     success = True
                     break
@@ -433,6 +445,8 @@ def _run_benchmark_background(request: RunRequest) -> None:
     kappa_thresh: float = request.kappa_thresh
 
     try:
+        # v0.6.5: Validate task name before loading env
+        # (catches swimmer naming mismatches etc. before they cause sys.exit in thread)
         env = _import_env(task)
         goal_factory = TASK_REGISTRY.get(task)
         if goal_factory is None:
@@ -506,12 +520,13 @@ def _run_benchmark_background(request: RunRequest) -> None:
         with open(out_path, 'w') as f:
             json.dump({'summary': summary, 'episodes': results}, f, indent=2)
 
-    except Exception as e:
-        print(f"[_run_benchmark_background] EXCEPTION: {e}")
+    except (Exception, SystemExit) as e:
+        err_msg: str = str(e) if not isinstance(e, SystemExit) else f"Task '{task}' failed to load (SystemExit)"
+        print(f"[_run_benchmark_background] EXCEPTION: {err_msg}")
         traceback.print_exc()
         broadcast_sync({
             "type": "error",
-            "message": f"Benchmark error: {str(e)}",
+            "message": f"Benchmark error: {err_msg}",
             "traceback": traceback.format_exc(),
         })
 
@@ -542,6 +557,8 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
     evolution_rounds: int = request.evolution_rounds
 
     try:
+        # v0.6.5: Validate task name before loading env
+        # (catches swimmer naming mismatches etc. before they cause sys.exit in thread)
         env = _import_env(task)
         goal_factory = TASK_REGISTRY.get(task)
         if goal_factory is None:
@@ -772,12 +789,13 @@ def _run_sip_benchmark_background(request: RunRequest) -> None:
         with open(out_path, 'w') as f:
             json.dump(sip_result, f, indent=2, default=str)
 
-    except Exception as e:
-        print(f"[_run_sip_benchmark_background] EXCEPTION: {e}")
+    except (Exception, SystemExit) as e:
+        err_msg: str = str(e) if not isinstance(e, SystemExit) else f"Task '{task}' failed to load (SystemExit)"
+        print(f"[_run_sip_benchmark_background] EXCEPTION: {err_msg}")
         traceback.print_exc()
         broadcast_sync({
             "type": "error",
-            "message": f"SIP-Bench error: {str(e)}",
+            "message": f"SIP-Bench error: {err_msg}",
             "traceback": traceback.format_exc(),
         })
 
@@ -980,19 +998,36 @@ async def get_merkle_chain() -> JSONResponse:
 async def set_mjviser_scene(req: SceneRequest) -> JSONResponse:
     """Set the 3D scene type for mjviser viewer.
 
+    v0.6.5: If viewer is already running, stops it so the user can
+    restart with the new scene. The viewer does NOT auto-restart
+    because ViserServer cleanup + restart in the same thread is
+    unreliable — instead, we stop cleanly and return a hint.
+
     Args:
-        req: SceneRequest with scene_type field ("plain" or "obstacle").
+        req: SceneRequest with scene_type field ("plain" or "obstacle" etc.).
 
     Returns:
-        JSONResponse with the current scene_type.
+        JSONResponse with the current scene_type and viewer_restarted hint.
     """
-    global mjviser_scene_type
+    global mjviser_scene_type, mjviser_viewer_running
     valid_scenes = {"plain", "obstacle", "ramp", "stairs", "floating", "maze"}
     if req.scene_type not in valid_scenes:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Invalid scene type. Must be one of: {', '.join(sorted(valid_scenes))}.")
     mjviser_scene_type = req.scene_type
-    return JSONResponse(content={"scene_type": mjviser_scene_type})
+
+    # v0.6.5: If viewer is running, stop it so new scene takes effect on next start
+    viewer_was_running: bool = mjviser_viewer_running
+    if mjviser_viewer_running:
+        mjviser_viewer_running = False  # Signal viewer thread to exit
+        # Give the thread a moment to clean up
+        # (the thread's finally block sets mjviser_viewer_running=False and clears URL)
+
+    return JSONResponse(content={
+        "scene_type": mjviser_scene_type,
+        "viewer_was_running": viewer_was_running,
+        "hint": "Scene changed. Click 'Open mjviser' to restart with the new scene." if viewer_was_running else "",
+    })
 
 
 @app.post("/api/start_viewer")

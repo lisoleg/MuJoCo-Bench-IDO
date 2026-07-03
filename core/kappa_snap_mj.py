@@ -359,7 +359,24 @@ def gauss_ex_residual(z_i: dict,
                 torso_upright = float(z_body[2])  # z-component of body z-axis
 
         # Get locomotion η weights from goal.eta_weights (or defaults)
-        eta_w: dict = getattr(goal, 'eta_weights', None) or {}
+        # v0.6.5: Support both dict and ndarray eta_weights formats.
+        # ndarray format: [w_vel, w_height, w_upright, w_eng] (legacy)
+        # dict format: {'vel': w_vel, 'height': w_height, ...} (preferred)
+        raw_weights = getattr(goal, 'eta_weights', None)
+        if isinstance(raw_weights, dict):
+            eta_w: dict = raw_weights
+        elif isinstance(raw_weights, np.ndarray):
+            # Legacy ndarray format: [w_vel, w_height, w_upright, w_eng]
+            eta_w = {
+                'w_vel': float(raw_weights[0]) if len(raw_weights) > 0 else 1.0,
+                'w_height': float(raw_weights[1]) if len(raw_weights) > 1 else 0.5,
+                'w_upright': float(raw_weights[2]) if len(raw_weights) > 2 else 0.3,
+                'w_eng': float(raw_weights[3]) if len(raw_weights) > 3 else 0.01,
+            }
+        elif raw_weights is None:
+            eta_w = {}
+        else:
+            eta_w = {}
         w_vel_loc: float = float(eta_w.get('w_vel', 1.0))
         w_height_loc: float = float(eta_w.get('w_height', 0.5))
         w_upright_loc: float = float(eta_w.get('w_upright', 0.3))

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.6.1</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.6.5</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -288,7 +288,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.6.1</span>
+      <span class="text-sm font-medium text-slate-400">v0.6.5</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -1225,6 +1225,11 @@
           isRunning = false;
           updateRunningUI(false);
           addLog(`Run complete! Avg steps=${data.summary.avg_steps.toFixed(1)}, Avg η=${data.summary.avg_final_eta.toFixed(6)}`);
+          // v0.6.5: Update final success rate from summary if available
+          if (data.summary && data.summary.success_rate !== undefined) {
+            const finalSR = Math.round(data.summary.success_rate * 100);
+            document.getElementById('metricSuccess').textContent = finalSR + '%';
+          }
           break;
 
         case 'sip_phase_start':
@@ -1360,8 +1365,7 @@
 
       // ── Update 5 Core Metrics ──
       document.getElementById('metricReturn').textContent = data.episode_return.toFixed(2);
-      const successPct = data.success ? 100 : 0;  // Will be updated per-episode
-      document.getElementById('metricSuccess').textContent = successPct + '%';
+      // Success rate is only updated on episode_complete (not per-step, to avoid clobbering)
       document.getElementById('metricEta').textContent = data.eta.toFixed(4);
       document.getElementById('metricNVR').textContent = data.noether_violations;
       // SER = steps where kappa_snap_triggered / total steps (computed cumulatively)
@@ -1674,6 +1678,12 @@
       .then(res => res.json())
       .then(data => {
         addLog(`3D scene set to: ${data.scene_type}`);
+        // v0.6.5: If viewer was running, it was stopped — show hint to restart
+        if (data.viewer_was_running) {
+          addLog('⚠️ Viewer stopped. Click "Open mjviser" to restart with new scene.');
+          document.getElementById('viewerStatus').textContent =
+            currentLang === 'zh' ? '场景已切换，请重新打开 mjviser' : 'Scene changed, re-open mjviser';
+        }
       })
       .catch(err => {
         addLog(`Scene request error: ${err.message}`);
@@ -1767,7 +1777,7 @@
       initCharts();
       connectWebSocket();
       setInterval(pollStatus, 2000);
-      addLog('Dashboard initialized v0.6.1');
+      addLog('Dashboard initialized v0.6.5');
     });
   </script>
 
