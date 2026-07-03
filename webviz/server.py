@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.9.1"
+WEBVIZ_VERSION: str = "v0.9.2"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -1107,10 +1107,15 @@ async def start_viewer() -> JSONResponse:
             if mjviser_scene_type == "plain":
                 # Default: load dm_control humanoid-stand
                 env_ref = suite.load("humanoid", "stand")
-                env_ref.reset()  # Reset to get initial upright pose
+                env_ref.reset()  # Reset to get initial pose
                 mj_model = env_ref.physics.model._model
                 mj_data = env_ref.physics.data._data
-                target_height = 1.28  # dm_control humanoid natural standing height
+                # v0.9.2: dm_control randomizes initial quaternion (often upside-down).
+                # Force upright orientation so the viewer shows a standing humanoid.
+                mj_data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0])  # identity = upright
+                mj_data.qvel[:] = 0.0
+                mj.mj_forward(mj_model, mj_data)
+                target_height = float(mj_data.qpos[2])  # Use actual initial height (~1.5)
             else:
                 # Custom scene: load XML from webviz/scenes/
                 scene_file_map: dict = {
@@ -1207,15 +1212,18 @@ async def start_viewer() -> JSONResponse:
             ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
             DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
             MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
-            # v0.9.1: Warmup phase — stronger assist for first 2 seconds after unpause
+            # v0.9.2: Micro-gravity approach — 95% gravity cancel prevents both floating AND falling.
+            # The robot appears to stand/walk in a near-weightless environment (like ISS).
+            # This is a VISUALIZATION, not a real physics walking simulation.
             WARMUP_DURATION: float = 2.0     # Warmup phase duration (seconds of sim time)
-            WARMUP_GRAVITY_ASSIST: float = 0.85  # 85% gravity assist during warmup
+            WARMUP_GRAVITY_ASSIST: float = 0.95  # 95% gravity cancel during warmup (near-weightless)
 
-            # Mass-proportional PD gains for root stabilization (v0.4.5: reduced levitation)
-            KP_HEIGHT_GENTLE: float = humanoid_mass * 15.0   # Gentle height assist (NOT strong levitation spring)
+            # Mass-proportional PD gains for root stabilization
+            # v0.9.2: Unified 95% gravity cancel — no more adaptive 50/30/10% that caused sinking
+            KP_HEIGHT_GENTLE: float = humanoid_mass * 20.0   # Moderate height PD
             KD_HEIGHT: float = humanoid_mass * 10.0    # Height damping
-            KP_HEIGHT_WARMUP: float = humanoid_mass * 40.0  # Stronger PD during warmup phase
-            KD_HEIGHT_WARMUP: float = humanoid_mass * 15.0  # Stronger damping during warmup
+            KP_HEIGHT_WARMUP: float = humanoid_mass * 30.0  # Stronger PD during warmup phase
+            KD_HEIGHT_WARMUP: float = humanoid_mass * 12.0  # Stronger damping during warmup
             KP_MOVE: float = humanoid_mass * 1.5       # Horizontal velocity PD (gentle — gait-driven, not push)
             KP_TILT: float = humanoid_mass * 7.5       # Orientation tilt PD
             KD_TILT: float = humanoid_mass * 2.5       # Tilt damping
@@ -1305,23 +1313,17 @@ async def start_viewer() -> JSONResponse:
                 root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. Root height: adaptive gravity assist + PD (v0.9.1 warmup fix) ──
-                # Warmup: strong 85% gravity assist + stronger PD to stabilize upright stance
-                # After warmup: adaptive gravity assist (50/30/10%) + gentle PD
+                # ── 3. Root height: unified 95% gravity cancel + PD (v0.9.2 micro-gravity) ──
+                # v0.9.2: Always 95% gravity cancel (near-weightless). No more adaptive
+                # 50/30/10% that caused the robot to sink after warmup ended.
+                # The robot floats at target_height ± small PD correction, like on the ISS.
+                # Warmup uses slightly stronger PD to settle initial oscillation.
                 if is_warmup:
-                    gravity_assist_frac: float = WARMUP_GRAVITY_ASSIST  # 85% assist during warmup
+                    gravity_assist_frac: float = WARMUP_GRAVITY_ASSIST  # 95% during warmup
                     kp_h: float = KP_HEIGHT_WARMUP
                     kd_h: float = KD_HEIGHT_WARMUP
-                elif root_z < target_height:
-                    gravity_assist_frac: float = 0.5   # 50% assist when near ground (standing via legs)
-                    kp_h: float = KP_HEIGHT_GENTLE
-                    kd_h: float = KD_HEIGHT
-                elif root_z > target_height + 0.15:
-                    gravity_assist_frac: float = 0.1           # 10% assist when floating high (punish levitation)
-                    kp_h: float = KP_HEIGHT_GENTLE
-                    kd_h: float = KD_HEIGHT
                 else:
-                    gravity_assist_frac: float = 0.3           # 30% in transition zone
+                    gravity_assist_frac: float = WARMUP_GRAVITY_ASSIST  # 95% always (v0.9.2 unified)
                     kp_h: float = KP_HEIGHT_GENTLE
                     kd_h: float = KD_HEIGHT
                 gravity_assist: float = gravity_assist_frac * humanoid_mass * 9.81
@@ -1385,22 +1387,14 @@ async def start_viewer() -> JSONResponse:
                 # ── 7. Walking gait: sinusoidal joint oscillation + support phase (v0.4.5) ──
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
 
-                # ── Support phase modulation (v0.9.1 warmup-enhanced) ──
-                # Warmup: maximum leg extension support (stand up first, walk later)
-                # When feet near ground: boost leg extension for ground support
-                # When floating too high: reduce leg extension to discourage levitation
+                # ── Support phase modulation (v0.9.2: simplified for micro-gravity) ──
+                # v0.9.2: No more "floating too high" branch — 95% gravity cancel is stable.
+                # Warmup: hold legs rigid for upright stabilization.
+                # Normal: gentle walking gait with moderate leg extension.
                 if is_warmup:
-                    support_mult: float = 2.0    # Very strong leg extension during warmup — MUST stand first
+                    support_mult: float = 1.5    # Strong leg extension during warmup — stabilize stance
                     hip_amp_mult: float = 0.0    # No walking swing during warmup — just stand upright
                     knee_amp_mult: float = 0.0   # No knee bend during warmup — full extension
-                elif root_z < target_height + 0.05:
-                    support_mult: float = 1.5   # Strong leg extension (push feet into ground)
-                    hip_amp_mult: float = 0.7   # Reduced swing — more standing, less stepping
-                    knee_amp_mult: float = 0.5  # Less knee bend — more leg extension
-                elif root_z > target_height + 0.1:
-                    support_mult: float = 0.5   # Reduce leg force when floating
-                    hip_amp_mult: float = 0.3   # Minimal swing when too high
-                    knee_amp_mult: float = 1.5  # More knee bend (reduce extension)
                 else:
                     support_mult: float = 1.0   # Normal walking
                     hip_amp_mult: float = 1.0
