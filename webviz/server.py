@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.6.6"
+WEBVIZ_VERSION: str = "v0.9.1"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -921,11 +921,8 @@ async def start_run(request: RunRequest) -> JSONResponse:
 
 
 @app.post("/api/stop")
-async def stop_run(request: StopRequest = None) -> JSONResponse:
+async def stop_run() -> JSONResponse:
     """Stop the currently running benchmark.
-
-    Args:
-        request: StopRequest (optional, defaults to graceful stop).
 
     Returns:
         JSONResponse confirming the stop signal was sent.
@@ -1210,13 +1207,20 @@ async def start_viewer() -> JSONResponse:
             ARM_AMP: float = 0.2             # Arm swing amplitude (rad)
             DESIRED_WALK_SPEED: float = 0.5  # Target walking speed (m/s)
             MIN_HEIGHT: float = 0.3 * target_height  # Recovery threshold (only severe falls)
+            # v0.9.1: Warmup phase — stronger assist for first 2 seconds after unpause
+            WARMUP_DURATION: float = 2.0     # Warmup phase duration (seconds of sim time)
+            WARMUP_GRAVITY_ASSIST: float = 0.85  # 85% gravity assist during warmup
 
             # Mass-proportional PD gains for root stabilization (v0.4.5: reduced levitation)
             KP_HEIGHT_GENTLE: float = humanoid_mass * 15.0   # Gentle height assist (NOT strong levitation spring)
             KD_HEIGHT: float = humanoid_mass * 10.0    # Height damping
+            KP_HEIGHT_WARMUP: float = humanoid_mass * 40.0  # Stronger PD during warmup phase
+            KD_HEIGHT_WARMUP: float = humanoid_mass * 15.0  # Stronger damping during warmup
             KP_MOVE: float = humanoid_mass * 1.5       # Horizontal velocity PD (gentle — gait-driven, not push)
             KP_TILT: float = humanoid_mass * 7.5       # Orientation tilt PD
             KD_TILT: float = humanoid_mass * 2.5       # Tilt damping
+            KP_TILT_WARMUP: float = humanoid_mass * 20.0  # Stronger tilt PD during warmup
+            KD_TILT_WARMUP: float = humanoid_mass * 8.0   # Stronger tilt damping during warmup
             KP_YAW: float = humanoid_mass * 2.0        # Yaw steering PD
             KD_YAW: float = humanoid_mass * 0.8        # Yaw damping
 
@@ -1281,8 +1285,12 @@ async def start_viewer() -> JSONResponse:
 
                 initial_qpos: np.ndarray = walk_state['initial_qpos']
 
-                # ── 1. Waypoint update ──
+                # v0.9.1: Warmup phase detection — first WARMUP_DURATION seconds
+                # After unpause, use stronger PD and gravity assist to "stand up"
                 sim_time: float = float(data.time)
+                is_warmup: bool = sim_time < WARMUP_DURATION
+
+                # ── 1. Waypoint update ──
                 if sim_time - walk_state['last_wp_time'] > WAYPOINT_CHANGE_SEC:
                     walk_state['waypoint'] = _generate_waypoint(walk_rng)
                     walk_state['last_wp_time'] = sim_time
@@ -1297,17 +1305,27 @@ async def start_viewer() -> JSONResponse:
                 root_vy: float = float(data.qvel[1])
                 root_vz: float = float(data.qvel[2])
 
-                # ── 3. Root height: adaptive gravity assist + gentle PD (v0.4.5 fix) ──
-                # Adaptive gravity assist: more help near ground (standing), less when floating.
-                # This prevents levitation while allowing ground-contact standing.
-                if root_z < target_height:
+                # ── 3. Root height: adaptive gravity assist + PD (v0.9.1 warmup fix) ──
+                # Warmup: strong 85% gravity assist + stronger PD to stabilize upright stance
+                # After warmup: adaptive gravity assist (50/30/10%) + gentle PD
+                if is_warmup:
+                    gravity_assist_frac: float = WARMUP_GRAVITY_ASSIST  # 85% assist during warmup
+                    kp_h: float = KP_HEIGHT_WARMUP
+                    kd_h: float = KD_HEIGHT_WARMUP
+                elif root_z < target_height:
                     gravity_assist_frac: float = 0.5   # 50% assist when near ground (standing via legs)
+                    kp_h: float = KP_HEIGHT_GENTLE
+                    kd_h: float = KD_HEIGHT
                 elif root_z > target_height + 0.15:
-                    gravity_assist_frac = 0.1           # 10% assist when floating high (punish levitation)
+                    gravity_assist_frac: float = 0.1           # 10% assist when floating high (punish levitation)
+                    kp_h: float = KP_HEIGHT_GENTLE
+                    kd_h: float = KD_HEIGHT
                 else:
-                    gravity_assist_frac = 0.3           # 30% in transition zone
+                    gravity_assist_frac: float = 0.3           # 30% in transition zone
+                    kp_h: float = KP_HEIGHT_GENTLE
+                    kd_h: float = KD_HEIGHT
                 gravity_assist: float = gravity_assist_frac * humanoid_mass * 9.81
-                height_force: float = gravity_assist + KP_HEIGHT_GENTLE * (target_height - root_z) - KD_HEIGHT * root_vz
+                height_force: float = gravity_assist + kp_h * (target_height - root_z) - kd_h * root_vz
                 data.qfrc_applied[2] = float(np.clip(height_force, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
 
                 # ── 4. Root horizontal movement toward waypoint ──
@@ -1330,16 +1348,19 @@ async def start_viewer() -> JSONResponse:
                 data.qfrc_applied[0] = float(np.clip(move_fx, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
                 data.qfrc_applied[1] = float(np.clip(move_fy, -MAX_ROOT_FORCE, MAX_ROOT_FORCE))
 
-                # ── 5. Root orientation stabilization ──
+                # ── 5. Root orientation stabilization (v0.9.1 warmup-enhanced) ──
                 # Compute torso z-axis from root quaternion.
                 # For upright torso, z_axis ≈ [0, 0, 1].
                 # Tilt correction: push z_axis back toward [0, 0, 1].
+                # Warmup: use stronger PD gains to prevent initial collapse.
+                kp_tilt: float = KP_TILT_WARMUP if is_warmup else KP_TILT
+                kd_tilt: float = KD_TILT_WARMUP if is_warmup else KD_TILT
                 quat: np.ndarray = data.qpos[3:7].copy()
                 z_axis: np.ndarray = _quat_to_z_axis(quat)
                 # z_axis[0] > 0 → torso tilts right → need -torque around y (DOF 4)
                 # z_axis[1] > 0 → torso tilts forward → need -torque around x (DOF 3)
-                tilt_torque_x: float = -KP_TILT * float(z_axis[1]) - KD_TILT * float(data.qvel[3])
-                tilt_torque_y: float = -KP_TILT * float(z_axis[0]) - KD_TILT * float(data.qvel[4])
+                tilt_torque_x: float = -kp_tilt * float(z_axis[1]) - kd_tilt * float(data.qvel[3])
+                tilt_torque_y: float = -kp_tilt * float(z_axis[0]) - kd_tilt * float(data.qvel[4])
                 data.qfrc_applied[3] = float(np.clip(tilt_torque_x, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
                 data.qfrc_applied[4] = float(np.clip(tilt_torque_y, -MAX_ROOT_TORQUE, MAX_ROOT_TORQUE))
 
@@ -1364,10 +1385,15 @@ async def start_viewer() -> JSONResponse:
                 # ── 7. Walking gait: sinusoidal joint oscillation + support phase (v0.4.5) ──
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
 
-                # ── Support phase modulation (v0.4.5 floating fix) ──
+                # ── Support phase modulation (v0.9.1 warmup-enhanced) ──
+                # Warmup: maximum leg extension support (stand up first, walk later)
                 # When feet near ground: boost leg extension for ground support
                 # When floating too high: reduce leg extension to discourage levitation
-                if root_z < target_height + 0.05:
+                if is_warmup:
+                    support_mult: float = 2.0    # Very strong leg extension during warmup — MUST stand first
+                    hip_amp_mult: float = 0.0    # No walking swing during warmup — just stand upright
+                    knee_amp_mult: float = 0.0   # No knee bend during warmup — full extension
+                elif root_z < target_height + 0.05:
                     support_mult: float = 1.5   # Strong leg extension (push feet into ground)
                     hip_amp_mult: float = 0.7   # Reduced swing — more standing, less stepping
                     knee_amp_mult: float = 0.5  # Less knee bend — more leg extension
