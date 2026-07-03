@@ -54,7 +54,7 @@ from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
 
-WEBVIZ_VERSION: str = "v0.9.5"
+WEBVIZ_VERSION: str = "v0.9.6"
 
 # ── FastAPI App ──
 app: FastAPI = FastAPI(title="MuJoCo-Bench-IDO Webviz", version=WEBVIZ_VERSION)
@@ -1635,10 +1635,35 @@ async def start_viewer() -> JSONResponse:
             actual_port: int = viser_server._websock_server._port
             mjviser_viewer_url = f"http://localhost:{actual_port}"
 
+            # ── v0.9.6: Custom reset_fn — the KEY fix for floating! ──
+            # mjviser's default _reset() calls mj_resetData which restores qpos
+            # to XML defaults (root_z=1.5, all joints=0). At z=1.5 the feet are
+            # 0.22m above ground → ncon=0 → no ground contact → 85% gravity
+            # support > residual gravity → robot floats to the sky.
+            #
+            # Fix: override reset_fn to set the correct standing pose (z=1.285,
+            # feet on ground, ncon=4) every time the user clicks Reset.
+            def reset_fn(mdl: "mj.MjModel", dat: "mj.MjData") -> None:
+                """Reset to neutral standing pose with feet on ground."""
+                dat.qpos[:] = 0.0
+                dat.qpos[2] = target_height  # 1.285 for plain, 0.85 for scenes
+                dat.qpos[3] = 1.0             # Upright quaternion (w=1)
+                dat.qvel[:] = 0.0
+                dat.qacc[:] = 0.0
+                dat.ctrl[:] = 0.0
+                dat.qfrc_applied[:] = 0.0
+                mj.mj_forward(mdl, dat)
+                # Re-capture initial_qpos after reset so PD targets are correct
+                walk_state['initial_qpos'] = dat.qpos.copy()
+                # Reset waypoint timer
+                walk_state['last_wp_time'] = 0.0
+                walk_state['waypoint'] = _generate_waypoint(walk_rng)
+
             viewer = mjviser.Viewer(
                 model=mj_model,
                 data=mj_data,
                 step_fn=step_fn,
+                reset_fn=reset_fn,
                 server=viser_server,
             )
             # Start in paused mode: robot shows upright pose, user clicks Play to start
