@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.16.32</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.4.0</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -341,7 +341,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.16.13</span>
+      <span class="text-sm font-medium text-slate-400">v0.4.0</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -516,6 +516,38 @@
         <span id="arm100Status" class="label-sm mt-1 block"></span>
         <p class="hint-text" style="margin-top: 4px; font-size: 0.7rem;">
           👉 关节控制 / VLA 模型 / CAMKit 双摄均在 3D 场景内的 Tab 面板中
+        </p>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-slate-600 my-1"></div>
+
+      <!-- ════════════ Welding Robot Panel ════════════ -->
+      <div>
+        <label class="label-sm mb-1 block" style="color: #f97316; font-weight: 600;">🔥 焊接机器人 (Welding Robot)</label>
+        <p class="hint-text" style="margin-bottom: 6px;">六轴焊接机器人 + 双轴变位机，4D动作空间(电流/电压/摆动/速度)。IDO/TOMAS安全审计 + Psi-Anchor硬约束。</p>
+
+        <!-- Welding type selector -->
+        <label class="label-sm mb-1 block">焊接姿态 (Weld Type)</label>
+        <select id="weldTypeSelect">
+          <option value="flat">平焊 (Flat)</option>
+          <option value="horizontal">横焊 (Horizontal)</option>
+          <option value="vertical">立焊 (Vertical)</option>
+          <option value="overhead">仰焊 (Overhead)</option>
+        </select>
+
+        <!-- Start/Stop buttons -->
+        <div class="flex gap-2 mt-2">
+          <button id="weldingStartBtn" class="btn-secondary" onclick="startWelding()" style="background: #7c2d12;">
+            🔥 Start Welding
+          </button>
+          <button id="weldingStopBtn" class="btn-secondary" onclick="stopWelding()" style="font-size:0.8rem; background: #991b1b;" disabled>
+            ⏹ Stop
+          </button>
+        </div>
+        <span id="weldingStatus" class="label-sm mt-1 block"></span>
+        <p class="hint-text" style="margin-top: 4px; font-size: 0.7rem;">
+          👉 焊接质量/安全/TCP位姿在右侧监控面板
         </p>
       </div>
 
@@ -814,6 +846,96 @@
           <span>mW</span>
           <span class="ml-4">κ-Snap Tokens:</span>
           <span id="kappaTokenDisplay" class="font-mono text-emerald-400">—</span>
+        </div>
+      </div>
+
+      <!-- ═══ Welding Robot Monitor Panel ═══ -->
+      <div class="card col-span-2" id="weldingPanel">
+        <div class="card-header flex items-center justify-between">
+          <span style="color: #f97316;">🔥 焊接机器人监控 (Welding Robot Monitor)</span>
+          <span id="weldingPhaseIndicator" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #1e293b; color: #64748b;">Idle</span>
+        </div>
+
+        <!-- Row 1: Status + Quality + Safety -->
+        <div class="grid grid-cols-4 gap-3 mt-2">
+          <!-- Welding Status -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">焊接状态 (Status)</span>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="weldingDot" class="status-dot idle"></span>
+              <span id="weldingStateText" class="value-md font-mono text-slate-400">Idle</span>
+            </div>
+            <div class="mt-2">
+              <span class="label-sm">Step:</span>
+              <span id="weldingStepCount" class="value-sm font-mono text-orange-400">0</span>
+              <span class="label-sm ml-2">Type:</span>
+              <span id="weldingTypeDisplay" class="value-sm font-mono text-orange-400">—</span>
+            </div>
+          </div>
+
+          <!-- Quality: eta -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">η (Eta)</span>
+            <span id="weldingEta" class="value-md font-mono text-yellow-400">—</span>
+            <div class="mt-1">
+              <span class="label-sm">Porosity:</span>
+              <span id="weldingPorosity" class="value-sm font-mono">—</span>
+            </div>
+          </div>
+
+          <!-- Quality: distortion + heat -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">Distortion (mm)</span>
+            <span id="weldingDistortion" class="value-md font-mono text-purple-400">—</span>
+            <div class="mt-1">
+              <span class="label-sm">Heat Input:</span>
+              <span id="weldingHeatInput" class="value-sm font-mono">—</span>
+            </div>
+          </div>
+
+          <!-- Safety -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">Psi-Anchor Safety</span>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="weldingSafetyDot" class="status-dot idle"></span>
+              <span id="weldingSafetyText" class="value-md font-mono text-emerald-400">PASS</span>
+            </div>
+            <div class="mt-1">
+              <span class="label-sm">Violations:</span>
+              <span id="weldingViolations" class="value-sm font-mono text-red-400">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 2: TCP + Sensors -->
+        <div class="grid grid-cols-4 gap-3 mt-3">
+          <!-- TCP Pose -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">TCP 位姿 (mm / deg)</span>
+            <div id="weldingTcpPose" class="value-sm font-mono text-cyan-400 mt-1">—</div>
+          </div>
+          <!-- Stickout -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">干伸长 (mm)</span>
+            <span id="weldingStickout" class="value-md font-mono text-blue-400">—</span>
+          </div>
+          <!-- Temperature -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">温度 (C)</span>
+            <span id="weldingTemperature" class="value-md font-mono text-red-400">—</span>
+          </div>
+          <!-- Seam Deviation -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">焊缝偏差 (mm)</span>
+            <span id="weldingSeamDev" class="value-md font-mono text-amber-400">—</span>
+          </div>
+        </div>
+
+        <!-- Safety Violations Log -->
+        <div class="mt-3" id="weldingSafetyLog" style="display: none;">
+          <span class="label-sm">安全违规记录:</span>
+          <div id="weldingViolationList" class="log-area mt-1" style="max-height: 80px;"></div>
         </div>
       </div>
 
@@ -2103,6 +2225,158 @@
         addLog(`Close SO-ARM100 error: ${err.message}`);
       });
     }
+
+    // ═══ v0.4.0: Welding Robot Control ═══
+    let _weldingPollTimer = null;
+
+    function startWelding() {
+      const weldType = document.getElementById('weldTypeSelect').value;
+      const btn = document.getElementById('weldingStartBtn');
+      const stopBtn = document.getElementById('weldingStopBtn');
+      btn.disabled = true;
+      btn.innerHTML = '⏳ 启动中...';
+
+      fetch('/api/welding/start?weld_type=' + encodeURIComponent(weldType), { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '🔥 Start Welding';
+
+        if (data.status === 'error') {
+          const errMsg = data.error || 'Unknown error';
+          addLog('[Welding] Error: ' + errMsg);
+          document.getElementById('weldingStatus').textContent = '[Error] ' + errMsg;
+          document.getElementById('weldingStatus').style.color = '#ef4444';
+        } else if (data.status === 'already_running') {
+          addLog('[Welding] Already running: ' + data.weld_type);
+          document.getElementById('weldingStatus').textContent = 'Running: ' + data.weld_type;
+          document.getElementById('weldingStatus').style.color = '#22c55e';
+          stopBtn.disabled = false;
+        } else {
+          addLog('[Welding] Started: ' + data.weld_type);
+          document.getElementById('weldingStatus').textContent = 'Running: ' + data.weld_type;
+          document.getElementById('weldingStatus').style.color = '#22c55e';
+          stopBtn.disabled = false;
+          // Start polling
+          if (_weldingPollTimer) clearInterval(_weldingPollTimer);
+          _weldingPollTimer = setInterval(pollWeldingStatus, 500);
+          pollWeldingStatus(); // immediate first poll
+        }
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '🔥 Start Welding';
+        addLog('[Welding] Request error: ' + err.message);
+        document.getElementById('weldingStatus').textContent = '[Error] ' + err.message;
+        document.getElementById('weldingStatus').style.color = '#ef4444';
+      });
+    }
+
+    function stopWelding() {
+      fetch('/api/welding/stop', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        addLog('[Welding] Stopped');
+        document.getElementById('weldingStatus').textContent = 'Stopped';
+        document.getElementById('weldingStatus').style.color = '#94a3b8';
+        document.getElementById('weldingStopBtn').disabled = true;
+        // Stop polling
+        if (_weldingPollTimer) {
+          clearInterval(_weldingPollTimer);
+          _weldingPollTimer = null;
+        }
+        // Final status update
+        setTimeout(pollWeldingStatus, 200);
+      })
+      .catch(err => {
+        addLog('[Welding] Stop error: ' + err.message);
+      });
+    }
+
+    function pollWeldingStatus() {
+      fetch('/api/welding/status')
+      .then(res => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(data => {
+        if (!data || data.status === 'error') {
+          // Welding modules not available
+          if (data && data.available === false) {
+            document.getElementById('weldingStateText').textContent = 'N/A';
+            document.getElementById('weldingStateText').className = 'value-md font-mono text-slate-500';
+            document.getElementById('weldingPhaseIndicator').textContent = 'N/A';
+            document.getElementById('weldingPhaseIndicator').style.color = '#64748b';
+          }
+          return;
+        }
+
+        // Status
+        const isRunning = data.status === 'running';
+        const dotEl = document.getElementById('weldingDot');
+        const stateEl = document.getElementById('weldingStateText');
+        const phaseEl = document.getElementById('weldingPhaseIndicator');
+
+        dotEl.className = 'status-dot ' + (isRunning ? 'running' : 'idle');
+        stateEl.textContent = isRunning ? 'Running' : 'Idle';
+        stateEl.className = 'value-md font-mono ' + (isRunning ? 'text-emerald-400' : 'text-slate-400');
+        phaseEl.textContent = isRunning ? 'Running' : 'Idle';
+        phaseEl.style.color = isRunning ? '#22c55e' : '#64748b';
+
+        // Step + type
+        document.getElementById('weldingStepCount').textContent = data.step || 0;
+        document.getElementById('weldingTypeDisplay').textContent = data.weld_type || '—';
+
+        // Quality
+        const q = data.quality || {};
+        document.getElementById('weldingEta').textContent = q.eta !== undefined ? q.eta.toFixed(4) : '—';
+        document.getElementById('weldingPorosity').textContent = q.porosity !== undefined ? (q.porosity * 100).toFixed(1) + '%' : '—';
+        document.getElementById('weldingDistortion').textContent = q.distortion !== undefined ? q.distortion.toFixed(3) : '—';
+        document.getElementById('weldingHeatInput').textContent = q.heat_input !== undefined ? q.heat_input.toFixed(1) + ' J/mm' : '—';
+
+        // Safety
+        const s = data.safety || {};
+        const sPassed = s.passed !== false;
+        document.getElementById('weldingSafetyDot').className = 'status-dot ' + (sPassed ? 'idle' : 'error');
+        document.getElementById('weldingSafetyText').textContent = sPassed ? 'PASS' : 'VIOLATION';
+        document.getElementById('weldingSafetyText').className = 'value-md font-mono ' + (sPassed ? 'text-emerald-400' : 'text-red-400');
+        const violations = s.violations || [];
+        document.getElementById('weldingViolations').textContent = violations.length;
+
+        // Violation log
+        if (violations.length > 0) {
+          const logEl = document.getElementById('weldingSafetyLog');
+          const listEl = document.getElementById('weldingViolationList');
+          logEl.style.display = 'block';
+          listEl.innerHTML = violations.map(v => {
+            const name = v.name || v.type || 'Unknown';
+            const msg = v.message || v.detail || '';
+            return '<div style="color:#f87171;">[' + name + '] ' + msg + '</div>';
+          }).join('');
+        } else {
+          document.getElementById('weldingSafetyLog').style.display = 'none';
+        }
+
+        // TCP + sensors
+        const tcp = data.tcp_pose || [];
+        if (tcp.length >= 6) {
+          document.getElementById('weldingTcpPose').textContent =
+            'X:' + tcp[0].toFixed(1) + ' Y:' + tcp[1].toFixed(1) + ' Z:' + tcp[2].toFixed(1) +
+            ' / R:' + tcp[3].toFixed(1) + ' P:' + tcp[4].toFixed(1) + ' Y:' + tcp[5].toFixed(1);
+        } else {
+          document.getElementById('weldingTcpPose').textContent = '—';
+        }
+        document.getElementById('weldingStickout').textContent = data.stickout_mm !== undefined ? data.stickout_mm.toFixed(2) : '—';
+        document.getElementById('weldingTemperature').textContent = data.temperature_C !== undefined ? data.temperature_C.toFixed(1) : '—';
+        document.getElementById('weldingSeamDev').textContent = data.seam_deviation_mm !== undefined ? data.seam_deviation_mm.toFixed(3) : '—';
+      })
+      .catch(err => {
+        // Silent fail on poll errors
+      });
+    }
+
+    // Initial welding status check on page load
+    setTimeout(pollWeldingStatus, 1500);
 
     // ═══ v0.16.17: Speed Control ═══
     function updateSpeed(val) {
