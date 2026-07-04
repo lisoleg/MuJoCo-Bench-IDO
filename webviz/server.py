@@ -3474,11 +3474,11 @@ async def get_t_processor_status() -> JSONResponse:
         return JSONResponse(content={
             "available": True,
             "spec": {
-                "gate_count": tp.gate_count,
-                "power_mw": tp.power_mw,
-                "clock_hz": tp.clock_hz,
-                "fifo_depth": tp.kappa_fifo.depth,
-                "sram_bytes": tp.kappa_fifo.sram_bytes,
+                "gate_count": tp.GATE_COUNT,
+                "power_mw": tp.POWER_MW,
+                "clock_hz": tp.CLOCK_HZ,
+                "fifo_depth": tp.fifo.depth,
+                "sram_bytes": tp.fifo.depth * 16,  # 16 bytes per entry
             },
         })
     except Exception as e:
