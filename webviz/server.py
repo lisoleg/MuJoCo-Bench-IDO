@@ -69,7 +69,7 @@ except ImportError as _tomas_err:
     TOMAS_AVAILABLE = False
     print(f"Warning: TOMAS wrapper not available: {_tomas_err}")
 
-WEBVIZ_VERSION: str = "v0.16.26"
+WEBVIZ_VERSION: str = "v0.16.27"
 
 # ── Bug 3 Fix: Baseline reference data for 7 core metrics ──
 # Source: dm_control PPO/SAC 100k step typical scores (paperswithcode, DM Control paper)
@@ -1728,12 +1728,15 @@ async def start_viewer() -> JSONResponse:
             #   - KD_ROOT_Z 80→140  (stronger damping kills oscillation)
             #   - Pitch/roll gains 350→220
             #   - Asymmetric Z clip: max +500N (≈1x gravity), min -150N (gentle pull-down)
+            # v0.16.27: Increased angular damping for terrain stability.
+            #   Previous KD=45 was too low — robot pitched 20°+ on ramp edges
+            #   before the PD controller could react. Now KD=90 for pitch/roll.
             KP_ROOT_Z: float = 450.0         # v0.16.24: was 1200 (too bouncy)
             KD_ROOT_Z: float = 140.0         # v0.16.24: was 80
-            KP_ROOT_PITCH: float = 220.0     # v0.16.24: was 350
-            KD_ROOT_PITCH: float = 45.0      # v0.16.24: was 40
-            KP_ROOT_ROLL: float = 220.0      # v0.16.24: was 350
-            KD_ROOT_ROLL: float = 45.0       # v0.16.24: was 40
+            KP_ROOT_PITCH: float = 280.0     # v0.16.27: was 220 (boosted for terrain)
+            KD_ROOT_PITCH: float = 90.0      # v0.16.27: was 45 (2x damping kills flip momentum)
+            KP_ROOT_ROLL: float = 280.0      # v0.16.27: was 220
+            KD_ROOT_ROLL: float = 90.0       # v0.16.27: was 45
             KP_ROOT_YAW: float = 30.0        # Yaw spring (was 50) — gentler turning
             KD_ROOT_YAW: float = 8.0         # (was 10)
             # v0.16.12: Clip limits
@@ -1880,16 +1883,18 @@ async def start_viewer() -> JSONResponse:
                     if ground_dist > 0:
                         ground_z = float(ray_origin_down[2] - ground_dist)
                         adaptive_target = ground_z + 0.85
+                        # v0.16.27: Lower target on terrain for stability
+                        if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze"):
+                            adaptive_target -= 0.10  # Crouch 10cm lower on terrain
                         # Smoothly blend toward adaptive target (avoid sudden jumps)
                         target_height = target_height * 0.95 + adaptive_target * 0.05
 
-                    # v0.16.26: Softer Z gain on uneven terrain to prevent launching,
-                    # BUT keep pitch/roll/yaw gains at FULL strength — terrain needs
-                    # MORE angular stability, not less. Previous code reduced ALL gains
-                    # by 0.7x which made the robot flip on exactly the terrain where
-                    # it needs the most stability.
+                    # v0.16.27: On terrain, BOOST angular gains (not just keep at 1.0).
+                    # Terrain generates larger disturbances from uneven foot placement,
+                    # so the robot needs MORE angular stability, not the same amount.
+                    # Z gain is still reduced (0.7x) to prevent vertical launching.
                     _terrain_z_scale = 0.7 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze") else 1.0
-                    _terrain_ang_scale = 1.0  # v0.16.26: Never reduce angular gains on terrain
+                    _terrain_ang_scale = 1.5 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze") else 1.0  # v0.16.27: was 1.0
                     _kp_root_z = KP_ROOT_Z * _terrain_z_scale
                     _kd_root_z = KD_ROOT_Z * _terrain_z_scale
                     _kp_root_pitch = KP_ROOT_PITCH * _terrain_ang_scale
@@ -2018,6 +2023,11 @@ async def start_viewer() -> JSONResponse:
                 # generates reaction torques that make the flip worse.
                 if _is_flipping or _is_tilting:
                     walk_mult = 0.0
+
+                # v0.16.27: Reduce gait amplitude on terrain — smaller steps
+                # mean less destabilizing torques from uneven foot placement.
+                if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze"):
+                    walk_mult *= 0.6  # 40% reduction on terrain
 
                 # v0.16.7: Ray casting for wall/terrain detection ──
                 # Cast forward ray to detect walls ahead (for maze navigation)
@@ -2567,15 +2577,50 @@ def _launch_arm100_viewer() -> None:
         cam_renderer = None
         cam_render_ctx = None  # Fallback: MjRenderContextOffscreen
         _cam_init_error: str = ""
+
+        # v0.16.27: Try EGL backend first — on Windows without a display,
+        # the default WGL backend creates a "valid" context that renders
+        # all-black images. EGL (via ANGLE) can do true offscreen rendering.
+        import os as _os
+        _prev_gl = _os.environ.get('MUJOCO_GL', '')
+        if not _prev_gl:
+            _os.environ['MUJOCO_GL'] = 'egl'
+
         try:
             renderer_cls = getattr(mj, 'Renderer', None)
             if renderer_cls is not None:
                 cam_renderer = renderer_cls(arm_model, CAM_HEIGHT, CAM_WIDTH)
+                # v0.16.27: Verify the renderer actually works by doing a test render
+                cam_renderer.update_scene(arm_data, camera=0)
+                _test_pixels = cam_renderer.render()
+                _test_mean = float(np.mean(_test_pixels))
+                if _test_mean < 1.0:
+                    # All-black → renderer initialized but no real GL context
+                    print(f"v0.16.27: Renderer test render all black (mean={_test_mean:.1f}) — EGL failed, trying osmesa")
+                    cam_renderer = None
+                    _os.environ['MUJOCO_GL'] = 'osmesa'
+                    try:
+                        cam_renderer = renderer_cls(arm_model, CAM_HEIGHT, CAM_WIDTH)
+                        cam_renderer.update_scene(arm_data, camera=0)
+                        _test2 = cam_renderer.render()
+                        if float(np.mean(_test2)) < 1.0:
+                            print(f"v0.16.27: osmesa also black (mean={float(np.mean(_test2)):.1f}) — giving up on GPU rendering")
+                            cam_renderer = None
+                            _cam_init_error = "all GL backends render black (no GPU/EGL/OSMesa)"
+                        else:
+                            print(f"v0.16.27: osmesa renderer works! (mean={float(np.mean(_test2)):.1f})")
+                    except Exception as osmesa_err:
+                        print(f"v0.16.27: osmesa failed: {osmesa_err}")
+                        cam_renderer = None
+                        _cam_init_error = f"egl black, osmesa failed: {osmesa_err}"
+                else:
+                    print(f"v0.16.27: EGL renderer works! test mean={_test_mean:.1f}")
                 # Find camera IDs
                 cam_ids = {mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, name): name
                            for name in ['top_cam', 'wrist_cam']
                            if mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, name) >= 0}
-                print(f"v0.16.25: CAMKit Renderer initialized — cameras: {cam_ids}, {CAM_WIDTH}x{CAM_HEIGHT}")
+                if cam_renderer is not None:
+                    print(f"v0.16.27: CAMKit Renderer ready — cameras: {cam_ids}, {CAM_WIDTH}x{CAM_HEIGHT}")
             else:
                 _cam_init_error = "mj.Renderer class not found"
                 print(f"v0.16.25: mj.Renderer not available: {_cam_init_error}")
@@ -2583,6 +2628,12 @@ def _launch_arm100_viewer() -> None:
             _cam_init_error = str(cam_init_err)
             print(f"v0.16.25: CAMKit Renderer init failed: {cam_init_err}")
             cam_renderer = None
+
+        # Restore original MUJOCO_GL setting
+        if _prev_gl:
+            _os.environ['MUJOCO_GL'] = _prev_gl
+        elif 'MUJOCO_GL' in _os.environ:
+            del _os.environ['MUJOCO_GL']
 
         # v0.16.25: Fallback to MjRenderContextOffscreen
         if cam_renderer is None:
@@ -2595,7 +2646,7 @@ def _launch_arm100_viewer() -> None:
 
         def _render_cam(cam_name: str) -> "np.ndarray":
             """Render a single camera view. Returns RGB (H, W, 3) or info overlay on failure."""
-            # v0.16.25: Try mj.Renderer first, then MjRenderContextOffscreen, then overlay.
+            # v0.16.27: Try mj.Renderer, check for all-black output, then OffscreenCtx, then overlay.
             if cam_renderer is not None:
                 try:
                     cam_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, cam_name)
@@ -2603,6 +2654,9 @@ def _launch_arm100_viewer() -> None:
                         return _make_cam_placeholder(cam_name, "camera not found in model")
                     cam_renderer.update_scene(arm_data, camera=cam_id)
                     pixels = cam_renderer.render()
+                    # v0.16.27: Check if render is all-black (dead GL context)
+                    if float(np.mean(pixels)) < 1.0:
+                        return _make_cam_placeholder(cam_name, "GL context produced black frame")
                     return pixels.astype(np.uint8)
                 except Exception as rend_err:
                     print(f"v0.16.25: Renderer.render failed for {cam_name}: {rend_err}")
@@ -2615,6 +2669,8 @@ def _launch_arm100_viewer() -> None:
                     # MjRenderContextOffscreen: render to buffer
                     cam_render_ctx.update_scene(arm_data, cam_id)
                     pixels = cam_render_ctx.read_pixels(cam_id, depth=False)
+                    if float(np.mean(pixels)) < 1.0:
+                        return _make_cam_placeholder(cam_name, "offscreen ctx produced black frame")
                     return pixels.astype(np.uint8)
                 except Exception as ctx_err:
                     print(f"v0.16.25: MjRenderContextOffscreen failed for {cam_name}: {ctx_err}")
@@ -2623,30 +2679,44 @@ def _launch_arm100_viewer() -> None:
                 return _make_cam_placeholder(cam_name, _cam_init_error or "no renderer available")
 
         def _make_cam_placeholder(cam_name: str, error_msg: str = "") -> "np.ndarray":
-            """v0.16.25: Generate a info-overlay image when renderer is unavailable.
-            Shows camera name, joint positions, and error message on a colored background.
+            """v0.16.27: Generate a info-overlay image when renderer is unavailable.
+            Shows camera name, joint positions, gripper state, and error message
+            on a GREEN background (clearly NOT black so user knows it's a fallback).
             """
             img = np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8)
-            # Dark blue background
-            img[:, :] = [20, 30, 60]
-            # Try to draw simple text using numpy (no PIL/cv2 dependency)
+            # Dark green background — clearly visible, not "black"
+            img[:, :] = [20, 80, 20]
             try:
                 from PIL import Image, ImageDraw
                 pil_img = Image.fromarray(img)
                 draw = ImageDraw.Draw(pil_img)
-                # Camera name
-                draw.text((10, 10), f"[{cam_name}]", fill=(100, 255, 100))
-                # Error message
+                # Camera name (bright yellow)
+                draw.text((10, 10), f"[{cam_name}]", fill=(255, 255, 0))
+                # Error message (red)
                 if error_msg:
-                    draw.text((10, 30), f"Error: {error_msg[:50]}", fill=(255, 100, 100))
-                # Joint info
+                    draw.text((10, 30), f"Error: {error_msg[:50]}", fill=(255, 80, 80))
+                # Live joint positions (white) — shows arm is actually moving
                 try:
                     qpos = arm_data.qpos[:7]
+                    labels = ["Rot", "Pit", "Elb", "WPi", "WRo", "GrL", "GrR"]
                     for i in range(min(7, len(qpos))):
-                        draw.text((10, 60 + i * 20), f"J{i}: {float(qpos[i]):+.3f}", fill=(200, 200, 200))
+                        draw.text((10, 60 + i * 20), f"{labels[i]}: {float(qpos[i]):+.3f}", fill=(200, 255, 200))
                 except Exception:
                     pass
-                draw.text((10, CAM_HEIGHT - 20), "v0.16.25 CAMKit (no GL)", fill=(120, 120, 120))
+                # Object positions
+                try:
+                    for obj_name, color in [("red_cube", (255, 100, 100)),
+                                             ("blue_ball", (100, 100, 255)),
+                                             ("tray", (150, 150, 150))]:
+                        obj_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, obj_name)
+                        if obj_id >= 0:
+                            pos = arm_data.xpos[obj_id]
+                            draw.text((10, 210), f"{obj_name}: ({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f})",
+                                      fill=color)
+                except Exception:
+                    pass
+                draw.text((10, CAM_HEIGHT - 15), "v0.16.27 CAMKit (no GL — showing live joint data)",
+                          fill=(120, 200, 120))
                 img = np.array(pil_img)
             except ImportError:
                 # No PIL — just return the colored background
@@ -2702,11 +2772,24 @@ def _launch_arm100_viewer() -> None:
                 except Exception:
                     pass  # Camera failure should NOT block VLA execution
                 try:
+                    # v0.16.27: Add object positions to obs_dict so VLA can
+                    # compute IK targets dynamically instead of using hardcoded values.
+                    _obj_positions = {}
+                    for _obj_name in ["red_cube", "blue_ball", "white_tissue", "tray"]:
+                        _bid = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, _obj_name)
+                        if _bid >= 0:
+                            _obj_positions[_obj_name] = arm_data.xpos[_bid].copy()
+                    # Gripper position for relative IK
+                    _grip_bid = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, "gripper_base")
+                    _gripper_pos = arm_data.xpos[_grip_bid].copy() if _grip_bid >= 0 else np.zeros(3)
                     obs_dict = {
                         'rgb': arm100_cam_top_rgb if arm100_cam_top_rgb is not None else np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8),
                         'wrist_rgb': arm100_cam_wrist_rgb if arm100_cam_wrist_rgb is not None else np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8),
                         'language': arm100_vla_instruction,
                         'proprio': arm_controller._get_arm_qpos(),
+                        'object_positions': _obj_positions,
+                        'gripper_position': _gripper_pos,
+                        'arm_base_z': 0.40,  # Arm base height for IK
                     }
                     action = arm100_vla_adapter.predict(obs_dict)
                     phase = "vla_infer"
@@ -2739,6 +2822,12 @@ def _launch_arm100_viewer() -> None:
 
             data.ctrl[:] = safe_action[:model.nu]
 
+            # v0.16.27: CRITICAL FIX — step physics! Without this, ctrl is set
+            # but the simulation never advances, so the arm doesn't move.
+            # The humanoid step_fn calls mj_step at line 2214, but the ARM100
+            # step_fn was missing it entirely.
+            mj.mj_step(model, data)
+
             if np.any(np.isnan(data.qpos)):
                 mj.mj_resetData(model, data)
                 mj.mj_forward(model, data)
@@ -2746,7 +2835,8 @@ def _launch_arm100_viewer() -> None:
             _arm_step_count[0] += 1
 
             # v0.16.19: Periodic CAMKit rendering (every 10 steps ≈ ~10 FPS at 100Hz sim)
-            if _arm_step_count[0] % 10 == 0 and cam_renderer is not None:
+            # v0.16.27: Always render (even if cam_renderer is None) to show live joint data
+            if _arm_step_count[0] % 10 == 0:
                 try:
                     top_rgb = _render_cam('top_cam')
                     wrist_rgb = _render_cam('wrist_cam')
@@ -3055,6 +3145,63 @@ def _launch_arm100_viewer() -> None:
                 except Exception as cam_gui_err:
                     viser_server.gui.add_markdown(f"CAMKit display error: {cam_gui_err}")
 
+            # ── v0.16.27: Telemetry Tab — live force feedback + object tracking ──
+            with arm_ctrl_tabs.add_tab("Telemetry"):
+                telemetry_md = viser_server.gui.add_markdown("**Live Telemetry**\n\nInitializing...")
+
+                def _update_telemetry():
+                    """Update telemetry display with live sensor data."""
+                    try:
+                        # Get gripper position
+                        grip_bid = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, "gripper_base")
+                        grip_pos = arm_data.xpos[grip_bid].copy() if grip_bid >= 0 else np.zeros(3)
+
+                        # Get object positions and distances
+                        lines = ["**Live Telemetry**\n"]
+                        lines.append(f"**Gripper pos:** ({grip_pos[0]:.3f}, {grip_pos[1]:.3f}, {grip_pos[2]:.3f})\n")
+
+                        for obj_name, color_emoji in [("red_cube", "red"), ("blue_ball", "blue"), ("white_tissue", "white"), ("tray", "tray")]:
+                            bid = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, obj_name)
+                            if bid >= 0:
+                                pos = arm_data.xpos[bid]
+                                dist = float(np.linalg.norm(grip_pos - pos))
+                                lines.append(f"**{color_emoji} {obj_name}:** ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}) — dist={dist:.3f}m\n")
+
+                        # Touch sensor readings (finger force)
+                        try:
+                            touch_l_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_SENSOR, "touch_L")
+                            touch_r_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_SENSOR, "touch_R")
+                            if touch_l_id >= 0 and touch_r_id >= 0:
+                                adr_l = arm_model.sensor_adr[touch_l_id]
+                                adr_r = arm_model.sensor_adr[touch_r_id]
+                                force_l = float(arm_data.sensordata[adr_l])
+                                force_r = float(arm_data.sensordata[adr_r])
+                                lines.append(f"\n**Finger forces:** L={force_l:.3f}N  R={force_r:.3f}N")
+                                if force_l > 0.01 or force_r > 0.01:
+                                    lines.append(" ✊ *grasping*")
+                        except Exception:
+                            pass
+
+                        # Joint positions
+                        qpos = arm_controller._get_arm_qpos()
+                        lines.append("\n\n**Joint positions:**")
+                        lines.append(f"\nRot={qpos[0]:+.2f} Pit={qpos[1]:+.2f} Elb={qpos[2]:+.2f} WPi={qpos[3]:+.2f} WRo={qpos[4]:+.2f}")
+                        lines.append(f"\nGrL={qpos[5]:+.2f} GrR={qpos[6]:+.2f}")
+
+                        # VLA status
+                        if arm100_vla_mode and arm100_vla_adapter is not None:
+                            lines.append(f"\n\n**VLA:** active, model={arm100_vla_adapter.model_name}")
+                            lines.append(f"\n**Instruction:** '{arm100_vla_instruction[:50]}'")
+
+                        telemetry_md.content = "".join(lines)
+                    except Exception:
+                        pass
+
+                telemetry_refresh = viser_server.gui.add_button("Refresh")
+                @telemetry_refresh.on_click
+                def _on_telemetry_refresh(_):
+                    _update_telemetry()
+
         except Exception as gui_err:
             print(f"SO-ARM100 control panel setup warning: {gui_err}")
 
@@ -3094,9 +3241,11 @@ def _launch_arm100_viewer() -> None:
                         # This handles the case where the viser Play button
                         # state is out of sync with viewer._paused.
                         if viewer._paused and arm100_vla_mode and arm100_vla_adapter is not None:
+                            # v0.16.27: When paused, _step_physics won't run,
+                            # so we call _arm_step_fn manually (which now includes
+                            # mj_step internally). No separate mj_step needed.
                             try:
                                 _arm_step_fn(arm_model, arm_data)
-                                mj.mj_step(arm_model, arm_data)
                                 viewer._dirty = True
                             except Exception:
                                 pass
@@ -3117,6 +3266,25 @@ def _launch_arm100_viewer() -> None:
                             wrist_img.image = _wrist_rgb
                         except Exception:
                             pass
+                        # v0.16.27: Also encode JPEG for API serving
+                        # (previously only done in _arm_step_fn which doesn't
+                        # run when viewer is paused)
+                        try:
+                            from PIL import Image as _PIL
+                            import io as _io
+                            for _arr, _attr in [(_top_rgb, 'arm100_cam_top_frame'),
+                                                (_wrist_rgb, 'arm100_cam_wrist_frame')]:
+                                _pil_img = _PIL.fromarray(_arr)
+                                _buf = _io.BytesIO()
+                                _pil_img.save(_buf, format='JPEG', quality=85)
+                                globals()[_attr] = _buf.getvalue()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    # v0.16.27: Update telemetry display periodically
+                    try:
+                        _update_telemetry()
                     except Exception:
                         pass
 
@@ -3352,11 +3520,14 @@ async def arm100_cam_top() -> Response:
     """Get latest top camera JPEG frame (CAMKit top_cam)."""
     if arm100_cam_top_frame is not None:
         return Response(content=arm100_cam_top_frame, media_type="image/jpeg")
-    # Return a black frame if no data yet
+    # Return a placeholder if no data yet
     try:
         import io as _io
-        from PIL import Image as _PIL
-        img = _PIL.new('RGB', (320, 240), color=(10, 10, 10))
+        from PIL import Image as _PIL, ImageDraw as _Draw
+        img = _PIL.new('RGB', (320, 240), color=(20, 80, 20))
+        draw = _Draw.Draw(img)
+        draw.text((10, 100), "Waiting for ARM100 viewer...", fill=(255, 255, 0))
+        draw.text((10, 120), "Click Play or Submit Instruction", fill=(200, 255, 200))
         buf = _io.BytesIO()
         img.save(buf, format='JPEG')
         return Response(content=buf.getvalue(), media_type="image/jpeg")
@@ -3371,8 +3542,11 @@ async def arm100_cam_wrist() -> Response:
         return Response(content=arm100_cam_wrist_frame, media_type="image/jpeg")
     try:
         import io as _io
-        from PIL import Image as _PIL
-        img = _PIL.new('RGB', (320, 240), color=(10, 10, 10))
+        from PIL import Image as _PIL, ImageDraw as _Draw
+        img = _PIL.new('RGB', (320, 240), color=(20, 80, 20))
+        draw = _Draw.Draw(img)
+        draw.text((10, 100), "Waiting for ARM100 viewer...", fill=(255, 255, 0))
+        draw.text((10, 120), "Click Play or Submit Instruction", fill=(200, 255, 200))
         buf = _io.BytesIO()
         img.save(buf, format='JPEG')
         return Response(content=buf.getvalue(), media_type="image/jpeg")

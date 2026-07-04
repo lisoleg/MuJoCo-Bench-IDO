@@ -1165,36 +1165,82 @@ class DemoVLAAdapter(VLAAdapter):
 
         return phases
 
-    def _get_phase_target(self, phase: str, proprio: np.ndarray) -> np.ndarray:
-        """Get target joint positions for a given phase."""
-        # Home pose
+    def _get_phase_target(self, phase: str, proprio: np.ndarray, obs_dict: dict = None) -> np.ndarray:
+        """Get target joint positions for a given phase.
+        v0.16.27: Uses IK based on actual object positions from obs_dict.
+        """
         home = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+
+        # v0.16.27: Extract object positions for IK
+        obj_positions = obs_dict.get('object_positions', {}) if obs_dict else {}
+        arm_base_z = obs_dict.get('arm_base_z', 0.40) if obs_dict else 0.40
+        target_obj = obj_positions.get('red_cube', np.array([0.4, 0.15, 0.435]))
+        tray_pos = obj_positions.get('tray', np.array([0.4, -0.25, 0.41]))
+
+        import math as _math
+
+        def _simple_ik(world_xyz: np.ndarray, gripper_closed: bool = False) -> np.ndarray:
+            """Simple geometric IK: compute arm joints to reach a world position.
+            Arm base is at (0, 0, arm_base_z). Joints: rotation, pitch, elbow, wrist.
+            """
+            dx = float(world_xyz[0]) - 0.0  # arm base x=0
+            dy = float(world_xyz[1]) - 0.0  # arm base y=0
+            dz = float(world_xyz[2]) - arm_base_z
+            # Base rotation: face the target
+            base_rot = _math.atan2(dy, dx)
+            # Horizontal distance
+            horiz = _math.sqrt(dx * dx + dy * dy)
+            # Total reach needed
+            reach = _math.sqrt(horiz * horiz + dz * dz)
+            # Arm segments: upper=0.12, forearm=0.115, wrist+gripper=0.04+0.025=0.065
+            L1, L2, L3 = 0.145, 0.115, 0.065
+            # Shoulder angle (from horizontal)
+            shoulder = _math.atan2(dz, horiz) if horiz > 0.01 else 0.0
+            # Elbow: bend to reach the target distance
+            # Using law of cosines on L1+L2
+            total_reach = L1 + L2
+            if reach > total_reach - 0.01:
+                reach = total_reach - 0.01  # Clamp to reachable
+            if reach < 0.05:
+                reach = 0.05
+            cos_elbow = (L1 * L1 + L2 * L2 - reach * reach) / (2 * L1 * L2)
+            cos_elbow = max(-1.0, min(1.0, cos_elbow))
+            elbow_angle = -(_math.pi - _math.acos(cos_elbow))  # Negative = bend forward
+            # Adjust shoulder for elbow bend
+            shoulder += _math.atan2(L2 * _math.sin(-elbow_angle), L1 + L2 * _math.cos(-elbow_angle))
+            # Wrist pitch: keep gripper pointing down
+            wrist_p = -(shoulder + elbow_angle)
+            # Gripper
+            grip_l = 0.7 if gripper_closed else 0.0
+            grip_r = -0.7 if gripper_closed else 0.0
+            return np.array([base_rot, shoulder * 0.8, elbow_angle, wrist_p, 0.0, grip_l, grip_r])
 
         if phase == "home":
             return home
         elif phase == "reach":
-            # Reach toward cube (approximate IK toward front-center-low)
-            return np.array([0.0, 0.5, -0.8, 0.3, 0.0, 0.0, 0.0])
+            # Reach to above the object (8cm above)
+            return _simple_ik(target_obj + np.array([0, 0, 0.08]), gripper_closed=False)
         elif phase == "descend":
-            # Lower to object
-            return np.array([0.0, 0.6, -1.0, 0.4, 0.0, 0.0, 0.0])
+            # Lower to object (2cm above for grasp)
+            return _simple_ik(target_obj + np.array([0, 0, 0.02]), gripper_closed=False)
         elif phase == "grasp":
             # Close gripper at current position
             target = proprio.copy()
-            target[5] = 0.7   # Close left
-            target[6] = -0.7  # Close right
+            target[5] = 0.7
+            target[6] = -0.7
             return target
         elif phase == "lift":
-            # Lift up while keeping gripper closed
-            return np.array([0.0, 0.2, -0.3, 0.0, 0.0, 0.7, -0.7])
+            # Lift up 15cm while keeping gripper closed
+            lift_target = target_obj + np.array([0, 0, 0.17])
+            return _simple_ik(lift_target, gripper_closed=True)
         elif phase == "transport":
-            # Move to tray (right side)
-            return np.array([0.8, 0.3, -0.5, 0.0, 0.0, 0.7, -0.7])
+            # Move to above tray (8cm above)
+            return _simple_ik(tray_pos + np.array([0, 0, 0.08]), gripper_closed=True)
         elif phase == "release":
             # Open gripper over tray
-            return np.array([0.8, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+            target = _simple_ik(tray_pos + np.array([0, 0, 0.08]), gripper_closed=False)
+            return target
         elif phase == "retreat":
-            # Return to home
             return home
         elif phase == "open_gripper":
             target = proprio.copy()
@@ -1244,7 +1290,7 @@ class DemoVLAAdapter(VLAAdapter):
             proprio = np.array(proprio, dtype=np.float64)
         if len(proprio) < 7:
             proprio = np.pad(proprio, (0, 7 - len(proprio)))
-        target = self._get_phase_target(current_phase, proprio)
+        target = self._get_phase_target(current_phase, proprio, obs_dict)
 
         # v0.16.26: Faster interpolation (was 0.15 — too slow to see motion)
         # 30% per step reaches target in ~10 steps (0.3s), visible to user

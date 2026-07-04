@@ -1,73 +1,60 @@
-# v0.16.25 交付总结
+# v0.16.26 交付总结
 
 ## TL;DR
-3个Bug修复 + 全部P0/P1/P2功能实现完毕，15/15模块验证通过。
+翻跟斗修复 + VLA指令修复 + 6个core模块接入benchmark循环 + Web UI更新 + 文档论文更新 + Git提交
 
 ## 交付概览
-- **版本**: v0.16.25
-- **服务器状态**: ✅ 运行中 (port 8080, v0.16.25 confirmed)
-- **测试通过率**: 15/15 模块 PASS (14 first-pass + 1 PsiLoRA bug fix)
-- **已知问题**: 新模块为独立实现，尚未接入 server.py 主循环
+- **版本**: v0.16.26
+- **服务器**: ✅ 运行中 (port 8080)
+- **Git**: ✅ 已推送到 GitHub (commits 4851a55 + 2903a70)
+- **新API**: /api/architecture ✅, /api/t_processor ✅
 
-## Bug 修复 (3个)
+## Bug 修复
 
-### Bug #1: 机器人突然翻个
-- **原因**: 之前的anti-bounce只解决垂直弹跳，未处理地形边缘导致的角速度翻转
-- **修复**: Flip detection (|roll|/|pitch|>0.52rad=flipping, >0.35rad=tilting) + 紧急恢复 (3x纠正力矩 + 蹲下 + 步态冻结)
-- **文件**: `webviz/server.py`
+### Bug #1: 机器人翻跟斗（根因修复）
+- **根因**: 地形场景下所有增益×0.7，包括pitch/roll稳定增益——在最需要稳定的地方反而降低了稳定性
+- **修复**: 
+  - 地形只缩放Z增益，角稳定增益保持满值
+  - 降低检测阈值：12°/20°（原20°/30°）——更早干预
+  - 高阻尼（4x）代替高力矩（3x）——防止过冲振荡
+  - 主动角速度阻尼：|angvel|>2rad/s时提前加阻尼
 
-### Bug #2: ARM100 camera黑屏
-- **原因**: mj.Renderer需要GL上下文(EGL)，headless环境失败
-- **修复**: 3级fallback (Renderer → MjRenderContextOffscreen → PIL信息覆盖图) + 初始渲染 + 周期渲染
-- **文件**: `webviz/server.py`
+### Bug #2: VLA指令无效果（根因修复）
+- **根因**: VLA分支内调用_render_cam()，camera失败→异常→fallback到默认控制器；15%插值太慢不可见
+- **修复**:
+  - 解耦camera渲染与VLA预测（独立try/except）
+  - 插值速率30%（原15%）——3倍速度，立即可见
+  - 暂停时手动步进物理——即使viewer paused也能执行VLA动作
 
-### Bug #3: Submit Instruction后机械臂不动
-- **原因**: VLA model设为"none"，没有实际adapter执行动作
-- **修复**: DemoVLAAdapter (指令解析→pick-and-place phases) + 自动启用VLA模式 + 自动取消暂停
-- **文件**: `webviz/server.py`, `webviz/tomas_wrapper.py`
+## 6个Core模块接入Benchmark循环
 
-## P0 功能
+| 模块 | 接入点 | 每步输出 |
+|------|--------|---------|
+| KappaSnapTokenizer | η计算后 | token字符串 + 32维summary |
+| T-Processor | action执行后 | η-ALU值 + ψ违规 |
+| Three-Body | action执行 | sim-to-real gap |
+| HG-PINN | 每步 | Hamiltonian能量统计 |
+| Nine-Layer | API报告 | L0-L8层级状态 |
+| ψ-LoRA | 离线收集 | DPO训练对 |
 
-| 模块 | 文件 | 行数 | 说明 |
-|------|------|------|------|
-| KappaSnapTokenizer | `core/kappa_snap_tokenizer.py` | 350 | κ-Snap→[KSNAP:level:event:eta:decision] token编码, sliding window=16, 32维summary |
-| S-Bridge LLM归因 | `agent/s_bridge.py` | +200 | ask_why_llm() few-shot prompt + template fallback |
+## Web UI更新
+- 九层认知架构面板（L0-L8卡片，从/api/architecture动态加载）
+- κ-Snap token实时显示
+- T-Processor规格显示（65k gates, 3.3mW）
+- 版本号更新至v0.16.26
 
-## P1 功能
+## 文档论文更新
+- README.md: 九层架构表、API列表、项目结构更新
+- Paper Appendix C.22: T-Processor规格、KappaSnapTokenizer、Three-Body、HG-PINN、ψ-LoRA、S-Bridge LLM归因、benchmark接入表
 
-| 模块 | 文件 | 行数 | 说明 |
-|------|------|------|------|
-| ψ-Anchor ZMP+Energy | `webviz/tomas_wrapper.py` | +80 | check_zmp() + check_energy_drift() |
-| T-Processor | `core/t_processor.py` | 400 | EtaALU(Q16.16) + PsiChecker + KappaSnapFIFO, 100Hz 65k gates |
+## Git提交
+- `4851a55`: v0.16.26 main commit (19 files, +4225 -172)
+- `2903a70`: T-Processor API属性名修复
+- 已推送到 https://github.com/lisoleg/MuJoCo-Bench-IDO.git
 
-## P2 功能
-
-| 模块 | 文件 | 行数 | 说明 |
-|------|------|------|------|
-| Three-Body | `core/three_body.py` | 300 | Virtual→Software→Physical, isomorphism check |
-| HG-PINN | `core/hg_pinn.py` | 200 | Hamiltonian-guided action head |
-| ψ-anchor LoRA | `core/psi_lora.py` | 200 | DPO preference training, rank-4 LoRA |
-| Nine-Layer Mapping | `core/nine_layer.py` | 250 | L0-L8 认知架构注册表 |
-
-## 文件清单
-
-### 修改的文件
-1. `webviz/server.py` — v0.16.25, 3 bug fixes
-2. `webviz/tomas_wrapper.py` — DemoVLAAdapter + ZMP/Energy check
-3. `agent/s_bridge.py` — ask_why_llm() LLM归因
-4. `webviz/dashboard.html` — 版本号更新
-
-### 新建的文件
-5. `core/kappa_snap_tokenizer.py` — κ-Snap Token编码器
-6. `core/t_processor.py` — T-Processor硬件模拟
-7. `core/three_body.py` — 三身体架构
-8. `core/hg_pinn.py` — Hamiltonian-guided PINN
-9. `core/psi_lora.py` — ψ-anchor LoRA DPO
-10. `core/nine_layer.py` — 九层认知映射
-
-## 用户下一步建议
-1. **打开浏览器验证**: http://localhost:8080 (Dashboard), http://localhost:8081 (3D Viewer地形场景验证翻个修复), http://localhost:8091 (ARM100验证camera+VLA)
-2. **测试VLA指令**: 在8091页面选择"demo-vla"模型，输入"pick the block"并点Submit，观察机械臂执行pick-and-place
-3. **接入主循环**: 新建的6个core模块目前是独立实现，下一步需要接入server.py benchmark循环
-4. **Git提交**: 所有修改可以commit到v0.16.25
-5. **收集preference pairs**: 运行benchmark时从κ-Snap audit trail收集数据，用于ψ-LoRA训练
+## 用户验证步骤
+1. http://localhost:8080 — Dashboard（查看九层架构面板 + T-Processor规格）
+2. http://localhost:8081 — 3D Viewer（地形场景验证翻跟斗修复）
+3. http://localhost:8091 — ARM100（Submit Instruction验证机械臂运动）
+4. `curl http://localhost:8080/api/architecture` — 九层架构API
+5. `curl http://localhost:8080/api/t_processor` — T-Processor规格API
