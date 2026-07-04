@@ -2,7 +2,7 @@
 
 IDO/TOMAS Architecture Upgraded to MuJoCo Continuous Physics Control Domain.
 
-**Current Version: v0.3.0** — Octonion Algebra + EML Distillation + CIM Memristor + Welding Robot + Heterogeneous Benchmark (章锋 2026-07-04)
+**Current Version: v0.4.0** — SLOS Three-Brain Architecture + PCM CIM + Psi-Anchor Gate + kappa-Snap Root Cause + MPW Tapeout + SAC Welding Training (章锋 2026-07-04 v2)
 
 ## Overview
 

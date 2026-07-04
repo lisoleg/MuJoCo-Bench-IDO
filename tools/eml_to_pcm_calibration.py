@@ -508,7 +508,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  Pulses:        {result.pulse_count}")
     print(f"  Final code:    0x{result.final_code:04X} ({result.final_code})")
     print(f"  Error:         {result.error_code} codes")
-    print(f"  Sequence:      {' → '.join(f'0x{c:04X}' for c in result.sequence)}")
+    print(f"  Sequence:      {' -> '.join(f'0x{c:04X}' for c in result.sequence)}")
 
     # Demo: full EML node calibration
     print(f"\n--- Full EML Node Calibration ({method_label(args.method)}) ---")
@@ -578,8 +578,8 @@ def _self_test() -> bool:
         f"Should converge in ≤10 pulses, got {result.pulse_count}"
     assert result.error_code <= calibrator.tolerance, \
         f"Error {result.error_code} exceeds tolerance {calibrator.tolerance}"
-    print(f"  Pulse-verify: 0x{PCM_TARGET_CODE_DEFAULT:04X} → 0x{result.final_code:04X} "
-          f"in {result.pulse_count} pulses ✓")
+    print(f"  Pulse-verify: 0x{PCM_TARGET_CODE_DEFAULT:04X} -> 0x{result.final_code:04X} "
+          f"in {result.pulse_count} pulses [OK]")
 
     # Test 3: EML node → weight matrix
     components = np.array([0.5, 0.3, 0.7, 0.2, 0.6, 0.4, 0.1, 0.8])
@@ -613,7 +613,7 @@ def _self_test() -> bool:
 
     print(f"  Full calibration: {cal['num_cells']} cells, "
           f"avg {cal['avg_pulses']:.1f} pulses, "
-          f"pass rate {ver['pass_rate']*100:.1f}% ✓")
+          f"pass rate {ver['pass_rate']*100:.1f}% [OK]")
 
     print("[eml_to_pcm_calibration] Self-test PASSED.")
     return True

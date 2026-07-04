@@ -761,9 +761,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             code = generator.analyze(snap)
             feedback = generator.generate_feedback(code)
             print(f"{code.cause:<25} {code.action:<35} {code.confidence:>5.2f}")
-            print(f"  → Evidence: {code.evidence}")
-            print(f"  → Feedback: {feedback['process_param_delta']}")
-            print(f"  → {code.format_string()}")
+            print(f"  -> Evidence: {code.evidence}")
+            print(f"  -> Feedback: {feedback['process_param_delta']}")
+            print(f"  -> {code.format_string()}")
             print()
 
     print("=" * 60)
@@ -839,7 +839,7 @@ def _self_test() -> bool:
         f"Gas contamination confidence should be >0.3, got {code_gas.confidence}"
     assert "Increase" in code_gas.action, \
         f"Gas contamination action should include 'Increase', got '{code_gas.action}'"
-    print(f"  Gas_Contamination: conf={code_gas.confidence:.2f} ✓")
+    print(f"  Gas_Contamination: conf={code_gas.confidence:.2f} [OK]")
 
     # Test 4: Feedback generation
     feedback = generator.generate_feedback(code_gas)
@@ -857,14 +857,14 @@ def _self_test() -> bool:
         f"Wire stick should be identified, got {code_stick.root_cause_type.value}"
     assert "Reduce" in code_stick.action or "Wire" in code_stick.action, \
         f"Wire stick action should include 'Reduce' or 'Wire', got '{code_stick.action}'"
-    print(f"  Wire_Stick: conf={code_stick.confidence:.2f} ✓")
+    print(f"  Wire_Stick: conf={code_stick.confidence:.2f} [OK]")
 
     # Test 6: Empty data handling
     snap_empty = MultimodalSnapshot(eta_residual=0.6)
     code_empty = generator.analyze(snap_empty)
     assert code_empty.confidence >= 0.0, "Empty data should not crash"
 
-    print(f"  All {len(all_causes)} root cause types tested ✓")
+    print(f"  All {len(all_causes)} root cause types tested [OK]")
     print("[ksnap_root_cause] Self-test PASSED.")
     return True
 
