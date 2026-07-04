@@ -554,3 +554,256 @@ class TestQADataHealth:
         """qa_data_health._self_test() 通过."""
         from tools.qa_data_health import _self_test
         assert _self_test() is True
+
+
+# ── PCM CIM 模拟器测试 ──
+
+class TestPCMModel:
+    """测试PCM (Phase Change Memory)相变存储器模型."""
+
+    def test_pcm_model_basic(self):
+        """PCM SET/RESET/部分SET电导态."""
+        from tools.tproc_cim_simulator import PCMModel, PCM_G_MAX_S, PCM_G_MIN_S
+        cell = PCMModel()
+
+        # RESET态: 低电导
+        cell.reset()
+        assert cell.code == 0, f"RESET code should be 0, got {cell.code}"
+        assert abs(cell.g - PCM_G_MIN_S) < 1e-12, "RESET conductance should be G_min"
+
+        # SET态: 高电导
+        cell.set()
+        assert cell.code == 0xFFFF, f"SET code should be 0xFFFF, got {cell.code}"
+        assert abs(cell.g - PCM_G_MAX_S) < 1e-12, "SET conductance should be G_max"
+
+        # 部分SET: 中间电导 (0x8000 = 50%)
+        cell.partial_set(0x8000)
+        assert cell.code == 0x8000
+        expected_g = PCM_G_MIN_S + 0x8000 / 0xFFFF * (PCM_G_MAX_S - PCM_G_MIN_S)
+        assert abs(cell.g - expected_g) < 1e-12, \
+            f"Partial SET conductance mismatch: {cell.g} vs {expected_g}"
+
+    def test_pcm_model_conversion(self):
+        """PCM电导码↔电导转换."""
+        from tools.tproc_cim_simulator import PCMModel
+        cell = PCMModel()
+        for test_code in [0, 0x2000, 0x4000, 0x8000, 0xC000, 0xFFFF]:
+            g = cell.code_to_conductance(test_code)
+            code_back = cell.conductance_to_code(g)
+            assert abs(code_back - test_code) <= 1, \
+                f"Round-trip failed: {test_code} → {g} → {code_back}"
+
+    def test_pcm_pulse_verify(self):
+        """PCM脉冲校验写入收敛."""
+        from tools.tproc_cim_simulator import PCMCrossbarArray, PCM_TARGET_CODE, PCM_TOLERANCE
+        np.random.seed(42)
+        pcm = PCMCrossbarArray(8)
+        result = pcm.pulse_verify_write(0, 0, PCM_TARGET_CODE)
+
+        assert result["converged"], \
+            f"Pulse-verify should converge to 0x{PCM_TARGET_CODE:04X}, " \
+            f"got 0x{result['final_code']:04X}"
+        assert result["pulses"] <= 10, \
+            f"Should converge in ≤10 pulses, got {result['pulses']}"
+        assert result["error"] <= PCM_TOLERANCE, \
+            f"Error {result['error']} exceeds tolerance {PCM_TOLERANCE}"
+        # Sequence should have at least 2 entries (initial + at least 1 pulse)
+        assert len(result["sequence"]) >= 2, \
+            f"Sequence should have ≥2 entries, got {len(result['sequence'])}"
+
+    def test_pcm_crossbar(self):
+        """PCM阵列MAC运算."""
+        from tools.tproc_cim_simulator import PCMCrossbarArray, PCM_G_MIN_S, PCM_G_MAX_S, PCM_CODE_MAX
+        pcm = PCMCrossbarArray(8)
+
+        # 全RESET: 近似零电流 (G_min leakage)
+        vec = np.ones(8) * 0.5
+        currents, _ = pcm.matrix_vector_mult(vec)
+        assert np.allclose(currents, 0, atol=1e-6), \
+            "All-RESET PCM array should produce ~0 current"
+
+        # 对角线编程到0x8000
+        for i in range(8):
+            pcm.set_weight_code(i, i, 0x8000)
+
+        currents, energy = pcm.matrix_vector_mult(vec)
+        g_mid = PCM_G_MIN_S + 0x8000 / PCM_CODE_MAX * (PCM_G_MAX_S - PCM_G_MIN_S)
+        # Expected: diagonal (g_mid) + 7 off-diagonal (g_min) leakage
+        expected_current = (g_mid + 7 * PCM_G_MIN_S) * 0.5 * 0.1
+        assert np.allclose(currents, expected_current, atol=1e-8), \
+            f"PCM diagonal current should be ~{expected_current}, got {currents[0]}"
+        assert energy > 0, "PCM energy should be positive"
+
+    def test_pcm_energy(self):
+        """PCM能耗对比SRAM+ALU."""
+        from tools.tproc_cim_simulator import PCMCrossbarArray, SRAM_ALU_ENERGY_PJ
+        pcm = PCMCrossbarArray(8)
+        for i in range(8):
+            pcm.set_weight_code(i, i, 0x8000)
+        vec = np.ones(8) * 0.5
+        _, energy_pcm = pcm.matrix_vector_mult(vec)
+        energy_pcm_pj = energy_pcm * 1e12
+        assert energy_pcm_pj < SRAM_ALU_ENERGY_PJ, \
+            f"PCM ({energy_pcm_pj:.2f}pJ) should be < SRAM+ALU ({SRAM_ALU_ENERGY_PJ:.2f}pJ)"
+
+    def test_pcm_run_comparison(self):
+        """run_pcm_comparison返回正确结构."""
+        from tools.tproc_cim_simulator import run_pcm_comparison
+        f = io.StringIO()
+        with redirect_stdout(f):
+            result = run_pcm_comparison()
+        assert "sram_alu_pj" in result
+        assert "rrrim_pj" in result
+        assert "pcm_pj" in result
+        assert "saving_rrrim" in result
+        assert "saving_pcm" in result
+        assert result["saving_pcm"] > 1.0, "PCM should save energy vs SRAM"
+
+    def test_pcm_cim_self_test(self):
+        """tproc_cim_simulator._self_test() 通过(含PCM测试)."""
+        from tools.tproc_cim_simulator import _self_test
+        assert _self_test() is True
+
+
+# ── EML→PCM标定测试 ──
+
+class TestEMLPCMCalibration:
+    """测试EML→PCM电导标定."""
+
+    def test_eml_calibration(self):
+        """EML→PCM标定基本流程."""
+        from tools.eml_to_pcm_calibration import EMLPCMCalibrator
+        calibrator = EMLPCMCalibrator()
+
+        # 标准八元数EML节点
+        components = np.array([0.5, 0.3, 0.7, 0.2, 0.6, 0.4, 0.1, 0.8])
+        result = calibrator.calibrate_eml_node(components, method="outer")
+
+        assert "weight_matrix" in result
+        assert "target_codes" in result
+        assert "actual_codes" in result
+        assert result["target_codes"].shape == (8, 8)
+        assert result["actual_codes"].shape == (8, 8)
+        assert result["num_cells"] == 64
+
+    def test_eml_calibration_convergence(self):
+        """EML标定脉冲收敛."""
+        from tools.eml_to_pcm_calibration import EMLPCMCalibrator
+        np.random.seed(42)
+        calibrator = EMLPCMCalibrator()
+
+        # 目标码0x4000的脉冲校验写入
+        result = calibrator.pulse_verify_write(0x4000)
+        assert result.converged, "Should converge to 0x4000"
+        assert result.pulse_count <= 10, "Should converge in ≤10 pulses"
+        assert result.error_code <= calibrator.tolerance
+
+    def test_eml_calibration_verification(self):
+        """EML标定验证精度."""
+        from tools.eml_to_pcm_calibration import EMLPCMCalibrator
+        np.random.seed(42)
+        calibrator = EMLPCMCalibrator()
+
+        components = np.array([0.5, 0.3, 0.7, 0.2, 0.6, 0.4, 0.1, 0.8])
+        cal = calibrator.calibrate_eml_node(components)
+        ver = calibrator.verify_calibration(cal["target_codes"], cal["actual_codes"])
+
+        assert "max_error" in ver
+        assert "pass_rate" in ver
+        assert ver["pass_rate"] > 0.8, f"Pass rate should be >80%, got {ver['pass_rate']*100:.1f}%"
+
+    def test_eml_calibration_self_test(self):
+        """eml_to_pcm_calibration._self_test() 通过."""
+        from tools.eml_to_pcm_calibration import _self_test
+        assert _self_test() is True
+
+
+# ── κ-Snap根因代码测试 ──
+
+class TestKSnapRootCause:
+    """测试κ-Snap根因代码生成."""
+
+    def test_ksnap_root_cause_gas_contamination(self):
+        """气体污染根因识别."""
+        from core.ksnap_root_cause import KSnapRootCauseGenerator, RootCauseType, _make_synthetic_snapshot
+        generator = KSnapRootCauseGenerator(eta_threshold=0.5)
+        snap = _make_synthetic_snapshot(RootCauseType.GAS_CONTAMINATION)
+        code = generator.analyze(snap)
+
+        assert code.root_cause_type == RootCauseType.GAS_CONTAMINATION, \
+            f"Should identify Gas_Contamination, got {code.root_cause_type.value}"
+        assert code.confidence > 0.3
+        assert "Increase" in code.action
+
+    def test_ksnap_root_cause_wire_stick(self):
+        """粘丝根因识别."""
+        from core.ksnap_root_cause import KSnapRootCauseGenerator, RootCauseType, _make_synthetic_snapshot
+        generator = KSnapRootCauseGenerator(eta_threshold=0.5)
+        snap = _make_synthetic_snapshot(RootCauseType.WIRE_STICK)
+        code = generator.analyze(snap)
+
+        assert code.root_cause_type == RootCauseType.WIRE_STICK, \
+            f"Should identify Wire_Stick, got {code.root_cause_type.value}"
+        assert code.confidence > 0.3
+
+    def test_ksnap_root_cause_format(self):
+        """根因代码格式字符串."""
+        from core.ksnap_root_cause import RootCauseCode, RootCauseType
+        code = RootCauseCode(
+            cause="Gas_Contamination",
+            action="Increase_Flow_20%",
+            confidence=0.94,
+            root_cause_type=RootCauseType.GAS_CONTAMINATION,
+        )
+        fmt = code.format_string()
+        assert "RootCause: Gas_Contamination" in fmt
+        assert "Action: Increase_Flow_20%" in fmt
+        assert "Confidence: 0.94" in fmt
+
+    def test_ksnap_root_cause_feedback(self):
+        """工艺反哺建议生成."""
+        from core.ksnap_root_cause import KSnapRootCauseGenerator, RootCauseType, _make_synthetic_snapshot
+        generator = KSnapRootCauseGenerator()
+        snap = _make_synthetic_snapshot(RootCauseType.GAS_CONTAMINATION)
+        code = generator.analyze(snap)
+        feedback = generator.generate_feedback(code)
+
+        assert "process_param_delta" in feedback
+        assert "eml_node_hint" in feedback
+        assert "gas_flow" in feedback["process_param_delta"]
+        assert feedback["process_param_delta"]["gas_flow"] > 0
+
+    def test_ksnap_root_cause_self_test(self):
+        """ksnap_root_cause._self_test() 通过."""
+        from core.ksnap_root_cause import _self_test
+        assert _self_test() is True
+
+
+# ── SAC焊接训练测试 ──
+
+class TestSACWeldTrain:
+    """测试SAC焊接训练脚本."""
+
+    def test_training_stats(self):
+        """TrainingStats数据结构."""
+        from baselines.sac_weld_train import TrainingStats
+        stats = TrainingStats()
+        stats.episode_returns = [1.0, 2.0, 3.0]
+        stats.episode_lengths = [100, 200, 300]
+        summary = stats.summary()
+        assert summary["n_episodes"] == 3
+        assert abs(summary["mean_return"] - 2.0) < 0.01
+
+    def test_numpy_sac_stub(self):
+        """NumpySAC Stub基本功能."""
+        from baselines.sac_weld_train import NumpySACStub
+        agent = NumpySACStub(obs_dim=18, act_dim=4)
+        obs = np.random.randn(18).astype(np.float32)
+        action = agent.select_action(obs)
+        assert action.shape == (4,)
+        assert np.all(action >= -1.0) and np.all(action <= 1.0)
+
+    def test_sac_weld_self_test(self):
+        """sac_weld_train._self_test() 通过."""
+        from baselines.sac_weld_train import _self_test
+        assert _self_test() is True
