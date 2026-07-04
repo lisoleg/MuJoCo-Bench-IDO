@@ -243,15 +243,16 @@
   </sensor>
 
   <!-- 4种焊接姿态关键帧 (keyframe) -->
+  <!-- joint5=0.95 → TCP z≈0.328, stickout≈38mm (余量充足, 重力下沉降~10mm) -->
   <keyframe>
-    <!-- flat: 平焊 — q=[0, 0.5, -0.8, 0, 0.3, 0], 变位机水平 -->
-    <key name="flat" qpos="0 0.5 -0.8 0 0.3 0 0 0"/>
+    <!-- flat: 平焊 — TCP在工件上方, 变位机水平 -->
+    <key name="flat" qpos="0 0.5 1.35 0 0.95 0 0 0"/>
     <!-- horizontal: 横焊 — 变位机倾斜45° -->
-    <key name="horizontal" qpos="0 0.5 -0.8 0 0.3 0 0 0.7854"/>
+    <key name="horizontal" qpos="0 0.5 1.35 0 0.95 0 0 0.7854"/>
     <!-- vertical: 立焊 — 变位机倾斜90° -->
-    <key name="vertical" qpos="0 0.5 -0.8 0 0.3 0 0 1.5708"/>
+    <key name="vertical" qpos="0 0.5 1.35 0 0.95 0 0 1.5708"/>
     <!-- overhead: 仰焊 — 变位机倾斜-45° -->
-    <key name="overhead" qpos="0 0.5 -0.8 0 0.3 0 0 -0.7854"/>
+    <key name="overhead" qpos="0 0.5 1.35 0 0.95 0 0 -0.7854"/>
   </keyframe>
 
 </mujoco>

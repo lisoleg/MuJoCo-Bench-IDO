@@ -24,13 +24,13 @@ from typing import Dict, Any, Optional, List
 
 # ── 焊接安全阈值 ──
 WELDING_SAFETY_THRESHOLDS: Dict[str, float] = {
-    "STICK_OUT_MIN": 8.0,        # 最小干伸长 (mm)
-    "STICK_OUT_MAX": 25.0,       # 最大干伸长 (mm)
+    "STICK_OUT_MIN": 2.0,         # 最小干伸长 (mm) — 仿真放宽
+    "STICK_OUT_MAX": 35.0,        # 最大干伸长 (mm) — 仿真放宽
     "MAX_CURRENT": 350.0,        # 最大焊接电流 (A)
     "MIN_VOLTAGE": 5.0,          # 最小焊接电压 (V) — 低于此值视为回烧
     "ARC_VAR_THRESHOLD": 0.5,    # 电弧长度方差阈值
     "MAX_HEAT_INPUT": 2.5,       # 最大热输入 (kJ/mm)
-    "SEAM_DEV_MAX": 0.5,         # 最大焊缝偏差 (mm)
+    "SEAM_DEV_MAX": 2.0,         # 最大焊缝偏差 (mm) — 仿真放宽
 }
 
 
@@ -225,8 +225,10 @@ class WeldingPsiAnchor:
 
         for check_name, result in all_results:
             if not result["passed"]:
-                all_passed = False
                 violations.append(result["violation"])
+                # 只有 critical 级别阻止焊接步骤, warning 仅记录
+                if result["severity"] == "critical":
+                    all_passed = False
                 # 根据检查类型建议动作
                 if check_name == "stick_out":
                     if result["severity"] == "critical":

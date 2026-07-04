@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.4.0</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.4.2</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -341,7 +341,7 @@
          class="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
         <span data-i18n="nav_docs">MuJoCo Docs</span></a>
-      <span class="text-sm font-medium text-slate-400">v0.4.0</span>
+      <span class="text-sm font-medium text-slate-400">v0.4.2</span>
       <div class="flex items-center gap-2">
         <span id="statusDot" class="status-dot idle"></span>
         <span id="statusText" class="label-sm" data-i18n="status_idle">Idle</span>
@@ -936,6 +936,151 @@
         <div class="mt-3" id="weldingSafetyLog" style="display: none;">
           <span class="label-sm">安全违规记录:</span>
           <div id="weldingViolationList" class="log-area mt-1" style="max-height: 80px;"></div>
+        </div>
+
+        <!-- Row 3: Welding Progress Bar -->
+        <div class="mt-3" style="background: #0f172a; padding: 10px; border-radius: 8px;">
+          <div class="flex items-center justify-between mb-1">
+            <span class="label-sm">焊缝进度 (Weld Seam Progress)</span>
+            <span id="weldingProgressText" class="value-sm font-mono text-orange-400">0 / 0 (0.0%)</span>
+          </div>
+          <div style="background: #1e293b; height: 12px; border-radius: 6px; overflow: hidden;">
+            <div id="weldingProgressBar" style="background: linear-gradient(90deg, #f97316, #fbbf24); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+          </div>
+          <div class="flex items-center gap-4 mt-2">
+            <span class="label-sm">电流:</span>
+            <span id="weldingCurrentDisp" class="value-sm font-mono text-red-400">— A</span>
+            <span class="label-sm">电压:</span>
+            <span id="weldingVoltageDisp" class="value-sm font-mono text-yellow-400">— V</span>
+            <span class="label-sm">热输入:</span>
+            <span id="weldingHeatDisp" class="value-sm font-mono text-orange-400">— J/mm</span>
+            <span id="weldingArcIndicator" class="text-xs px-2 py-0.5 rounded-full"
+                  style="background: #1e293b; color: #64748b;">Arc: OFF</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Welding Camera Feeds ═══ -->
+      <div class="card col-span-2" id="weldingCameraPanel">
+        <div class="card-header flex items-center justify-between">
+          <span style="color: #f97316;">📷 焊接视觉系统 (Welding Vision System)</span>
+          <span id="weldingCamStatus" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #1e293b; color: #64748b;">—</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mt-2">
+          <!-- Overview Camera -->
+          <div class="card" style="background: #0f172a; padding: 8px;">
+            <div class="flex items-center justify-between mb-1">
+              <span class="label-sm">Overview Cam (全局视角)</span>
+              <span class="text-xs text-slate-500">640x480</span>
+            </div>
+            <div style="position: relative; background: #000; border-radius: 6px; overflow: hidden; aspect-ratio: 4/3;">
+              <img id="weldingCamOverview" src="" alt="Overview Camera"
+                   style="width: 100%; height: 100%; object-fit: cover; display: none;"
+                   onerror="this.style.display='none'; document.getElementById('weldingCamOverviewPlaceholder').style.display='flex';" />
+              <div id="weldingCamOverviewPlaceholder"
+                   style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; color: #475569;">
+                <span style="font-size: 2rem;">📷</span>
+                <span class="text-xs mt-1">Camera offline</span>
+                <span class="text-xs">(GPU render required)</span>
+              </div>
+            </div>
+          </div>
+          <!-- Weld Camera (close-up) -->
+          <div class="card" style="background: #0f172a; padding: 8px;">
+            <div class="flex items-center justify-between mb-1">
+              <span class="label-sm">Weld Cam (焊接特写)</span>
+              <span class="text-xs text-slate-500">640x480</span>
+            </div>
+            <div style="position: relative; background: #000; border-radius: 6px; overflow: hidden; aspect-ratio: 4/3;">
+              <img id="weldingCamWeld" src="" alt="Weld Camera"
+                   style="width: 100%; height: 100%; object-fit: cover; display: none;"
+                   onerror="this.style.display='none'; document.getElementById('weldingCamWeldPlaceholder').style.display='flex';" />
+              <div id="weldingCamWeldPlaceholder"
+                   style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column; color: #475569;">
+                <span style="font-size: 2rem;">📷</span>
+                <span class="text-xs mt-1">Camera offline</span>
+                <span class="text-xs">(GPU render required)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Welding Sensor Data Acquisition ═══ -->
+      <div class="card col-span-2" id="weldingSensorPanel">
+        <div class="card-header flex items-center justify-between">
+          <span style="color: #f97316;">📊 焊接数据采集系统 (Welding DAQ)</span>
+          <span id="weldingDaqStatus" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #1e293b; color: #64748b;">— sensors</span>
+        </div>
+
+        <!-- Sensor Grid: 7 sensors -->
+        <div class="grid grid-cols-4 gap-3 mt-2">
+          <!-- 1. TCP Position -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #22d3ee;">① TCP 位置 (500Hz)</span>
+            <div id="weldingSensorTcpPos" class="value-sm font-mono text-cyan-400 mt-1">—</div>
+          </div>
+          <!-- 2. Stickout -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #60a5fa;">② 干伸长 (500Hz)</span>
+            <div class="mt-1">
+              <span id="weldingSensorStickout" class="value-md font-mono text-blue-400">—</span>
+              <span class="text-xs text-slate-500"> mm</span>
+            </div>
+          </div>
+          <!-- 3. Joint Torques -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #a78bfa;">③ 关节力矩 (500Hz)</span>
+            <div id="weldingSensorTorques" class="value-sm font-mono text-purple-400 mt-1">—</div>
+          </div>
+          <!-- 4. Contact Force -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #f472b6;">④ 接触力 (500Hz)</span>
+            <div id="weldingSensorForce" class="value-sm font-mono text-pink-400 mt-1">—</div>
+          </div>
+          <!-- 5. Temperature -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #fb923c;">⑤ 红外温度 (60Hz)</span>
+            <div class="mt-1">
+              <span id="weldingSensorTemp" class="value-md font-mono text-orange-400">—</span>
+              <span class="text-xs text-slate-500"> °C</span>
+            </div>
+          </div>
+          <!-- 6. Arc Current -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #ef4444;">⑥ 霍尔电流 (50kHz)</span>
+            <div class="mt-1">
+              <span id="weldingSensorArc" class="value-md font-mono text-red-400">—</span>
+              <span class="text-xs text-slate-500"> A</span>
+            </div>
+          </div>
+          <!-- 7. Seam Deviation -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #fbbf24;">⑦ 焊缝偏差 (500Hz)</span>
+            <div class="mt-1">
+              <span id="weldingSensorSeam" class="value-md font-mono text-amber-400">—</span>
+              <span class="text-xs text-slate-500"> mm</span>
+            </div>
+          </div>
+          <!-- Adaptive Sampling Rate -->
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm" style="color: #34d399;">自适应采样率</span>
+            <div id="weldingSensorSampleRate" class="value-sm font-mono text-emerald-400 mt-1">—</div>
+          </div>
+        </div>
+
+        <!-- Joint Angles Detail -->
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">关节角度 (Joint Angles, deg)</span>
+            <div id="weldingSensorJointAngles" class="value-sm font-mono text-slate-300 mt-1">—</div>
+          </div>
+          <div class="card" style="background: #0f172a; padding: 10px;">
+            <span class="label-sm">执行器力 (Actuator Forces, N)</span>
+            <div id="weldingSensorActuatorForce" class="value-sm font-mono text-slate-300 mt-1">—</div>
+          </div>
         </div>
       </div>
 
@@ -2272,6 +2417,14 @@
           if (_weldingPollTimer) clearInterval(_weldingPollTimer);
           _weldingPollTimer = setInterval(pollWeldingStatus, 500);
           pollWeldingStatus(); // immediate first poll
+          // Start sensor data polling
+          if (_weldingSensorTimer) clearInterval(_weldingSensorTimer);
+          _weldingSensorTimer = setInterval(pollWeldingSensors, 300);
+          pollWeldingSensors();
+          // Start camera refresh
+          if (_weldingCameraTimer) clearInterval(_weldingCameraTimer);
+          _weldingCameraTimer = setInterval(refreshWeldingCameras, 1000);
+          refreshWeldingCameras();
         }
       })
       .catch(err => {
@@ -2295,6 +2448,14 @@
         if (_weldingPollTimer) {
           clearInterval(_weldingPollTimer);
           _weldingPollTimer = null;
+        }
+        if (_weldingSensorTimer) {
+          clearInterval(_weldingSensorTimer);
+          _weldingSensorTimer = null;
+        }
+        if (_weldingCameraTimer) {
+          clearInterval(_weldingCameraTimer);
+          _weldingCameraTimer = null;
         }
         // Final status update
         setTimeout(pollWeldingStatus, 200);
@@ -2343,7 +2504,7 @@
         document.getElementById('weldingEta').textContent = q.eta !== undefined ? q.eta.toFixed(4) : '—';
         document.getElementById('weldingPorosity').textContent = q.porosity !== undefined ? (q.porosity * 100).toFixed(1) + '%' : '—';
         document.getElementById('weldingDistortion').textContent = q.distortion !== undefined ? q.distortion.toFixed(3) : '—';
-        document.getElementById('weldingHeatInput').textContent = q.heat_input !== undefined ? q.heat_input.toFixed(1) + ' J/mm' : '—';
+        document.getElementById('weldingHeatInput').textContent = data.heat_input !== undefined ? data.heat_input.toFixed(1) + ' J/mm' : '—';
 
         // Safety
         const s = data.safety || {};
@@ -2380,10 +2541,146 @@
         document.getElementById('weldingStickout').textContent = data.stickout_mm !== undefined ? data.stickout_mm.toFixed(2) : '—';
         document.getElementById('weldingTemperature').textContent = data.temperature_C !== undefined ? data.temperature_C.toFixed(1) : '—';
         document.getElementById('weldingSeamDev').textContent = data.seam_deviation_mm !== undefined ? data.seam_deviation_mm.toFixed(3) : '—';
+
+        // Welding progress bar
+        const wpIdx = data.waypoint_idx || 0;
+        const wpTotal = data.waypoint_total || 0;
+        const progress = data.weld_progress || 0;
+        document.getElementById('weldingProgressBar').style.width = (progress * 100).toFixed(1) + '%';
+        document.getElementById('weldingProgressText').textContent =
+          wpIdx + ' / ' + wpTotal + ' (' + (progress * 100).toFixed(1) + '%)';
+
+        // Current / Voltage / Heat input
+        document.getElementById('weldingCurrentDisp').textContent =
+          data.current_A !== undefined ? data.current_A.toFixed(1) + ' A' : '— A';
+        document.getElementById('weldingVoltageDisp').textContent =
+          data.voltage_V !== undefined ? data.voltage_V.toFixed(1) + ' V' : '— V';
+        document.getElementById('weldingHeatDisp').textContent =
+          data.heat_input !== undefined ? data.heat_input.toFixed(1) + ' J/mm' : '— J/mm';
+
+        // Arc indicator
+        const arcEl = document.getElementById('weldingArcIndicator');
+        if (isRunning) {
+          arcEl.textContent = 'Arc: ON (' + (data.current_A || 0).toFixed(0) + 'A)';
+          arcEl.style.background = 'rgba(239, 68, 68, 0.2)';
+          arcEl.style.color = '#ef4444';
+        } else {
+          arcEl.textContent = 'Arc: OFF';
+          arcEl.style.background = '#1e293b';
+          arcEl.style.color = '#64748b';
+        }
       })
       .catch(err => {
         // Silent fail on poll errors
       });
+    }
+
+    // ═══ v0.4.2: Welding Sensor Data Acquisition ═══
+    let _weldingSensorTimer = null;
+    let _weldingCameraTimer = null;
+
+    function pollWeldingSensors() {
+      fetch('/api/welding/sensors')
+      .then(res => { if (!res.ok) return null; return res.json(); })
+      .then(data => {
+        if (!data || data.status === 'error') return;
+        const s = data.sensors || {};
+
+        // 1. TCP Position
+        const tcpPos = s.tcp_position_mm || [];
+        const tcpEuler = s.tcp_euler_deg || [];
+        if (tcpPos.length >= 3) {
+          document.getElementById('weldingSensorTcpPos').textContent =
+            'X:' + tcpPos[0].toFixed(1) + ' Y:' + tcpPos[1].toFixed(1) + ' Z:' + tcpPos[2].toFixed(1);
+        }
+
+        // 2. Stickout
+        document.getElementById('weldingSensorStickout').textContent =
+          s.stickout_mm !== undefined ? s.stickout_mm.toFixed(2) : '—';
+
+        // 3. Joint Torques (from actuator forces)
+        const forces = s.actuator_forces_N || [];
+        if (forces.length >= 6) {
+          document.getElementById('weldingSensorTorques').textContent =
+            '[' + forces.slice(0, 6).map(f => f.toFixed(1)).join(', ') + ']';
+        }
+
+        // 4. Contact Force
+        const cf = s.contact_force_N || [];
+        if (cf.length >= 3) {
+          document.getElementById('weldingSensorForce').textContent =
+            'Fx:' + cf[0].toFixed(2) + ' Fy:' + cf[1].toFixed(2) + ' Fz:' + cf[2].toFixed(2);
+        }
+
+        // 5. Temperature
+        document.getElementById('weldingSensorTemp').textContent =
+          s.temperature_C !== undefined ? s.temperature_C.toFixed(1) : '—';
+
+        // 6. Arc Current
+        document.getElementById('weldingSensorArc').textContent =
+          s.arc_current_A !== undefined ? s.arc_current_A.toFixed(1) : '—';
+
+        // 7. Seam Deviation
+        document.getElementById('weldingSensorSeam').textContent =
+          s.seam_deviation_mm !== undefined ? s.seam_deviation_mm.toFixed(3) : '—';
+
+        // Joint angles
+        const ja = s.joint_angles_deg || [];
+        if (ja.length >= 6) {
+          document.getElementById('weldingSensorJointAngles').textContent =
+            'J1:' + ja[0].toFixed(1) + ' J2:' + ja[1].toFixed(1) + ' J3:' + ja[2].toFixed(1) +
+            ' J4:' + ja[3].toFixed(1) + ' J5:' + ja[4].toFixed(1) + ' J6:' + ja[5].toFixed(1);
+        }
+
+        // Actuator forces detail
+        if (forces.length >= 6) {
+          document.getElementById('weldingSensorActuatorForce').textContent =
+            '[' + forces.slice(0, 6).map(f => f.toFixed(2)).join(', ') + '] N';
+        }
+
+        // DAQ status
+        const numSensors = 7;
+        const stepVal = data.step || 0;
+        document.getElementById('weldingDaqStatus').textContent =
+          numSensors + ' sensors @ ' + stepVal + ' steps';
+        document.getElementById('weldingDaqStatus').style.color =
+          data.running ? '#22c55e' : '#64748b';
+      })
+      .catch(err => { /* silent */ });
+    }
+
+    // ═══ v0.4.2: Welding Camera Feeds ═══
+    function refreshWeldingCameras() {
+      const camOverview = document.getElementById('weldingCamOverview');
+      const camWeld = document.getElementById('weldingCamWeld');
+      const camStatus = document.getElementById('weldingCamStatus');
+      const ts = Date.now(); // cache buster
+
+      // Overview camera
+      camOverview.onerror = function() {
+        camOverview.style.display = 'none';
+        document.getElementById('weldingCamOverviewPlaceholder').style.display = 'flex';
+        camStatus.textContent = 'Camera render failed';
+        camStatus.style.color = '#ef4444';
+      };
+      camOverview.onload = function() {
+        camOverview.style.display = 'block';
+        document.getElementById('weldingCamOverviewPlaceholder').style.display = 'none';
+        camStatus.textContent = 'Live';
+        camStatus.style.color = '#22c55e';
+      };
+      camOverview.src = '/api/welding/cam/overview_cam?w=640&h=480&t=' + ts;
+
+      // Weld camera
+      camWeld.onerror = function() {
+        camWeld.style.display = 'none';
+        document.getElementById('weldingCamWeldPlaceholder').style.display = 'flex';
+      };
+      camWeld.onload = function() {
+        camWeld.style.display = 'block';
+        document.getElementById('weldingCamWeldPlaceholder').style.display = 'none';
+      };
+      camWeld.src = '/api/welding/cam/weld_cam?w=640&h=480&t=' + ts;
     }
 
     // Initial welding status check on page load

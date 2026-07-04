@@ -4063,6 +4063,11 @@ async def welding_status() -> JSONResponse:
         temperature: float = float(obs[16])
         seam_dev: float = float(obs[17])
 
+        # 焊接进度
+        wp_idx: int = getattr(env, "_current_waypoint_idx", 0)
+        wp_total: int = len(getattr(env, "waypoints", []))
+        weld_progress: float = wp_idx / max(wp_total - 1, 1) if wp_total > 1 else 0.0
+
         return JSONResponse(content={
             "status": "running" if _welding_running else "idle",
             "weld_type": env.weld_type,
@@ -4075,6 +4080,13 @@ async def welding_status() -> JSONResponse:
             "seam_deviation_mm": seam_dev,
             "quality": _welding_quality,
             "safety": _welding_safety,
+            "weld_progress": weld_progress,
+            "waypoint_idx": wp_idx,
+            "waypoint_total": wp_total,
+            "heat_input": getattr(env, "_last_heat_input", 0.0),
+            "current_A": getattr(env, "_last_current", 0.0),
+            "voltage_V": getattr(env, "_last_voltage", 0.0),
+            "viewer_url": welding_viewer_url if welding_viewer_running else None,
             "available": True,
         })
     except Exception as e:
@@ -4584,6 +4596,183 @@ async def welding_viewer_status() -> JSONResponse:
         "url": welding_viewer_url,
         "error": welding_viewer_error,
         "weld_type": welding_viewer_weld_type,
+    })
+
+
+# ═══════════════════════════════════════════════════════════════
+# Welding Sensors & Camera APIs (v0.4.2)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/welding/sensors")
+async def welding_sensors() -> JSONResponse:
+    """焊接传感器实时数据 (7类多模态传感器).
+
+    Returns:
+        JSONResponse with all sensor readings:
+        tcp_pose, stickout, joint_torques, contact_force,
+        temperature, arc_current, seam_deviation,
+        joint_angles, joint_velocities, actuator_forces,
+        weld_progress, heat_input.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+
+    env: Optional[Any] = _get_or_create_welding_env()
+    if env is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "WeldingEnv creation failed"},
+        )
+
+    try:
+        sensor_data: Dict[str, Any] = env.get_sensor_data()
+
+        # 递归转换 numpy 类型为 JSON 可序列化类型
+        def _jsonify(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {k: _jsonify(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_jsonify(v) for v in obj]
+            if hasattr(obj, "tolist"):  # numpy array/scalar
+                return _jsonify(obj.tolist())
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            if isinstance(obj, (np.bool_,)):
+                return bool(obj)
+            return obj
+
+        return JSONResponse(content={
+            "status": "ok",
+            "running": _welding_running,
+            "step": _welding_step,
+            "sensors": _jsonify(sensor_data),
+        })
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)},
+        )
+
+
+@app.get("/api/welding/cam/{cam_name}")
+async def welding_camera(cam_name: str, width: int = 640, height: int = 480):
+    """焊接 MuJoCo 相机渲染.
+
+    Renders the specified MuJoCo camera to a JPEG image.
+
+    Args:
+        cam_name: Camera name ("overview_cam" or "weld_cam").
+        width: Image width (default 640).
+        height: Image height (default 480).
+
+    Returns:
+        JPEG image response, or JSON error.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+
+    env: Optional[Any] = _get_or_create_welding_env()
+    if env is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "WeldingEnv creation failed"},
+        )
+
+    # 验证相机名称
+    valid_cams = ["overview_cam", "weld_cam"]
+    if cam_name not in valid_cams:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "error": f"Invalid camera '{cam_name}'. Valid: {valid_cams}",
+            },
+        )
+
+    try:
+        # 确保物理状态是最新的
+        import mujoco as _mj
+        _mj.mj_forward(env.model, env.data)
+
+        jpeg_bytes: Optional[bytes] = env.render_camera(
+            cam_name=cam_name,
+            width=min(width, 1280),
+            height=min(height, 960),
+        )
+
+        if jpeg_bytes is None:
+            # 渲染失败 — 返回占位图
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "error": "Camera render failed (GPU/EGL not available on Windows)",
+                    "cam_name": cam_name,
+                },
+            )
+
+        from fastapi import Response
+        return Response(
+            content=jpeg_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache, no-store"},
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)},
+        )
+
+
+@app.get("/api/welding/camera_info")
+async def welding_camera_info() -> JSONResponse:
+    """获取焊接相机信息.
+
+    Returns:
+        JSONResponse with available cameras and their properties.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+
+    env: Optional[Any] = _get_or_create_welding_env()
+    if env is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "WeldingEnv creation failed"},
+        )
+
+    cameras: list = []
+    try:
+        for i in range(env.model.ncam):
+            name = __import__("mujoco").mj_id2name(
+                env.model, __import__("mujoco").mjtObj.mjOBJ_CAMERA, i
+            )
+            pos = env.model.cam_pos[i].tolist()
+            fovy = float(env.model.cam_fovy[i])
+            cameras.append({
+                "name": name,
+                "position": pos,
+                "fovy": fovy,
+                "url": f"/api/welding/cam/{name}",
+            })
+    except Exception:
+        pass
+
+    return JSONResponse(content={
+        "status": "ok",
+        "cameras": cameras,
+        "num_cameras": len(cameras),
     })
 
 

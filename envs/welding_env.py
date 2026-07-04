@@ -217,6 +217,16 @@ class WeldingEnv:
         self._step_count: int = 0
         self._current_waypoint_idx: int = 0
         self._temperature: float = 25.0  # 初始温度 25°C
+        self._last_current: float = 200.0  # 最近一次焊接电流
+        self._last_voltage: float = 24.0  # 最近一次焊接电压
+        self._last_heat_input: float = 0.0  # 最近一次热输入 (J/mm)
+
+        # 传感器套件
+        try:
+            from core.welding_sensors import WeldingSensorSuite
+            self.sensor_suite: Optional[Any] = WeldingSensorSuite()
+        except ImportError:
+            self.sensor_suite = None
 
         # keyframe 索引
         self._keyframe_map: Dict[str, int] = {}
@@ -319,18 +329,24 @@ class WeldingEnv:
 
         # ④ 推进 MuJoCo 物理 (如果安全检查通过)
         if safety_result["passed"]:
-            # 简单: 将焊接速度映射为关节运动（使TCP沿焊缝移动）
-            self._advance_along_seam(speed)
+            # 驱动关节让 TCP 沿焊缝移动 + 摆动 + 电弧可视化
+            self._advance_along_seam(speed, weave, current)
             mujoco.mj_step(self.model, self.data)
         else:
             # 安全违规: 仍推进物理但不移动TCP
             mujoco.mj_step(self.model, self.data)
 
         # ⑤ 更新温度 (简化热模型: 电流×电压 → 热量, 自然冷却)
-        heat_input: float = current * voltage * WELD_TIMESTEP  # J
+        heat_input_j: float = current * voltage * WELD_TIMESTEP  # J
         cooling: float = (self._temperature - 25.0) * 0.001  # 自然冷却
-        self._temperature += heat_input * 0.0001 - cooling
+        self._temperature += heat_input_j * 0.0001 - cooling
         self._temperature = max(25.0, min(self._temperature, 2000.0))
+
+        # 存储最近焊接参数 (供传感器套件读取)
+        self._last_current = current
+        self._last_voltage = voltage
+        # 热输入 (J/mm) = 电流×电压 / 速度
+        self._last_heat_input = (current * voltage) / max(speed, 0.1)
 
         # ⑥ 计算奖励
         reward: float = self.compute_welding_reward(quality)
@@ -345,7 +361,14 @@ class WeldingEnv:
             "weld_type": self.weld_type,
             "step_count": self._step_count,
             "waypoint_idx": self._current_waypoint_idx,
+            "waypoint_total": len(self.waypoints),
+            "weld_progress": self._current_waypoint_idx / max(len(self.waypoints) - 1, 1),
             "action_clipped": action_clipped.tolist(),
+            "heat_input": self._last_heat_input,
+            "current": current,
+            "voltage": voltage,
+            "weave": weave,
+            "speed": speed,
         }
 
         # 获取更新后的观测
@@ -358,14 +381,21 @@ class WeldingEnv:
             "info": info,
         }
 
-    def _advance_along_seam(self, speed_mm_s: float) -> None:
+    def _advance_along_seam(
+        self,
+        speed_mm_s: float,
+        weave_mm: float = 0.0,
+        current_a: float = 200.0,
+    ) -> None:
         """根据焊接速度推进 TCP 沿焊缝方向移动.
 
-        通过设置关节控制器目标来近似 TCP 运动。
-        简化实现: 根据速度更新当前 waypoint 索引。
+        通过设置 position actuator 的 ctrl 目标来驱动关节运动,
+        使 TCP 沿焊缝 X 轴方向移动, 同时叠加 Y 方向摆动(weave)。
 
         Args:
             speed_mm_s: 焊接速度 (mm/s).
+            weave_mm: 摆动幅度 (mm).
+            current_a: 焊接电流 (A), 用于电弧可视化.
         """
         # 每步移动距离 (m)
         step_distance_m: float = speed_mm_s / 1000.0 * WELD_TIMESTEP
@@ -378,12 +408,59 @@ class WeldingEnv:
                 self._current_waypoint_idx + 1, len(self.waypoints) - 1
             )
 
-        # 设置控制器目标为当前 waypoint 附近的姿态
-        # 这里保持关键帧姿态不变（简化），实际由 IK 控制器处理
+        # ── 计算关节控制目标 ──
+        # 基础姿态来自关键帧 (keyframe qpos, 不是 qpos0)
         kf_name: str = WELD_TYPE_KEYFRAMES.get(self.weld_type, "flat")
         kf_id: int = self._keyframe_map.get(kf_name, 0)
         if self.model.nkey > 0 and kf_id < self.model.nkey:
-            self.data.qpos[:8] = self.model.qpos0[:8]  # 保持初始姿态
+            base_qpos = self.model.key_qpos[kf_id][:8].copy()
+        else:
+            base_qpos = np.array([0.0, 0.5, -0.8, 0.0, 0.3, 0.0, 0.0, 0.0])
+
+        # 焊缝进度 (0.0 → 1.0)
+        progress: float = self._current_waypoint_idx / max(len(self.waypoints) - 1, 1)
+
+        # joint2 (shoulder pitch): 从 0.5 → 0.65, 使手臂前倾延伸 TCP 沿 +X
+        joint2_offset: float = 0.15 * progress
+        # joint3 (elbow pitch): 从 1.35 → 1.20, 肘部微调保持 TCP 高度
+        joint3_offset: float = -0.15 * progress
+        # joint1 (base rotation): 叠加摆动
+        weave_rad: float = (weave_mm / 1000.0) * 0.5  # mm → rad (近似)
+        weave_offset: float = weave_rad * np.sin(
+            2.0 * np.pi * 2.0 * self._step_count * WELD_TIMESTEP
+        )
+
+        # 设置 8 个 position actuator 的控制目标
+        ctrl_targets = np.zeros(8, dtype=np.float64)
+        ctrl_targets[0] = base_qpos[0] + weave_offset       # joint1 + weave
+        ctrl_targets[1] = base_qpos[1] + joint2_offset       # joint2 + sweep
+        ctrl_targets[2] = base_qpos[2] + joint3_offset       # joint3 + sweep
+        ctrl_targets[3] = base_qpos[3]                        # joint4
+        ctrl_targets[4] = base_qpos[4]                        # joint5
+        ctrl_targets[5] = base_qpos[5]                        # joint6
+        ctrl_targets[6] = base_qpos[6]                        # pos_rot_z
+        ctrl_targets[7] = base_qpos[7]                        # pos_tilt_x
+
+        # 裁剪到 actuator ctrlrange
+        for i in range(min(8, self.model.nu)):
+            lo = self.model.actuator_ctrlrange[i, 0]
+            hi = self.model.actuator_ctrlrange[i, 1]
+            ctrl_targets[i] = np.clip(ctrl_targets[i], lo, hi)
+
+        self.data.ctrl[:8] = ctrl_targets
+
+        # ── 电弧可视化: 根据电流大小调整 arc_cone 透明度 ──
+        try:
+            arc_geom_id = self.model.geom("arc_cone").id
+            # 电流越大, 电弧越亮 (alpha 0.0→0.8)
+            arc_alpha: float = min(0.8, current_a / 350.0 * 0.8)
+            # 添加闪烁效果 (高频随机)
+            flicker: float = 0.85 + 0.15 * np.sin(self._step_count * 0.5)
+            self.model.geom_rgba[arc_geom_id] = np.array(
+                [0.95, 0.25, 0.08, arc_alpha * flicker]
+            )
+        except Exception:
+            pass
 
     def get_observation(self) -> np.ndarray:
         """获取 18 维观测向量.
@@ -460,8 +537,8 @@ class WeldingEnv:
     def _compute_stickout(self) -> float:
         """计算干伸长 (mm).
 
-        从 MuJoCo distance 传感器读取 wire_tip 到 workpiece 的距离，
-        转换为 mm。如果传感器不可用，回退到几何计算。
+        干伸长 = wire_tip 到工件表面的垂直距离 (Z方向)。
+        工件表面 = workpiece body Z + 工件半厚度 (0.025m)。
 
         Returns:
             干伸长 (mm).
@@ -472,30 +549,30 @@ class WeldingEnv:
             dist_m: float = float(self.data.sensordata[dist_adr])
             return max(0.0, dist_m * 1000.0)
 
-        # 回退: 几何计算 (wire_tip 到 workpiece 中心表面)
+        # 几何计算: Z方向距离 (wire_tip Z - workpiece surface Z)
         tcp_pos: np.ndarray = self.data.site_xpos[self._wire_tip_id]
         wp_pos: np.ndarray = self.data.xpos[self._workpiece_id]
-        dist_m = float(np.linalg.norm(tcp_pos - wp_pos))
-        return max(0.0, dist_m * 1000.0)
+        # 工件表面 = workpiece center Z + 半厚度 (0.025m)
+        wp_surface_z: float = float(wp_pos[2]) + 0.025
+        stickout_m: float = float(tcp_pos[2]) - wp_surface_z
+        return max(0.0, stickout_m * 1000.0)
 
     def _compute_seam_deviation(self) -> float:
-        """计算 TCP 到焊缝的垂直距离偏差 (mm).
+        """计算 TCP 到焊缝的横向偏差 (mm).
 
-        焊缝沿 X 轴方向，偏差为 TCP 在 YZ 平面到焊缝线的距离。
+        焊缝沿 X 轴方向, 偏差仅为 Y 方向 (横向偏移),
+        不含 Z 方向 (高度由 stickout 单独管理)。
 
         Returns:
-            焊缝偏差 (mm).
+            焊缝横向偏差 (mm).
         """
         tcp_pos: np.ndarray = self.data.site_xpos[self._wire_tip_id]
 
-        # 焊缝中心线: 沿X轴, y=WORKPIECE_CENTER[1], z=WORKPIECE_CENTER[2]
+        # 焊缝中心线: 沿X轴, y=WORKPIECE_CENTER[1]
         seam_y: float = WORKPIECE_CENTER[1]
-        seam_z: float = WORKPIECE_CENTER[2] + 0.015  # 焊缝表面高度
 
-        # 偏差 = YZ 平面距离
-        dev_m: float = float(np.sqrt(
-            (tcp_pos[1] - seam_y) ** 2 + (tcp_pos[2] - seam_z) ** 2
-        ))
+        # 偏差 = Y方向距离 (横向偏移)
+        dev_m: float = float(abs(tcp_pos[1] - seam_y))
         return dev_m * 1000.0
 
     def _read_contact_force(self) -> np.ndarray:
@@ -573,6 +650,116 @@ class WeldingEnv:
         rz: float = float(np.arctan2(siny_cosp, cosy_cosp))
 
         return np.array([rx, ry, rz])
+
+    def get_sensor_data(self) -> Dict[str, Any]:
+        """获取所有传感器实时数据 (供 API 调用).
+
+        Returns:
+            传感器数据字典, 包含:
+              - tcp_pose: [x, y, z, rx, ry, rz]
+              - stickout_mm: 干伸长
+              - joint_torques: [6] 关节力矩
+              - contact_force: [fx, fy, fz]
+              - temperature_C: 温度
+              - arc_current_A: 电弧电流
+              - seam_deviation_mm: 焊缝偏差
+              - joint_angles: [6] 关节角度
+              - joint_velocities: [6] 关节速度
+              - actuator_forces: [6] 执行器力
+              - weld_progress: 焊接进度 0-1
+              - heat_input: 热输入 J/mm
+        """
+        obs: np.ndarray = self.get_observation()
+
+        # 从 MuJoCo 传感器读取
+        joint_angles = np.zeros(6)
+        joint_velocities = np.zeros(6)
+        actuator_forces = np.zeros(6)
+
+        # 直接从 data 读取
+        joint_angles[:6] = self.data.qpos[:6].copy()
+        if self.model.nv >= 6:
+            joint_velocities[:6] = self.data.qvel[:6].copy()
+        if self.model.nu >= 6:
+            actuator_forces[:6] = self.data.actuator_force[:6].copy()
+
+        # 如果有传感器套件, 用它读取
+        sensor_readings: Dict[str, Any] = {}
+        if self.sensor_suite is not None:
+            try:
+                sensor_readings = self.sensor_suite.read_all(
+                    self.model, self.data, self
+                )
+            except Exception:
+                pass
+
+        return {
+            "tcp_pose": obs[0:6].tolist(),
+            "tcp_position_mm": (obs[0:3] * 1000.0).tolist(),
+            "tcp_euler_deg": np.degrees(obs[3:6]).tolist(),
+            "stickout_mm": float(obs[12]),
+            "contact_force_N": obs[13:16].tolist(),
+            "temperature_C": float(obs[16]),
+            "arc_current_A": self._last_current,
+            "arc_voltage_V": self._last_voltage,
+            "seam_deviation_mm": float(obs[17]),
+            "joint_angles_rad": joint_angles.tolist(),
+            "joint_angles_deg": np.degrees(joint_angles).tolist(),
+            "joint_velocities_rad_s": joint_velocities.tolist(),
+            "actuator_forces_N": actuator_forces.tolist(),
+            "weld_progress": float(
+                self._current_waypoint_idx / max(len(self.waypoints) - 1, 1)
+            ),
+            "waypoint_idx": self._current_waypoint_idx,
+            "waypoint_total": len(self.waypoints),
+            "heat_input_J_mm": self._last_heat_input,
+            "sensor_suite": sensor_readings if sensor_readings else {},
+        }
+
+    def render_camera(
+        self,
+        cam_name: str = "overview_cam",
+        width: int = 640,
+        height: int = 480,
+    ) -> Optional[bytes]:
+        """渲染 MuJoCo 相机为 JPEG bytes.
+
+        Args:
+            cam_name: 相机名称 ("overview_cam" 或 "weld_cam").
+            width: 图像宽度.
+            height: 图像高度.
+
+        Returns:
+            JPEG bytes, 如果渲染失败返回 None.
+        """
+        try:
+            cam_id = self.model.camera(cam_name).id
+            renderer = mujoco.Renderer(self.model, height=height, width=width)
+            renderer.update_scene(self.data, camera=cam_id)
+            pixels = renderer.render()
+            # numpy RGB → JPEG
+            import cv2
+            bgr = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ok:
+                return buf.tobytes()
+        except Exception:
+            pass
+
+        # 回退: 用 PIL
+        try:
+            from PIL import Image
+            import io
+            cam_id = self.model.camera(cam_name).id
+            renderer = mujoco.Renderer(self.model, height=height, width=width)
+            renderer.update_scene(self.data, camera=cam_id)
+            pixels = renderer.render()
+            img = Image.fromarray(pixels)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
+        except Exception:
+            return None
 
     @property
     def action_spec(self) -> Dict[str, Any]:
