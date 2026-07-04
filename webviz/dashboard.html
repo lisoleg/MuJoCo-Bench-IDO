@@ -2252,11 +2252,22 @@
           document.getElementById('weldingStatus').textContent = 'Running: ' + data.weld_type;
           document.getElementById('weldingStatus').style.color = '#22c55e';
           stopBtn.disabled = false;
+          if (data.viewer_url) {
+            window.open(data.viewer_url, '_blank');
+            addLog('[Welding] 3D Viewer: ' + data.viewer_url);
+          }
         } else {
           addLog('[Welding] Started: ' + data.weld_type);
           document.getElementById('weldingStatus').textContent = 'Running: ' + data.weld_type;
           document.getElementById('weldingStatus').style.color = '#22c55e';
           stopBtn.disabled = false;
+          // Open 3D viewer in new window
+          if (data.viewer_url) {
+            window.open(data.viewer_url, '_blank');
+            addLog('[Welding] 3D Viewer opened: ' + data.viewer_url);
+          } else {
+            addLog('[Welding] Running headless (no 3D viewer)');
+          }
           // Start polling
           if (_weldingPollTimer) clearInterval(_weldingPollTimer);
           _weldingPollTimer = setInterval(pollWeldingStatus, 500);

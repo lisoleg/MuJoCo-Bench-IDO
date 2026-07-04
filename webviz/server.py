@@ -3989,6 +3989,15 @@ _welding_step: int = 0
 _welding_quality: Dict[str, Any] = {}
 _welding_safety: Dict[str, Any] = {"passed": True, "violations": [], "actions": []}
 
+# v0.4.1: Welding 3D Viewer state (mirrors ARM100 viewer pattern)
+welding_viewer_thread: Optional[threading.Thread] = None
+welding_viewer_running: bool = False
+welding_viewer_url: str = ""
+welding_viewer_error: str = ""
+welding_persistent_server = None        # type: Optional[Any]
+welding_persistent_port: int = 0
+welding_viewer_weld_type: str = "flat"
+
 try:
     from envs.welding_env import WeldingEnv
     from agent.welding_psi_anchor import WeldingPsiAnchor
@@ -4169,6 +4178,243 @@ async def welding_safety() -> JSONResponse:
         )
 
 
+def _launch_welding_viewer(weld_type: str = "flat") -> None:
+    """Launch the welding robot 3D viewer with ViserServer + mjviser.
+
+    Loads mujoco_weld_robot.xml, creates a WeldingEnv, and runs the welding
+    simulation inside a viser viewer loop — similar to _launch_arm100_viewer
+    but for the 6-DOF welding robot + 2-axis positioner.
+
+    Args:
+        weld_type: Welding posture type ("flat", "horizontal", "vertical", "overhead").
+    """
+    global welding_viewer_running, welding_viewer_url, welding_viewer_error
+    global welding_persistent_server, welding_persistent_port
+    global _welding_running, _welding_step, _welding_quality, _welding_safety
+    global _welding_env, welding_viewer_weld_type
+
+    try:
+        import mujoco as mj
+        import time as _time
+        import numpy as np
+        from pathlib import Path
+        from viser import ViserServer
+
+        # ── 1. Load welding robot scene ──
+        scene_xml_path = str(
+            Path(__file__).resolve().parent.parent / "envs" / "assets" / "mujoco_weld_robot.xml"
+        )
+        weld_model = mj.MjModel.from_xml_path(scene_xml_path)
+        weld_data = mj.MjData(weld_model)
+        mj.mj_resetData(weld_model, weld_data)
+        mj.mj_forward(weld_model, weld_data)
+
+        print(f"v0.4.1: Welding scene loaded -- nq={weld_model.nq}, nu={weld_model.nu}, "
+              f"nsensor={weld_model.nsensor}")
+
+        # ── 2. Create WeldingEnv for simulation logic ──
+        env: Optional[Any] = _get_or_create_welding_env(weld_type)
+        if env is None:
+            raise RuntimeError("Failed to create WeldingEnv")
+        # Sync the viewer's model/data with the env's model/data
+        weld_model = env.model
+        weld_data = env.data
+        env.reset()
+        welding_viewer_weld_type = weld_type
+
+        # ── 3. Create or reuse ViserServer (ports 8097-8102) ──
+        viser_server = None
+        actual_port: int = 0
+
+        if welding_persistent_server is not None:
+            try:
+                _check_port = welding_persistent_server._websock_server._port
+                viser_server = welding_persistent_server
+                actual_port = welding_persistent_port
+                print(f"v0.4.1: Reusing persistent welding ViserServer on port {actual_port}")
+            except Exception:
+                welding_persistent_server = None
+                welding_persistent_port = 0
+
+        if viser_server is None:
+            for _attempt in range(6):
+                _try_port = 8097 + _attempt  # Welding uses 8097-8102
+                try:
+                    viser_server = ViserServer(port=_try_port, verbose=False)
+                    actual_port = viser_server._websock_server._port
+                    welding_persistent_server = viser_server
+                    welding_persistent_port = actual_port
+                    print(f"v0.4.1: Created welding ViserServer on port {actual_port}")
+                    break
+                except (OSError, RuntimeError) as _oe:
+                    print(f"Welding ViserServer port {_try_port} failed (attempt {_attempt+1}/6): {_oe}")
+                    if _attempt < 5:
+                        _time.sleep(2.0)
+            if viser_server is None:
+                raise RuntimeError("Failed to create welding ViserServer after 6 attempts on ports 8097-8102")
+
+        actual_port = viser_server._websock_server._port
+        welding_viewer_url = f"http://localhost:{actual_port}"
+
+        # ── 4. Welding action (near-optimal params) ──
+        _weld_action = np.array([200.0, 24.0, 2.0, 6.0])
+
+        # ── 5. Step function for mjviser ──
+        def _weld_step_fn(model, data):
+            """Step function called by mjviser viewer each tick."""
+            global _welding_step, _welding_quality, _welding_safety
+
+            if not _welding_running:
+                return
+
+            try:
+                result = env.step(_weld_action)
+                _welding_step = result.get("info", {}).get("step_count", _welding_step + 1)
+                _welding_quality = result.get("info", {}).get("quality", {})
+                _welding_safety = result.get("info", {}).get("safety",
+                                                              {"passed": True, "violations": [], "actions": []})
+
+                if result.get("done", False):
+                    # Auto-reset for continuous visualization
+                    env.reset()
+                    _welding_step = 0
+            except Exception as e:
+                print(f"Welding step error: {e}")
+
+        # ── 6. Create mjviser Viewer ──
+        viewer = mjviser.Viewer(
+            model=weld_model,
+            data=weld_data,
+            step_fn=_weld_step_fn,
+            server=viser_server,
+        )
+        # Start running immediately — user already clicked "Start Welding"
+        viewer._paused = False
+
+        # Initial render
+        mj.mj_forward(weld_model, weld_data)
+        viewer._setup_gui()
+
+        # Reset GUI container to root for custom panels
+        viser_server.gui._set_container_uuid("root")
+
+        # ── 7. Custom GUI panels ──
+        try:
+            import viser
+            weld_tabs = viser_server.gui.add_tab_group()
+
+            with weld_tabs.add_tab("Welding Control"):
+                viser_server.gui.add_markdown(
+                    f"**Welding Robot 3D Viewer**\n\n"
+                    f"Weld type: `{weld_type}`\n"
+                    f"Click Play to start welding simulation."
+                )
+
+                weld_type_dropdown = viser_server.gui.add_dropdown(
+                    "Weld Type",
+                    options=["flat", "horizontal", "vertical", "overhead"],
+                    initial_value=weld_type,
+                )
+
+                @weld_type_dropdown.on_update
+                def _on_weld_type(event) -> None:
+                    global welding_viewer_weld_type, _welding_env
+                    new_type = event.target.value
+                    welding_viewer_weld_type = new_type
+                    _welding_env = None  # Force recreate on next step
+                    print(f"v0.4.1: Weld type changed to {new_type}")
+
+                # Display welding parameters
+                viser_server.gui.add_markdown(
+                    "**Welding Parameters**\n\n"
+                    f"- Current: 200 A\n"
+                    f"- Voltage: 24 V\n"
+                    f"- Weave: 2.0 mm\n"
+                    f"- Speed: 6.0 mm/s\n"
+                    f"- Timestep: 2ms (500Hz)"
+                )
+
+            with weld_tabs.add_tab("Quality & Safety"):
+                # Live quality metrics display
+                quality_label = viser_server.gui.add_markdown("**Quality**\n\n- eta: --\n- porosity: --\n- distortion: --")
+                safety_label = viser_server.gui.add_markdown("**Safety**\n\n- Status: --\n- Violations: 0")
+
+                def _update_metrics():
+                    """Update quality/safety display."""
+                    q = _welding_quality
+                    s = _welding_safety
+                    try:
+                        quality_label.content = (
+                            f"**Quality**\n\n"
+                            f"- eta: {q.get('eta', 0):.4f}\n"
+                            f"- porosity: {q.get('porosity', 0):.4f}\n"
+                            f"- distortion: {q.get('distortion', 0):.4f} mm"
+                        )
+                        s_passed = s.get("passed", True)
+                        s_violations = s.get("violations", [])
+                        safety_label.content = (
+                            f"**Safety**\n\n"
+                            f"- Status: {'PASS' if s_passed else 'VIOLATION'}\n"
+                            f"- Violations: {len(s_violations)}"
+                        )
+                    except Exception:
+                        pass
+
+            with weld_tabs.add_tab("Robot Info"):
+                viser_server.gui.add_markdown(
+                    "**6-DOF Welding Robot + 2-Axis Positioner**\n\n"
+                    f"- nq: {weld_model.nq}\n"
+                    f"- nu: {weld_model.nu}\n"
+                    f"- nsensor: {weld_model.nsensor}\n"
+                    f"- nkeyframe: {weld_model.nkey}\n"
+                    f"\n**Actuators**:\n"
+                    f"- act_joint1-6: Robot arm\n"
+                    f"- act_pos_rot_z: Positioner rotation\n"
+                    f"- act_pos_tilt_x: Positioner tilt"
+                )
+
+        except Exception as gui_err:
+            print(f"v0.4.1: Welding GUI setup error (non-fatal): {gui_err}")
+
+        # ── 8. Main viewer loop ──
+        welding_viewer_running = True
+        welding_viewer_error = ""
+        _welding_running = True  # Start simulation immediately
+        print(f"v0.4.1: Welding viewer running at {welding_viewer_url}")
+
+        _metrics_counter = 0
+        try:
+            while welding_viewer_running:
+                # Tick the viewer (handles physics + rendering)
+                for _ in range(max(1, mjviser_sim_speed)):
+                    if welding_viewer_running:
+                        viewer._tick()
+                    else:
+                        break
+
+                # Update metrics display every ~50 ticks
+                _metrics_counter += 1
+                if _metrics_counter % 50 == 0:
+                    try:
+                        _update_metrics()
+                    except Exception:
+                        pass
+
+                _time.sleep(0.001)
+        finally:
+            welding_viewer_running = False
+            _welding_running = False
+            print("v0.4.1: Welding viewer loop ended")
+
+    except Exception as e:
+        welding_viewer_error = str(e)
+        welding_viewer_running = False
+        _welding_running = False
+        import traceback
+        print(f"v0.4.1: Welding viewer error: {e}")
+        traceback.print_exc()
+
+
 def _welding_simulation_loop(weld_type: str, max_steps: int = 500) -> None:
     """焊接仿真循环 (在后台线程中运行).
 
@@ -4216,15 +4462,20 @@ def _welding_simulation_loop(weld_type: str, max_steps: int = 500) -> None:
 
 @app.post("/api/welding/start")
 async def welding_start(weld_type: str = "flat") -> JSONResponse:
-    """启动焊接仿真.
+    """启动焊接仿真 + 3D Viewer.
+
+    Launches a ViserServer-based 3D viewer (ports 8097-8102) that shows
+    the welding robot in real-time. The viewer runs the welding simulation
+    inside its step function.
 
     Args:
         weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead").
 
     Returns:
-        JSONResponse with status.
+        JSONResponse with status and viewer_url.
     """
-    global _welding_running, _welding_thread
+    global _welding_running, _welding_thread, welding_viewer_thread
+    global welding_viewer_running, welding_viewer_url, welding_viewer_error
 
     if not WELDING_AVAILABLE:
         return JSONResponse(
@@ -4233,34 +4484,81 @@ async def welding_start(weld_type: str = "flat") -> JSONResponse:
                      "available": False},
         )
 
-    if _welding_running:
-        return JSONResponse(
-            content={"status": "already_running", "weld_type": weld_type}
+    if not MJVISER_AVAILABLE:
+        # Fallback: headless simulation (no 3D viewer)
+        if _welding_running:
+            return JSONResponse(
+                content={"status": "already_running", "weld_type": weld_type}
+            )
+        _welding_running = True
+        _welding_thread = threading.Thread(
+            target=_welding_simulation_loop,
+            args=(weld_type,),
+            daemon=True,
         )
+        _welding_thread.start()
+        return JSONResponse(content={
+            "status": "started",
+            "weld_type": weld_type,
+            "available": True,
+            "viewer_url": None,
+            "note": "mjviser not available, running headless",
+        })
 
-    _welding_running = True
-    _welding_thread = threading.Thread(
-        target=_welding_simulation_loop,
+    # 3D viewer mode
+    if welding_viewer_running:
+        return JSONResponse(content={
+            "status": "already_running",
+            "weld_type": weld_type,
+            "viewer_url": welding_viewer_url,
+            "available": True,
+        })
+
+    welding_viewer_error = ""
+    welding_viewer_thread = threading.Thread(
+        target=_launch_welding_viewer,
         args=(weld_type,),
         daemon=True,
     )
-    _welding_thread.start()
+    welding_viewer_thread.start()
+
+    # Poll for up to 10 seconds for viewer to start
+    for _ in range(100):
+        time.sleep(0.1)
+        if welding_viewer_running:
+            break
+        if welding_viewer_error:
+            return JSONResponse(
+                status_code=500,
+                content={"status": "error",
+                         "error": welding_viewer_error,
+                         "available": True},
+            )
+
+    if not welding_viewer_running:
+        return JSONResponse(
+            status_code=504,
+            content={"status": "timeout",
+                     "error": "Welding viewer startup timed out",
+                     "available": True},
+        )
 
     return JSONResponse(content={
-        "status": "started",
+        "status": "running",
         "weld_type": weld_type,
+        "viewer_url": welding_viewer_url,
         "available": True,
     })
 
 
 @app.post("/api/welding/stop")
 async def welding_stop() -> JSONResponse:
-    """停止焊接仿真.
+    """停止焊接仿真 + 3D Viewer.
 
     Returns:
         JSONResponse with status.
     """
-    global _welding_running
+    global _welding_running, welding_viewer_running, welding_viewer_url
 
     if not WELDING_AVAILABLE:
         return JSONResponse(
@@ -4269,7 +4567,24 @@ async def welding_stop() -> JSONResponse:
         )
 
     _welding_running = False
+    welding_viewer_running = False
+    welding_viewer_url = ""
     return JSONResponse(content={"status": "stopped"})
+
+
+@app.get("/api/welding/viewer_status")
+async def welding_viewer_status() -> JSONResponse:
+    """焊接3D Viewer状态.
+
+    Returns:
+        JSONResponse with viewer running status and URL.
+    """
+    return JSONResponse(content={
+        "running": welding_viewer_running,
+        "url": welding_viewer_url,
+        "error": welding_viewer_error,
+        "weld_type": welding_viewer_weld_type,
+    })
 
 
 # ── CORS middleware (for development) ──
