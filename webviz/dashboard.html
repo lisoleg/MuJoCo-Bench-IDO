@@ -1084,6 +1084,25 @@
         </div>
       </div>
 
+      <!-- ═══ Welding Baseline Comparison Panel ═══ -->
+      <div class="card col-span-2" id="weldingBaselinePanel">
+        <div class="card-header flex items-center justify-between">
+          <span>Welding Baseline Comparison</span>
+          <span id="weldingBaselineStatus" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #1e293b; color: #94a3b8;">Ready</span>
+        </div>
+        <div class="mt-2">
+          <button id="weldingBaselineBtn" class="btn-primary" onclick="runWeldingBaseline()"
+                  style="background: #7c2d12; padding: 6px 16px; border-radius: 6px; border: none; color: #fff; cursor: pointer; font-size: 0.85rem;">
+            Run Baseline Comparison
+          </button>
+          <span id="weldingBaselineHint" class="text-xs text-slate-400 ml-2">Runs 4 agents (Random, Constant, SAC, Expert) with 9 metrics</span>
+        </div>
+        <div id="weldingBaselineResult" class="mt-3">
+          <p class="text-sm text-slate-400">Click the button to run real simulation evaluation of 4 agents.</p>
+        </div>
+      </div>
+
       <!-- ═══ SIP-Bench Results Panel ═══ -->
       <div class="card col-span-2" id="sipPanel" style="display: none;">
         <div class="card-header flex items-center justify-between">
@@ -2465,6 +2484,122 @@
       });
     }
 
+    // ═══ Welding Baseline Comparison ═══
+    async function runWeldingBaseline() {
+      const btn = document.getElementById('weldingBaselineBtn');
+      const statusEl = document.getElementById('weldingBaselineStatus');
+      const resultEl = document.getElementById('weldingBaselineResult');
+      btn.disabled = true;
+      btn.textContent = 'Evaluating... (~10s)';
+      statusEl.textContent = 'Running';
+      statusEl.style.background = '#7c2d12';
+      statusEl.style.color = '#fbbf24';
+      resultEl.innerHTML = '<p class="text-sm text-amber-400">Running 4 agents on WeldingEnv (300 steps each)...</p>';
+      try {
+        const resp = await fetch('/api/welding/baseline_comparison');
+        const data = await resp.json();
+        if (data.status === 'error') {
+          resultEl.innerHTML = '<p class="text-sm text-red-400">Evaluation failed: ' + (data.error || 'unknown error') + '</p>';
+          statusEl.textContent = 'Error';
+          statusEl.style.background = '#991b1b';
+          statusEl.style.color = '#f87171';
+        } else {
+          renderBaselineTable(data);
+          statusEl.textContent = 'Done';
+          statusEl.style.background = '#14532d';
+          statusEl.style.color = '#4ade80';
+          addLog('[Welding Baseline] Best agent: ' + (data.best_agent || 'N/A'));
+        }
+      } catch(e) {
+        resultEl.innerHTML = '<p class="text-sm text-red-400">Evaluation failed: ' + e.message + '</p>';
+        statusEl.textContent = 'Error';
+        statusEl.style.background = '#991b1b';
+        statusEl.style.color = '#f87171';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Run Baseline Comparison';
+    }
+
+    function renderBaselineTable(data) {
+      const resultEl = document.getElementById('weldingBaselineResult');
+      const agents = data.agents || {};
+      const metrics = data.metrics || [];
+      const metricInfo = data.metric_info || {};
+      const agentNames = Object.keys(agents);
+      const bestAgent = data.best_agent || '';
+
+      if (agentNames.length === 0 || metrics.length === 0) {
+        resultEl.innerHTML = '<p class="text-sm text-slate-400">No data available.</p>';
+        return;
+      }
+
+      // Find best value per metric
+      const bestValues = {};
+      for (const m of metrics) {
+        const info = metricInfo[m] || {};
+        const lowerBetter = info.lower_better !== false;
+        let best = null;
+        for (const a of agentNames) {
+          const v = (agents[a] || {})[m];
+          if (v === undefined || v === null) continue;
+          if (best === null) { best = v; continue; }
+          if (lowerBetter && v < best) best = v;
+          if (!lowerBetter && v > best) best = v;
+        }
+        bestValues[m] = best;
+      }
+
+      // Build table
+      let html = '<div class="overflow-x-auto mt-2">';
+      html += '<table class="w-full text-sm" style="border-collapse: collapse;">';
+
+      // Header row
+      html += '<thead><tr style="border-bottom: 2px solid #475569;">';
+      html += '<th class="text-left py-2 px-3 text-slate-300">Metric</th>';
+      for (const a of agentNames) {
+        const isBest = (a === bestAgent);
+        html += '<th class="text-right py-2 px-3 ' + (isBest ? 'text-emerald-400' : 'text-slate-300') + '">';
+        html += a;
+        if (isBest) html += ' *';
+        html += '</th>';
+      }
+      html += '</tr></thead>';
+
+      // Data rows
+      html += '<tbody>';
+      for (const m of metrics) {
+        const info = metricInfo[m] || {};
+        const unit = info.unit ? ' (' + info.unit + ')' : '';
+        const dir = info.lower_better === false ? ' up' : ' down';
+        const dirIcon = info.lower_better === false ? ' \u2191' : ' \u2193';
+        html += '<tr style="border-bottom: 1px solid #334155;">';
+        html += '<td class="py-1.5 px-3 text-slate-400">' + m + unit + '<span class="text-xs text-slate-500">' + dirIcon + '</span></td>';
+        for (const a of agentNames) {
+          const v = (agents[a] || {})[m];
+          const isBestVal = (bestValues[m] !== null && Math.abs(v - bestValues[m]) < 1e-9);
+          const bgStyle = isBestVal ? 'background: rgba(20, 83, 45, 0.3);' : '';
+          const textStyle = isBestVal ? 'text-emerald-300 font-bold' : 'text-slate-300';
+          const valStr = (v !== undefined && v !== null) ? v.toFixed(4) : '—';
+          html += '<td class="py-1.5 px-3 text-right ' + textStyle + '" style="' + bgStyle + '">' + valStr + '</td>';
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+
+      // Summary
+      html += '<div class="mt-2 text-xs text-slate-400">';
+      html += '<span class="text-emerald-400">*</span> = best agent (highest return) &nbsp;|&nbsp; ';
+      html += '<span style="background: rgba(20, 83, 45, 0.3); padding: 0 4px;">highlighted</span> = best value per metric &nbsp;|&nbsp; ';
+      html += '<span>\u2193 = lower is better, \u2191 = higher is better</span>';
+      html += '<br><span class="mt-1 block">Best Agent: <span class="text-emerald-400 font-bold">' + bestAgent + '</span></span>';
+      if (data.timestamp) {
+        html += '<span class="block">Timestamp: ' + data.timestamp + '</span>';
+      }
+      html += '</div>';
+
+      resultEl.innerHTML = html;
+    }
+
     function pollWeldingStatus() {
       fetch('/api/welding/status')
       .then(res => {
@@ -2685,6 +2820,103 @@
 
     // Initial welding status check on page load
     setTimeout(pollWeldingStatus, 1500);
+
+    // ═══ Welding Baseline Comparison ═══
+    async function runWeldingBaseline() {
+      const btn = document.getElementById('weldingBaselineBtn');
+      const statusEl = document.getElementById('weldingBaselineStatus');
+      const resultEl = document.getElementById('weldingBaselineResult');
+
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+      statusEl.textContent = 'Running';
+      statusEl.style.color = '#fbbf24';
+      resultEl.innerHTML = '<p class="text-sm text-amber-400">Running 4 agents on WeldingEnv (300 steps each)... ~10s</p>';
+
+      try {
+        const resp = await fetch('/api/welding/baseline_comparison');
+        const data = await resp.json();
+        if (data.status === 'error') {
+          resultEl.innerHTML = '<p class="text-sm text-red-400">Error: ' + (data.error || 'Unknown') + '</p>';
+          statusEl.textContent = 'Error';
+          statusEl.style.color = '#ef4444';
+        } else {
+          renderBaselineTable(data, resultEl);
+          statusEl.textContent = 'Done';
+          statusEl.style.color = '#22c55e';
+        }
+      } catch(e) {
+        resultEl.innerHTML = '<p class="text-sm text-red-400">Request failed: ' + e.message + '</p>';
+        statusEl.textContent = 'Error';
+        statusEl.style.color = '#ef4444';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Run Baseline Comparison';
+    }
+
+    function renderBaselineTable(data, el) {
+      const agents = data.agents || {};
+      const metrics = data.metrics || [];
+      const metricInfo = data.metric_info || {};
+      const agentNames = Object.keys(agents);
+      const bestAgent = data.best_agent || 'N/A';
+
+      // Compute best values per metric
+      const bestVals = {};
+      for (const m of metrics) {
+        const info = metricInfo[m] || {};
+        const lowerBetter = info.lower_better !== false;
+        let bv = lowerBetter ? Infinity : -Infinity;
+        for (const a of agentNames) {
+          const v = (agents[a] || {})[m];
+          if (v !== undefined) {
+            if (lowerBetter && v < bv) bv = v;
+            if (!lowerBetter && v > bv) bv = v;
+          }
+        }
+        bestVals[m] = bv;
+      }
+
+      // Build table
+      let html = '<div class="overflow-x-auto mt-2">';
+      html += '<table class="w-full text-sm" style="border-collapse: collapse;">';
+      // Header
+      html += '<thead><tr style="border-bottom: 2px solid #475569;">';
+      html += '<th class="text-left py-2 px-2 text-slate-400">Metric</th>';
+      for (const a of agentNames) {
+        const isBest = a === bestAgent;
+        html += '<th class="text-right py-2 px-2 ' + (isBest ? 'text-emerald-400' : 'text-slate-300') + '">';
+        html += a + (isBest ? ' ★' : '');
+        html += '</th>';
+      }
+      html += '</tr></thead><tbody>';
+
+      // Rows
+      for (const m of metrics) {
+        const info = metricInfo[m] || {};
+        const unit = info.unit ? ' (' + info.unit + ')' : '';
+        const dir = info.lower_better !== false ? ' ↓' : ' ↑';
+        const displayName = (info.display || m) + unit + dir;
+
+        html += '<tr style="border-bottom: 1px solid #1e293b;">';
+        html += '<td class="py-1.5 px-2 text-slate-400">' + displayName + '</td>';
+        for (const a of agentNames) {
+          const v = (agents[a] || {})[m];
+          const isBest = v !== undefined && Math.abs(v - bestVals[m]) < 1e-9;
+          const cellStyle = isBest ? 'color: #34d399; font-weight: 600; background: rgba(52,211,153,0.1);' : 'color: #cbd5e1;';
+          const valStr = v !== undefined ? v.toFixed(4) : '—';
+          html += '<td class="text-right py-1.5 px-2 font-mono" style="' + cellStyle + '">' + valStr + '</td>';
+        }
+        html += '</tr>';
+      }
+
+      html += '</tbody></table></div>';
+      html += '<div class="mt-2 text-xs text-slate-500">★ Best agent: ' + bestAgent;
+      if (data.timestamp) html += ' | Timestamp: ' + data.timestamp;
+      html += '</div>';
+
+      el.innerHTML = html;
+    }
 
     // ═══ v0.16.17: Speed Control ═══
     function updateSpeed(val) {

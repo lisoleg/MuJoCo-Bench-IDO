@@ -4776,6 +4776,32 @@ async def welding_camera_info() -> JSONResponse:
     })
 
 
+@app.get("/api/welding/baseline_comparison")
+async def welding_baseline_comparison() -> JSONResponse:
+    """Run real baseline evaluation: 4 agents on WeldingEnv, 9 metrics comparison.
+
+    Runs Random, Constant, SAC, and Expert agents on the same WeldingEnv,
+    collects 9 quality and performance metrics per agent, and returns
+    a structured comparison result.
+
+    Returns:
+        JSONResponse with evaluation result containing agents, metrics,
+        metric_info, best_agent, and timestamp.
+    """
+    # Lazy import to avoid circular dependencies and heavy startup
+    try:
+        from benchmarks.welding_eval import run_evaluation
+        result = run_evaluation(weld_type="flat", max_steps=300)
+        return JSONResponse(content=result)
+    except Exception as e:
+        import traceback as _tb
+        _tb.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e)},
+        )
+
+
 # ── CORS middleware (for development) ──
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
