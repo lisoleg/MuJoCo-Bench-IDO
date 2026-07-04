@@ -32,11 +32,21 @@ mujoco_*.dll
 
 # Logs
 *.log
+MUJOCO_LOG.TXT
 .pip_deps/
 checkpoints/
 
 # Diagnostic test scripts (local-only, not for repo)
 test_walker_*.py
+test_debug_*.py
+test_pick_place_v*.py
+test_v*_verify.py
+test_hopper_*.py
+test_pd_*.py
+test_ws_*.py
+test_api_*.py
+test_concurrent*.py
+hybrid_benchmark_verify.py
 
 # r2dreamer third_party cache and training runs
 third_party/r2dreamer/__pycache__/

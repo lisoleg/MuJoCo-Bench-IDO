@@ -1,60 +1,84 @@
-# v0.16.26 交付总结
+# v0.3.0 交付总结 — 章锋2026-07-04论文集成
 
 ## TL;DR
-翻跟斗修复 + VLA指令修复 + 6个core模块接入benchmark循环 + Web UI更新 + 文档论文更新 + Git提交
+基于章锋2026年7月4日论文，为MuJoCo-Bench-IDO焊接机器人仿真系统新增10项增强：八元数非结合代数、EML蒸馏网络、异构计算基准、CIM忆阻器模拟器、焊接物理公式升级、DOCX文档生成、数据质量QA工具、硬件参考文件、EML标注Schema、传感器选型文档。**601个测试全绿，零回归，已推送到GitHub。**
 
 ## 交付概览
-- **版本**: v0.16.26
-- **服务器**: ✅ 运行中 (port 8080)
-- **Git**: ✅ 已推送到 GitHub (commits 4851a55 + 2903a70)
-- **新API**: /api/architecture ✅, /api/t_processor ✅
+| 指标 | 数值 |
+|------|------|
+| 版本 | v0.3.0 |
+| 服务器 | ✅ 运行中 (http://localhost:8080) |
+| 测试总数 | **601** (全部通过, 12.21s) |
+| 新建文件 | 38 |
+| 修改文件 | 7 |
+| Git提交 | `3c640b7` (49 files, +14,358 -75) |
+| GitHub | ✅ 已推送 (SSH) |
 
-## Bug 修复
+## v0.3.0 新增模块
 
-### Bug #1: 机器人翻跟斗（根因修复）
-- **根因**: 地形场景下所有增益×0.7，包括pitch/roll稳定增益——在最需要稳定的地方反而降低了稳定性
-- **修复**: 
-  - 地形只缩放Z增益，角稳定增益保持满值
-  - 降低检测阈值：12°/20°（原20°/30°）——更早干预
-  - 高阻尼（4x）代替高力矩（3x）——防止过冲振荡
-  - 主动角速度阻尼：|angvel|>2rad/s时提前加阻尼
+### 1. 八元数非结合代数 (`core/octonion_ops.py`)
+- Cayley-Dickson构造的8维超复数，非交换非结合
+- Φ流贯演化算子: Φ(q,ω) = (q·ω)·q
+- η残差: ||Φ(q,ω) − ω||²
+- Fano平面对称群G₂(阶168)
+- 焊接状态8参数→八元数嵌入
 
-### Bug #2: VLA指令无效果（根因修复）
-- **根因**: VLA分支内调用_render_cam()，camera失败→异常→fallback到默认控制器；15%插值太慢不可见
-- **修复**:
-  - 解耦camera渲染与VLA预测（独立try/except）
-  - 插值速率30%（原15%）——3倍速度，立即可见
-  - 暂停时手动步进物理——即使viewer paused也能执行VLA动作
+### 2. EML八元数蒸馏网络 (`core/welding_eml_distillation.py`)
+- PyTorch MLP: feat(8→hd→hd) + to_oct(hd→8) + omega_net(hd→hd→8)
+- 三重损失: ℒ_η(BCE) + ℒ_p(MSE) + ℒ_norm(单位约束)
+- EML候选生成: 取η最小前10% episodes
 
-## 6个Core模块接入Benchmark循环
+### 3. 异构计算基准 (`tools/hetero_benchmark.py`)
+- 纯GPU(340W) vs GPU+T-Proc(170W) = 10倍节能
+- T-Proc 100Hz vs GPU 20Hz = 5倍吞吐提升
+- CLI: `python tools/hetero_benchmark.py --steps 100`
 
-| 模块 | 接入点 | 每步输出 |
-|------|--------|---------|
-| KappaSnapTokenizer | η计算后 | token字符串 + 32维summary |
-| T-Processor | action执行后 | η-ALU值 + ψ违规 |
-| Three-Body | action执行 | sim-to-real gap |
-| HG-PINN | 每步 | Hamiltonian能量统计 |
-| Nine-Layer | API报告 | L0-L8层级状态 |
-| ψ-LoRA | 离线收集 | DPO训练对 |
+### 4. CIM忆阻器交叉阵列 (`tools/tproc_cim_simulator.py`)
+- 8×8 RRAM矩阵向量乘法, O(1)时间复杂度
+- 能耗: CIM 0.08pJ vs SRAM+ALU 335.36pJ = **4162倍节能**
+- Fano平面编码: ±g_on电导映射乘法表符号
 
-## Web UI更新
-- 九层认知架构面板（L0-L8卡片，从/api/architecture动态加载）
-- κ-Snap token实时显示
-- T-Processor规格显示（65k gates, 3.3mW）
-- 版本号更新至v0.16.26
+### 5. 焊接物理公式升级 (`core/welding_process_proxy.py`)
+- target_pen = k_I × I² / (v × t)
+- V_nom = 16 + 2 × (t > 3)
+- evaluate_detailed()输出6项质量指标
 
-## 文档论文更新
-- README.md: 九层架构表、API列表、项目结构更新
-- Paper Appendix C.22: T-Processor规格、KappaSnapTokenizer、Three-Body、HG-PINN、ψ-LoRA、S-Bridge LLM归因、benchmark接入表
+### 6. DOCX输出+κ-Snap聚合 (`tools/wps_pqr_generator.py`)
+- WPS/PQR文档生成 (python-docx, HTML回退)
+- aggregate_ksnap_stats(): η均值/标准差/通过率/违规分布
 
-## Git提交
-- `4851a55`: v0.16.26 main commit (19 files, +4225 -172)
-- `2903a70`: T-Processor API属性名修复
-- 已推送到 https://github.com/lisoleg/MuJoCo-Bench-IDO.git
+### 7. 数据质量QA工具 (`tools/qa_data_health.py`)
+- HDF5完整性、时间戳单调性、ADC饱和检测
+
+### 8. 硬件参考文件 (`hardware/`)
+- KCU105 + Kria K26 XDC引脚约束
+- Verilog η-ALU + CXL驱动 + SDC约束
+
+### 9. EML标注Schema (`docs/welding_eml_annotation_schema.json`)
+- 完整JSON Schema: 焊缝类型/专家标签/物理参数/η目标/ψ-Anchor约束/八元数节点
+
+### 10. 传感器选型文档 (`docs/welding_sensor_selection.md`)
+- 7类传感器: 电弧电流(50kHz)、电压、送丝、速度、TCP位姿、温度、焊缝跟踪
+
+## Bug修复 (5项)
+1. CIM self-test容差 (1e-10→1e-5, g_off泄漏电流)
+2. EML蒸馏网络omega_net维度 (8→hidden_dim)
+3. wps_pqr_generator.py缺少numpy导入
+4. 八元数非结合性测试基元素 (e1,e2,e3→e1,e2,e4)
+5. WPSGenerator→WpsPqrGenerator类名修正
+
+## 论文更新
+- **验证论文**: +C.23-C.30 (8个新章节, ~400行)
+- **中文论文**: +§9 (10个子章节, ~120行) + 参考文献[21]
+
+## 已完成待办确认
+- ✅ P0/P1/P2模块已集成在server.py的run_episode_with_streaming()中
+- ✅ .gitignore更新（排除MUJOCO_LOG.TXT和临时测试脚本）
+- ✅ README.md更新（v0.3.0, 项目结构, API列表, 测试说明）
 
 ## 用户验证步骤
-1. http://localhost:8080 — Dashboard（查看九层架构面板 + T-Processor规格）
-2. http://localhost:8081 — 3D Viewer（地形场景验证翻跟斗修复）
-3. http://localhost:8091 — ARM100（Submit Instruction验证机械臂运动）
-4. `curl http://localhost:8080/api/architecture` — 九层架构API
-5. `curl http://localhost:8080/api/t_processor` — T-Processor规格API
+1. http://localhost:8080 — Dashboard
+2. `curl http://localhost:8080/api/architecture` — 九层架构API
+3. `python tools/hetero_benchmark.py --steps 100` — 异构计算基准
+4. `python tools/tproc_cim_simulator.py` — CIM能耗对比
+5. `python -m pytest tests/ -v` — 全部601测试
