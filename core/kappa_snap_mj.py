@@ -499,3 +499,124 @@ def compute_merkle_snap_id(prev_snap_id: str,
     hash_hex: str = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
     snap_id: str = prev_snap_id + hash_hex[:16]
     return snap_id
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v0.4.0: 焊接域 κ-Snap 扩展 (Welding Domain Extension)
+# ═══════════════════════════════════════════════════════════════════
+
+# ── 焊接事件类型 (6种) ──
+WELDING_EVENT_TYPES: dict = {
+    "ARC_STRIKE": "电弧引燃 — 焊接开始事件",
+    "ARC_STABLE": "电弧稳定 — 正常焊接阶段",
+    "ARC_EXTINGUISH": "电弧熄灭 — 焊接结束或中断事件",
+    "STICKOUT_DRIFT": "干伸长漂移 — 干伸长超出安全范围",
+    "SEAM_DEVIATION": "焊缝偏差 — TCP 偏离焊缝中心线",
+    "BURN_BACK_RISK": "回烧风险 — 高电流低电压危险状态",
+}
+
+# ── 焊接类型 → 权重调整表 ──
+WELDING_ETA_WEIGHTS: dict = {
+    "flat":       {"w_seam": 1.0, "w_tcp": 0.3, "w_stick": 0.5, "w_current": 0.2},
+    "horizontal": {"w_seam": 1.2, "w_tcp": 0.4, "w_stick": 0.6, "w_current": 0.3},
+    "vertical":   {"w_seam": 1.5, "w_tcp": 0.5, "w_stick": 0.7, "w_current": 0.4},
+    "overhead":   {"w_seam": 1.8, "w_tcp": 0.6, "w_stick": 0.8, "w_current": 0.5},
+}
+
+
+def welding_gauss_ex_residual(
+    welding_state: dict,
+    goal_eml=None,
+    w_seam: float = 1.0,
+    w_tcp: float = 0.3,
+    w_stick: float = 0.5,
+    w_current: float = 0.2,
+) -> float:
+    """计算焊接域 GaussEx 残差 η_weld.
+
+    η_weld = w_seam * seam_dev² + w_tcp * tcp_ori_dev²
+             + w_stick * stickout_dev² + w_current * current_var²
+
+    根据 weld_type 动态调整权重: 仰焊 > 立焊 > 横焊 > 平焊,
+    因为难度越高, 对偏差越敏感.
+
+    Args:
+        welding_state: 焊接状态字典, 包含:
+          - seam_deviation: 焊缝偏差 (mm)
+          - tcp_orientation_dev: TCP 姿态偏差 (rad)
+          - stickout: 当前干伸长 (mm)
+          - stickout_target: 目标干伸长 (mm, 默认15)
+          - current_variance: 电流方差 (A²)
+          - weld_type: 焊接类型 ("flat"/"horizontal"/"vertical"/"overhead")
+        goal_eml: GoalEML 实例 (可选, 用于获取焊接类型).
+        w_seam: 焊缝偏差权重 (默认1.0).
+        w_tcp: TCP 姿态偏差权重 (默认0.3).
+        w_stick: 干伸长偏差权重 (默认0.5).
+        w_current: 电流方差权重 (默认0.2).
+
+    Returns:
+        焊接域残差 η_weld (float). 越低表示焊接质量越好.
+    """
+    # 从 goal_eml 获取焊接类型 (如果有)
+    weld_type: str = "flat"
+    if goal_eml is not None:
+        weld_type = getattr(goal_eml, 'name', 'flat').replace('welding_', '')
+    weld_type = welding_state.get("weld_type", weld_type)
+
+    # 根据焊接类型动态调整权重
+    type_weights: dict = WELDING_ETA_WEIGHTS.get(weld_type, WELDING_ETA_WEIGHTS["flat"])
+    w_seam_eff: float = w_seam * type_weights["w_seam"]
+    w_tcp_eff: float = w_tcp * type_weights["w_tcp"]
+    w_stick_eff: float = w_stick * type_weights["w_stick"]
+    w_current_eff: float = w_current * type_weights["w_current"]
+
+    # 焊缝偏差 (mm)
+    seam_dev: float = float(welding_state.get("seam_deviation", 0.0))
+
+    # TCP 姿态偏差 (rad)
+    tcp_ori_dev: float = float(welding_state.get("tcp_orientation_dev", 0.0))
+
+    # 干伸长偏差 (mm) — 偏离目标干伸长
+    stickout: float = float(welding_state.get("stickout", 15.0))
+    stickout_target: float = float(welding_state.get("stickout_target", 15.0))
+    stickout_dev: float = stickout - stickout_target
+
+    # 电流方差 (A²)
+    current_var: float = float(welding_state.get("current_variance", 0.0))
+
+    # 加权平方残差
+    eta_weld: float = (
+        w_seam_eff * seam_dev ** 2
+        + w_tcp_eff * tcp_ori_dev ** 2
+        + w_stick_eff * stickout_dev ** 2
+        + w_current_eff * current_var ** 2
+    )
+
+    return float(eta_weld)
+
+
+def compute_welding_snap_id(
+    prev_snap_id: str,
+    eta: float,
+    decision: str = "",
+) -> str:
+    """计算焊接域 Merkle snap ID.
+
+    与标准 compute_merkle_snap_id 类似, 但添加焊接域前缀以便区分.
+
+    Hash rule: snap_id = "WELD:" + prev_snap_id + sha256(
+        "welding" + prev_snap_id + str(eta) + str(decision)
+    )[:16]
+
+    Args:
+        prev_snap_id: 前一个 snap_id. 新链使用 "genesis".
+        eta: 当前焊接域残差 η_weld.
+        decision: 决策字符串 (如 'WELD_SAFE', 'WELD_ADJUST').
+
+    Returns:
+        焊接域 snap_id 字符串.
+    """
+    hash_input: str = "welding" + prev_snap_id + str(eta) + str(decision)
+    hash_hex: str = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+    snap_id: str = "WELD:" + hash_hex[:16]
+    return snap_id

@@ -1,0 +1,257 @@
+<mujoco model="weld_robot_ido">
+  <!--
+    焊接机器人 MuJoCo IDO Scene
+    Based on: "From VLA to Embodied Consciousness" (Zhang Feng, 2026)
+    Hardware: 六轴焊接机器人 + 双轴变位机
+    IDO Integration: ψ-Anchor (焊接安全约束), κ-Snap审计追踪
+
+    连杆长度:
+      L1=0.30m (基座高度)
+      L2=0.60m (大臂)
+      L3=0.50m (小臂)
+      L4=0.10m (腕1)
+      L5=0.10m (腕2)
+      L6=0.08m (末端)
+
+    关节配置 (6-DOF):
+      joint1 — base rotation (hinge, Z轴, ±180°)
+      joint2 — shoulder pitch (hinge, Y轴, ±90°)
+      joint3 — elbow pitch (hinge, Y轴, ±135°)
+      joint4 — wrist rotation (hinge, Z轴, ±180°)
+      joint5 — wrist pitch (hinge, Y轴, ±90°)
+      joint6 — end rotation (hinge, Z轴, ±180°)
+
+    变位机 (双轴):
+      pos_rot_z — 水平旋转 (hinge, Z轴, ±180°)
+      pos_tilt_x — 倾斜旋转 (hinge, X轴, ±90°)
+
+    Author: MuJoCo-Bench-IDO Welding Module v0.1.0
+  -->
+
+  <compiler angle="radian" coordinate="local"/>
+  <option timestep="0.002" gravity="0 0 -9.81">
+    <flag gravity="enable"/>
+  </option>
+
+  <default>
+    <joint armature="0.05" damping="0.3" limited="true"/>
+    <geom contype="1" conaffinity="1" condim="4" friction="0.8 0.02 0.01"/>
+    <position kp="200" kv="20" forcerange="-30 30"/>
+    <default class="robot_link">
+      <geom type="box" rgba="0.5 0.5 0.55 1" group="1"/>
+    </default>
+    <default class="arm_joint">
+      <joint armature="0.05" damping="0.3" limited="true"/>
+    </default>
+    <default class="weld_gun_link">
+      <geom type="box" rgba="0.15 0.15 0.18 1" group="1"/>
+    </default>
+    <default class="positioner_geom">
+      <geom type="box" rgba="0.35 0.35 0.40 1" group="1"/>
+    </default>
+    <default class="workpiece">
+      <geom group="2" contype="1" conaffinity="1"/>
+    </default>
+    <default class="weld_seam_geom">
+      <geom group="3" contype="0" conaffinity="0"/>
+    </default>
+  </default>
+
+  <asset>
+    <material name="mat_robot_silver"  rgba="0.5 0.5 0.55 1"/>
+    <material name="mat_gun_black"    rgba="0.12 0.12 0.15 1"/>
+    <material name="mat_workpiece"    rgba="0.4 0.4 0.42 1"/>
+    <material name="mat_seam_blue"    rgba="0.15 0.4 0.8 0.6"/>
+    <material name="mat_arc_red"      rgba="0.9 0.15 0.15 0.4"/>
+    <material name="mat_positioner"   rgba="0.3 0.3 0.35 1"/>
+    <material name="mat_base"         rgba="0.2 0.2 0.23 1"/>
+    <material name="mat_ground"       rgba="0.15 0.15 0.18 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- 地面 -->
+    <geom name="ground" type="plane" size="3.0 3.0 0.1" material="mat_ground"
+          friction="1.0 0.05 0.02" condim="3"/>
+
+    <!-- 灯光 -->
+    <light directional="true" diffuse="0.8 0.8 0.8" pos="0 0 4" dir="0 0 -1"/>
+    <light pos="1.5 -1.5 3" diffuse="0.4 0.4 0.4" dir="-0.5 0.5 -1"/>
+
+    <!-- 相机 -->
+    <camera name="overview_cam" pos="2.0 -2.0 2.5" euler="35 0 45" fovy="0.8"/>
+    <camera name="weld_cam" pos="0.8 0.3 1.5" euler="60 0 30" fovy="1.2"/>
+
+    <!-- ═════════ 六轴焊接机器人 ═════════ -->
+    <body name="robot_base" pos="0 0 0">
+      <!-- 基座安装板 -->
+      <geom name="base_plate" type="cylinder" size="0.08 0.015" zaxis="0 0 1"
+            material="mat_base" condim="3"/>
+
+      <body name="link1" pos="0 0 0.015">
+        <!-- Joint 1: Base Rotation (Z轴旋转) -->
+        <joint name="joint1" type="hinge" axis="0 0 1" range="-3.14159 3.14159" class="arm_joint"/>
+        <geom name="link1_geom" type="cylinder" size="0.06 0.15" zaxis="0 0 1"
+              pos="0 0 0.15" material="mat_robot_silver"/>
+
+        <body name="link2" pos="0 0 0.30">
+          <!-- Joint 2: Shoulder Pitch (Y轴俯仰) -->
+          <joint name="joint2" type="hinge" axis="0 1 0" range="-1.5708 1.5708" class="arm_joint"/>
+          <geom name="link2_geom" type="box" size="0.04 0.05 0.30"
+                pos="0 0 0.30" material="mat_robot_silver"/>
+
+          <body name="link3" pos="0 0 0.60">
+            <!-- Joint 3: Elbow Pitch (Y轴俯仰) -->
+            <joint name="joint3" type="hinge" axis="0 1 0" range="-2.3562 2.3562" class="arm_joint"/>
+            <geom name="link3_geom" type="box" size="0.035 0.04 0.25"
+                  pos="0 0 0.25" material="mat_robot_silver"/>
+
+            <body name="link4" pos="0 0 0.50">
+              <!-- Joint 4: Wrist Rotation (Z轴旋转) -->
+              <joint name="joint4" type="hinge" axis="0 0 1" range="-3.14159 3.14159" class="arm_joint"/>
+              <geom name="link4_geom" type="cylinder" size="0.025 0.05" zaxis="0 0 1"
+                    pos="0 0 0.05" material="mat_robot_silver"/>
+
+              <body name="link5" pos="0 0 0.10">
+                <!-- Joint 5: Wrist Pitch (Y轴俯仰) -->
+                <joint name="joint5" type="hinge" axis="0 1 0" range="-1.5708 1.5708" class="arm_joint"/>
+                <geom name="link5_geom" type="box" size="0.025 0.03 0.05"
+                      pos="0 0 0.05" material="mat_robot_silver"/>
+
+                <body name="link6" pos="0 0 0.10">
+                  <!-- Joint 6: End Rotation (Z轴旋转) -->
+                  <joint name="joint6" type="hinge" axis="0 0 1" range="-3.14159 3.14159" class="arm_joint"/>
+                  <geom name="link6_geom" type="cylinder" size="0.022 0.04" zaxis="0 0 1"
+                        pos="0 0 0.04" material="mat_robot_silver"/>
+
+                  <!-- 焊枪 body (weld_gun) -->
+                  <body name="weld_gun" pos="0 0 0.08">
+                    <geom name="weld_gun_body" type="box" size="0.012 0.012 0.075"
+                          pos="0 0 0.075" material="mat_gun_black" class="weld_gun_link"/>
+                    <geom name="weld_gun_nozzle" type="cylinder" size="0.008 0.04" zaxis="0 0 1"
+                          pos="0 0 0.15" material="mat_gun_black"/>
+
+                    <!-- 焊丝尖端 site (wire_tip) -->
+                    <site name="wire_tip" pos="0 0 0.19" size="0.003" rgba="1 0.3 0 0.8"/>
+
+                    <!-- 电弧区域 (arc_cone) — 从wire_tip向下的锥形 -->
+                    <geom name="arc_cone" type="cylinder" size="0.003 0.01"
+                          pos="0 0 0.21" material="mat_arc_red" contype="0" conaffinity="0"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- ═════════ 双轴变位机 + 工件 ═════════ -->
+    <!-- 变位机底座在机器人前方1.0m处, 高度0.2m -->
+    <body name="positioner_base" pos="1.0 0 0.0">
+      <!-- 变位机底座 -->
+      <geom name="pos_base_plate" type="cylinder" size="0.10 0.015" zaxis="0 0 1"
+            pos="0 0 0.015" material="mat_positioner" condim="3"/>
+      <geom name="pos_base_column" type="box" size="0.06 0.06 0.085"
+            pos="0 0 0.1" material="mat_positioner"/>
+
+      <body name="positioner_rot" pos="0 0 0.20">
+        <!-- 变位机旋转轴: pos_rot_z (Z轴水平旋转) -->
+        <joint name="pos_rot_z" type="hinge" axis="0 0 1" range="-3.14159 3.14159" class="arm_joint"/>
+        <geom name="pos_rot_disk" type="cylinder" size="0.08 0.02" zaxis="0 0 1"
+              pos="0 0 0.02" material="mat_positioner"/>
+
+        <body name="positioner_tilt" pos="0 0 0.04">
+          <!-- 变位机倾斜轴: pos_tilt_x (X轴倾斜旋转) -->
+          <joint name="pos_tilt_x" type="hinge" axis="1 0 0" range="-1.5708 1.5708" class="arm_joint"/>
+          <geom name="pos_tilt_frame" type="box" size="0.10 0.08 0.01"
+                pos="0 0 0.01" material="mat_positioner"/>
+
+          <!-- 工件 (workpiece) — 0.3m x 0.2m x 0.05m -->
+          <body name="workpiece" pos="0 0 0.025">
+            <geom name="workpiece_geom" type="box" size="0.15 0.10 0.025"
+                  material="mat_workpiece" class="workpiece"
+                  friction="1.2 0.05 0.02"/>
+
+            <!-- 焊缝 (weld_seam) — 工件表面上的蓝色半透明条带 -->
+            <geom name="weld_seam" type="box" size="0.10 0.0025 0.0005"
+                  pos="0 0 0.026" material="mat_seam_blue" class="weld_seam_geom"/>
+          </body>
+        </body>
+      </body>
+    </body>
+
+  </worldbody>
+
+  <!-- 接触排除: 机器人各连杆间不自碰撞 -->
+  <contact>
+    <exclude body1="robot_base" body2="link1"/>
+    <exclude body1="link1" body2="link2"/>
+    <exclude body1="link2" body2="link3"/>
+    <exclude body1="link3" body2="link4"/>
+    <exclude body1="link4" body2="link5"/>
+    <exclude body1="link5" body2="link6"/>
+    <exclude body1="link6" body2="weld_gun"/>
+    <exclude body1="positioner_base" body2="positioner_rot"/>
+    <exclude body1="positioner_rot" body2="positioner_tilt"/>
+    <exclude body1="positioner_tilt" body2="workpiece"/>
+  </contact>
+
+  <!-- 执行器: 6个机器人关节 + 2个变位机关节 -->
+  <actuator>
+    <position name="act_joint1" joint="joint1" kp="200" kv="20" forcerange="-30 30" ctrlrange="-3.14159 3.14159"/>
+    <position name="act_joint2" joint="joint2" kp="200" kv="20" forcerange="-30 30" ctrlrange="-1.5708 1.5708"/>
+    <position name="act_joint3" joint="joint3" kp="200" kv="20" forcerange="-30 30" ctrlrange="-2.3562 2.3562"/>
+    <position name="act_joint4" joint="joint4" kp="200" kv="20" forcerange="-30 30" ctrlrange="-3.14159 3.14159"/>
+    <position name="act_joint5" joint="joint5" kp="200" kv="20" forcerange="-30 30" ctrlrange="-1.5708 1.5708"/>
+    <position name="act_joint6" joint="joint6" kp="200" kv="20" forcerange="-30 30" ctrlrange="-3.14159 3.14159"/>
+    <position name="act_pos_rot_z" joint="pos_rot_z" kp="200" kv="20" forcerange="-30 30" ctrlrange="-3.14159 3.14159"/>
+    <position name="act_pos_tilt_x" joint="pos_tilt_x" kp="200" kv="20" forcerange="-30 30" ctrlrange="-1.5708 1.5708"/>
+  </actuator>
+
+  <!-- 传感器: TCP位置/姿态, 干伸长, 关节力矩, 接触力 -->
+  <sensor>
+    <!-- TCP位置 (wire_tip site的世界坐标) -->
+    <framepos name="tcp_pos" objtype="site" objname="wire_tip"/>
+    <!-- TCP姿态 (weld_gun body的世界四元数) -->
+    <framequat name="tcp_quat" objtype="body" objname="weld_gun"/>
+    <!-- 干伸长: wire_tip到workpiece表面的距离 (几何计算在Python中完成) -->
+    <!-- MuJoCo distance sensor 仅支持 site-site, 此处用 framepos 代替 -->
+    <framepos name="workpiece_pos" objtype="body" objname="workpiece"/>
+    <!-- 关节位置 (6个机器人关节) — 用于读取关节状态 -->
+    <jointpos name="jp_joint1" joint="joint1"/>
+    <jointpos name="jp_joint2" joint="joint2"/>
+    <jointpos name="jp_joint3" joint="joint3"/>
+    <jointpos name="jp_joint4" joint="joint4"/>
+    <jointpos name="jp_joint5" joint="joint5"/>
+    <jointpos name="jp_joint6" joint="joint6"/>
+    <!-- 关节速度 (6个机器人关节) -->
+    <jointvel name="jv_joint1" joint="joint1"/>
+    <jointvel name="jv_joint2" joint="joint2"/>
+    <jointvel name="jv_joint3" joint="joint3"/>
+    <jointvel name="jv_joint4" joint="joint4"/>
+    <jointvel name="jv_joint5" joint="joint5"/>
+    <jointvel name="jv_joint6" joint="joint6"/>
+    <!-- 执行器力 (用于力矩监测) -->
+    <actuatorfrc name="af_joint1" actuator="act_joint1"/>
+    <actuatorfrc name="af_joint2" actuator="act_joint2"/>
+    <actuatorfrc name="af_joint3" actuator="act_joint3"/>
+    <actuatorfrc name="af_joint4" actuator="act_joint4"/>
+    <actuatorfrc name="af_joint5" actuator="act_joint5"/>
+    <actuatorfrc name="af_joint6" actuator="act_joint6"/>
+    <!-- 焊枪body的力传感器 (通过site) -->
+    <force name="cf_weld_gun" site="wire_tip"/>
+  </sensor>
+
+  <!-- 4种焊接姿态关键帧 (keyframe) -->
+  <keyframe>
+    <!-- flat: 平焊 — q=[0, 0.5, -0.8, 0, 0.3, 0], 变位机水平 -->
+    <key name="flat" qpos="0 0.5 -0.8 0 0.3 0 0 0"/>
+    <!-- horizontal: 横焊 — 变位机倾斜45° -->
+    <key name="horizontal" qpos="0 0.5 -0.8 0 0.3 0 0 0.7854"/>
+    <!-- vertical: 立焊 — 变位机倾斜90° -->
+    <key name="vertical" qpos="0 0.5 -0.8 0 0.3 0 0 1.5708"/>
+    <!-- overhead: 仰焊 — 变位机倾斜-45° -->
+    <key name="overhead" qpos="0 0.5 -0.8 0 0.3 0 0 -0.7854"/>
+  </keyframe>
+
+</mujoco>

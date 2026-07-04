@@ -910,3 +910,97 @@ def make_swimmer_swim15_eml(physics,
         target_upright=1.0,
         eta_weights={'vel': 1.0, 'height': 0.0, 'upright': 0.0},
     )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v1.2.0: 焊接域 GoalEML 扩展 (Welding Domain Extension)
+# ═══════════════════════════════════════════════════════════════════
+
+# ── 4种焊接姿态的 EML 参数表 ──
+WELDING_EML_PARAMS: dict = {
+    "flat": {
+        "invariants": ['seam_tracking', 'stickout_range', 'thermal_limit', 'porosity_control'],
+        "delta_K": 0.03,
+        "max_energy_inject": 2.0,   # kJ/mm — 平焊热输入上限较高
+        "pos_tol": 0.5,             # mm
+        "ori_tol": 0.10,            # rad
+        "target_stickout": 15.0,    # mm
+    },
+    "horizontal": {
+        "invariants": ['seam_tracking', 'stickout_range', 'thermal_limit', 'porosity_control'],
+        "delta_K": 0.03,
+        "max_energy_inject": 1.8,   # kJ/mm — 横焊热输入略低
+        "pos_tol": 0.5,
+        "ori_tol": 0.10,
+        "target_stickout": 15.0,
+    },
+    "vertical": {
+        "invariants": ['seam_tracking', 'stickout_range', 'thermal_limit', 'porosity_control'],
+        "delta_K": 0.03,
+        "max_energy_inject": 1.5,   # kJ/mm — 立焊需控制热输入防铁水流失
+        "pos_tol": 0.4,
+        "ori_tol": 0.08,
+        "target_stickout": 12.0,
+    },
+    "overhead": {
+        "invariants": ['seam_tracking', 'stickout_range', 'thermal_limit', 'porosity_control'],
+        "delta_K": 0.03,
+        "max_energy_inject": 1.2,   # kJ/mm — 仰焊热输入最低, 防铁水下淌
+        "pos_tol": 0.3,
+        "ori_tol": 0.08,
+        "target_stickout": 10.0,
+    },
+}
+
+
+def make_welding_eml(weld_type: str = "flat",
+                     physics=None,
+                     delta_K: float = 0.03) -> GoalEML:
+    """焊接域 GoalEML 工厂函数.
+
+    根据焊接姿态类型创建对应的 GoalEML 实例, 配置焊接专用不变量:
+      - seam_tracking: 焊缝跟踪
+      - stickout_range: 干伸长范围
+      - thermal_limit: 热输入限制
+      - porosity_control: 气孔控制
+
+    不同焊接姿态的热输入上限不同:
+      flat=2.0, horizontal=1.8, vertical=1.5, overhead=1.2 (kJ/mm)
+
+    Args:
+        weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead").
+        physics: dm_control Physics 实例 (兼容接口, 焊接域不使用).
+        delta_K: κ-Snap 残差阈值.
+
+    Returns:
+        GoalEML 实例, 配置焊接域参数:
+          - eta_mode: 'welding'
+          - invariants: 焊接专用不变量列表
+          - max_energy_inject: 根据焊接种类查表
+    """
+    weld_type = weld_type.lower()
+    params: dict = WELDING_EML_PARAMS.get(weld_type, WELDING_EML_PARAMS["flat"])
+
+    return GoalEML(
+        name=f'welding_{weld_type}',
+        invariants=params["invariants"].copy(),
+        target_pos=np.array([0.0, 0.0, 0.0]),  # 焊接域不使用固定目标点
+        delta_K=params.get("delta_K", delta_K),
+        max_energy_inject=params["max_energy_inject"],
+        pos_tol=params["pos_tol"],
+        ori_tol=params["ori_tol"],
+        collide_thresh=0.01,  # 焊接域: 严格碰撞检测
+        # 焊接域 η 模式
+        eta_mode='welding',
+        # 焊接域不使用 locomotion 参数, 但保留字段以兼容
+        target_speed=0.0,
+        target_height=0.0,
+        target_upright=0.0,
+        eta_weights={
+            'w_seam': WELDING_EML_PARAMS.get(weld_type, WELDING_EML_PARAMS["flat"]).get("w_seam", 1.0),
+            'w_tcp': 0.3,
+            'w_stick': 0.5,
+            'w_current': 0.2,
+            'target_stickout': params["target_stickout"],
+        },
+    )

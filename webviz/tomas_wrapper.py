@@ -1181,8 +1181,12 @@ class DemoVLAAdapter(VLAAdapter):
         """
         home = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
 
-        # v0.16.28: Extract object positions for IK
-        obj_positions = obs_dict.get('object_positions', {}) if obs_dict else {}
+        # v0.16.32: Use CACHED initial positions (not live) to prevent
+        # runaway feedback loop during lift/transport when cube moves
+        # with the gripper via kinematic attachment.
+        obj_positions = getattr(self, '_initial_obj_positions', {})
+        if not obj_positions:
+            obj_positions = obs_dict.get('object_positions', {}) if obs_dict else {}
         arm_base_z = obs_dict.get('arm_base_z', 0.40) if obs_dict else 0.40
         target_obj = obj_positions.get('red_cube', np.array([0.22, 0.18, 0.435]))
         tray_pos = obj_positions.get('tray', np.array([0.22, -0.18, 0.41]))
@@ -1190,7 +1194,15 @@ class DemoVLAAdapter(VLAAdapter):
         import math as _math
 
         def _ik_to_target(target_world: np.ndarray, gripper_closed: bool = False) -> np.ndarray:
-            """v0.16.29: Use scipy.optimize on the real MuJoCo FK to compute IK.
+            """v0.16.30: Use scipy.optimize on the real MuJoCo FK to compute IK.
+
+            v0.16.30 NEW STRATEGY: For grasp (closed=True), optimize so BOTH
+            fingertips land at cube's Y-sides (±0.025 from cube_y). This puts
+            the fingers in contact with the cube faces, not inside the cube.
+
+            For open phases (reach, descend), use fingertip CENTER optimization
+            (with gripper fully closed to compute the grasp position).
+
             v0.16.29: Optimize for FINGERTIP CENTER (avg of fsr_left + fsr_right),
             not gripper_base. The old code placed gripper_base at the target, but
             the fingertips are ~5cm offset — causing the gripper to overshoot the
@@ -1198,9 +1210,13 @@ class DemoVLAAdapter(VLAAdapter):
             Falls back to a geometric approximation if scipy fails.
             """
             target_world = np.asarray(target_world, dtype=np.float64)
-            # Gripper fingers open/closed
-            grip_l = 0.7 if gripper_closed else 0.0
-            grip_r = -0.7 if gripper_closed else 0.0
+            # v0.16.31: Fixed gripper semantics.
+            # Hinge axis="0 1 0" → fingers separate in X direction.
+            # grip_angle=0.0 = CLOSED (gap=2.4cm), grip_angle=0.873 = OPEN (gap=6.3cm)
+            # For GRASP: grip_angle=0.5 (gap=4.36cm < cube 5cm → squeeze via contact)
+            # For OPEN:  grip_angle=0.873 (gap=6.3cm > cube 5cm → clear during approach)
+            grip_l = 0.5 if gripper_closed else 0.873
+            grip_r = -0.5 if gripper_closed else -0.873
             # First, try the geometric IK as initial guess
             try:
                 geom_init = _geometric_ik(target_world, arm_base_z, gripper_closed)
@@ -1213,51 +1229,82 @@ class DemoVLAAdapter(VLAAdapter):
                 # v0.16.29: Pre-compute site IDs for fingertip center
                 _fsr_l_id = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_SITE, "fsr_left")
                 _fsr_r_id = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_SITE, "fsr_right")
+                # v0.16.30: Pre-compute cube y for grasp IK
+                _cube_pos = obs_dict.get('object_positions', {}).get('red_cube', None) if obs_dict else None
+                if _cube_pos is not None:
+                    _cube_y = float(_cube_pos[1])
+                    _cube_x = float(_cube_pos[0])
+                    _cube_z = float(_cube_pos[2])
+                else:
+                    _cube_y = 0.18
+                    _cube_x = 0.22
+                    _cube_z = 0.435
 
                 def _cost(params):
                     rot, pitch, elbow, wrist = params
-                    # Clamp to joint ranges
-                    rot = max(-3.14, min(3.14, rot))
-                    pitch = max(-1.5, min(1.5, pitch))
-                    elbow = max(-1.5, min(2.3, elbow))
-                    wrist = max(-1.5, min(1.5, wrist))
+                    # v0.16.32: Use quadratic penalty instead of silent clamping.
+                    # Old code clamped params inside cost → Nelder-Mead found
+                    # "solutions" with pitch=584 (clamped to 1.5 internally →
+                    # cost=0), but returned unclamped values caused FK explosion.
+                    # Now: clamp for FK, but add heavy penalty for out-of-range.
+                    rot_c = max(-3.14159, min(3.14159, rot))
+                    pitch_c = max(-1.5, min(1.5, pitch))
+                    elbow_c = max(-1.5, min(2.3, elbow))
+                    wrist_c = max(-1.5, min(1.5, wrist))
                     # FK using local copy of data
                     d = self._data_cache
-                    d.qpos[21] = rot
-                    d.qpos[22] = pitch
-                    d.qpos[23] = elbow
-                    d.qpos[24] = wrist
+                    d.qpos[21] = rot_c
+                    d.qpos[22] = pitch_c
+                    d.qpos[23] = elbow_c
+                    d.qpos[24] = wrist_c
                     d.qpos[25] = 0.0
                     d.qpos[26] = grip_l
                     d.qpos[27] = grip_r
                     _mj.mj_forward(self._model, d)
-                    # v0.16.29: Use fingertip center instead of gripper_base
                     if _fsr_l_id >= 0 and _fsr_r_id >= 0:
                         ft_center = (d.site_xpos[_fsr_l_id] + d.site_xpos[_fsr_r_id]) * 0.5
+                        err = float(np.linalg.norm(ft_center - target_world))
                     else:
-                        # Fallback to gripper_base
                         grip_id = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_BODY, "gripper_base")
                         if grip_id < 0:
                             return 1e6
                         ft_center = d.xpos[grip_id]
-                    err = float(np.linalg.norm(ft_center - target_world))
-                    # Add small penalty for joint range violations
+                        err = float(np.linalg.norm(ft_center - target_world))
+                    # v0.16.32: Heavy quadratic penalty for out-of-range params
+                    # (10.0 per radian² — ensures optimizer stays in valid range)
                     range_pen = 0.0
-                    for v, lo, hi in [(pitch, -1.5, 1.5), (elbow, -1.5, 2.3), (wrist, -1.5, 1.5)]:
+                    for v, lo, hi in [(rot, -3.14159, 3.14159),
+                                      (pitch, -1.5, 1.5),
+                                      (elbow, -1.5, 2.3),
+                                      (wrist, -1.5, 1.5)]:
                         if v < lo:
-                            range_pen += (lo - v) * 0.1
+                            range_pen += (lo - v) ** 2 * 10.0
                         if v > hi:
-                            range_pen += (v - hi) * 0.1
+                            range_pen += (v - hi) ** 2 * 10.0
                     return err + range_pen
                 # Try multiple starting points for robustness
                 best = None
-                for x0 in [geom_init[:4], [0.0, -0.8, -0.8, 0.2], [-0.7, -1.0, -0.5, 0.0],
-                          [0.7, -1.0, -0.5, 0.0], [-1.0, -1.2, -0.3, 0.5]]:
+                # v0.16.32: Added +rotation starting points for -Y targets (tray).
+                # Old code only had negative rotation starts → IK couldn't find
+                # solutions for objects at negative Y (tray at y=-0.18).
+                for x0 in [geom_init[:4],
+                           [0.0, -0.5, -0.5, 0.0],
+                           [-0.5, -0.8, -0.5, 0.0],
+                           [-1.0, -0.8, -0.5, 0.0],
+                           [-0.8, -0.6, -0.4, 0.0],
+                           [0.7, -0.5, -0.5, 0.0],   # +rot for -Y targets
+                           [1.0, -0.8, -0.5, 0.0],   # +rot for -Y targets
+                           [0.5, -0.6, -0.4, 0.0]]:  # +rot for -Y targets
                     r = minimize(_cost, x0=x0, method='Nelder-Mead',
-                                 options={'xatol': 1e-3, 'fatol': 1e-4, 'maxiter': 200})
+                                 options={'xatol': 1e-4, 'fatol': 1e-5, 'maxiter': 500})
                     if best is None or r.fun < best.fun:
                         best = r
+                # v0.16.32: Clamp result to valid ranges (prevent FK explosion)
                 rot, pitch, elbow, wrist = best.x
+                rot = max(-3.14159, min(3.14159, rot))
+                pitch = max(-1.5, min(1.5, pitch))
+                elbow = max(-1.5, min(2.3, elbow))
+                wrist = max(-1.5, min(1.5, wrist))
             except Exception:
                 # Fall back to geometric IK
                 rot, pitch, elbow, wrist = geom_init[:4]
@@ -1292,49 +1339,65 @@ class DemoVLAAdapter(VLAAdapter):
             shoulder = -(target_angle - half_e)
             # Wrist pitch: align gripper with target
             wrist_p = 0.0
-            grip_l = 0.7 if gripper_closed else 0.0
-            grip_r = -0.7 if gripper_closed else 0.0
+            # v0.16.31: Fixed gripper semantics (same as _ik_to_target)
+            grip_l = 0.5 if gripper_closed else 0.873
+            grip_r = -0.5 if gripper_closed else -0.873
             return np.array([base_rot, shoulder, elbow_angle, wrist_p, 0.0, grip_l, grip_r])
 
         if phase == "home":
             return home
         elif phase == "reach":
-            # v0.16.29: Fingertip target 8cm above object (approach from above)
+            # v0.16.31: Open gripper (gap=6.3cm), fingertip center 8cm above object
             return _ik_to_target(target_obj + np.array([0, 0, 0.08]), gripper_closed=False)
         elif phase == "descend":
-            # v0.16.29: Fingertip at object center height (ready to grasp)
-            return _ik_to_target(target_obj + np.array([0, 0, 0.0]), gripper_closed=False)
+            # v0.16.32: Fingertip center 2cm above object top (not at center).
+            #   Gripper_base is ~5cm above fingertip → at cube center+7cm.
+            #   Even without contact exclusion, gripper_base clears the cube.
+            #   Contact exclusion (XML) is the primary fix; this is backup.
+            return _ik_to_target(target_obj + np.array([0, 0, 0.02]), gripper_closed=False)
         elif phase == "grasp":
-            target = proprio.copy()
-            target[5] = 0.7
-            target[6] = -0.7
-            return target
+            # v0.16.31: Close gripper (gap=4.36cm < cube 5cm) → squeeze cube
+            return _ik_to_target(target_obj, gripper_closed=True)
         elif phase == "lift":
-            # v0.16.29: Fingertip 15cm above object (lifted clear)
+            # v0.16.31: Closed gripper holds cube, lift 15cm above object
             lift_target = target_obj + np.array([0, 0, 0.15])
             return _ik_to_target(lift_target, gripper_closed=True)
         elif phase == "transport":
-            # v0.16.29: Fingertip 5cm above tray (approach tray)
-            return _ik_to_target(tray_pos + np.array([0, 0, 0.05]), gripper_closed=True)
+            # v0.16.31: Closed gripper holds cube, 8cm above tray
+            return _ik_to_target(tray_pos + np.array([0, 0, 0.08]), gripper_closed=True)
         elif phase == "release":
-            # v0.16.29: Same position, open gripper
-            return _ik_to_target(tray_pos + np.array([0, 0, 0.05]), gripper_closed=False)
+            # v0.16.31: Open gripper to release cube above tray
+            return _ik_to_target(tray_pos + np.array([0, 0, 0.08]), gripper_closed=False)
         elif phase == "retreat":
             return home
         elif phase == "open_gripper":
             target = proprio.copy()
-            target[5] = 0.0
-            target[6] = 0.0
+            target[5] = 0.873  # v0.16.31: Fully open (gap=6.3cm)
+            target[6] = -0.873
             return target
         elif phase == "close_gripper":
             target = proprio.copy()
-            target[5] = 0.7
-            target[6] = -0.7
+            target[5] = 0.5    # v0.16.31: Grasp (gap=4.36cm < cube 5cm)
+            target[6] = -0.5
             return target
         elif phase == "hold":
             return proprio.copy()
         else:
             return home
+
+    @property
+    def current_phase(self) -> str:
+        """v0.16.31: Expose current VLA phase for server-side cube attachment."""
+        if not hasattr(self, '_phases') or not self._phases:
+            return "unknown"
+        if not hasattr(self, '_phase_idx') or self._phase_idx >= len(self._phases):
+            return "done"
+        return self._phases[self._phase_idx]
+
+    @property
+    def phase_step(self) -> int:
+        """v0.16.31: Expose step count within current phase."""
+        return getattr(self, '_step_counter', 0)
 
     def predict(self, obs_dict: Dict[str, Any]) -> np.ndarray:
         """Generate instruction-driven action sequence."""
@@ -1345,12 +1408,29 @@ class DemoVLAAdapter(VLAAdapter):
             self._phases = self._parse_instruction(instruction)
             self._phase_idx = 0
             self._step_counter = 0
-            print(f"DemoVLA: New instruction '{instruction[:50]}' → phases: {self._phases}")
+            # v0.16.32: Cache initial object positions at sequence start.
+            # During lift/transport, the cube moves with the gripper (kinematic
+            # attachment). If we read the live cube position, the lift target
+            # becomes a runaway feedback loop (target = current_pos + 15cm).
+            # Caching the initial position keeps all phase targets stable.
+            _obj_pos = obs_dict.get('object_positions', {})
+            self._initial_obj_positions = {
+                k: (v.copy() if isinstance(v, np.ndarray) else np.array(v, dtype=np.float64))
+                for k, v in _obj_pos.items()
+            }
+            print(f"DemoVLA: New instruction '{instruction[:50]}' -> phases: {self._phases}")
+            print(f"DemoVLA: Cached initial positions: { {k: v.tolist() for k, v in self._initial_obj_positions.items()} }")
 
         if not hasattr(self, '_phases') or not self._phases:
             self._phases = self._parse_instruction(instruction)
             self._phase_idx = 0
             self._step_counter = 0
+            # v0.16.32: Cache positions here too (fallback path)
+            _obj_pos = obs_dict.get('object_positions', {})
+            self._initial_obj_positions = {
+                k: (v.copy() if isinstance(v, np.ndarray) else np.array(v, dtype=np.float64))
+                for k, v in _obj_pos.items()
+            }
 
         # v0.16.29: 50 steps per phase (~1.7s at 30Hz). Was 30 — too short for
         # actuator to converge even with kinematic assist. 50 gives the arm
@@ -1374,9 +1454,13 @@ class DemoVLAAdapter(VLAAdapter):
             proprio = np.pad(proprio, (0, 7 - len(proprio)))
         target = self._get_phase_target(current_phase, proprio, obs_dict)
 
-        # v0.16.26: Faster interpolation (was 0.15 — too slow to see motion)
-        # 30% per step reaches target in ~10 steps (0.3s), visible to user
-        action = proprio + (target - proprio) * 0.30
+        # v0.16.30: Return FULL target (not 30% interpolation).
+        # Old code: action = proprio + (target - proprio) * 0.30
+        # This caused the arm to stop at 30% of the way (since kinematic
+        # assist tracks ctrl = action, not target). Now the kinematic
+        # assist directly drives qpos toward target via ctrl = target.
+        # This makes the arm reach IK target in ~5 steps (vs 50 before).
+        action = target.copy() if isinstance(target, np.ndarray) else np.array(target, dtype=np.float64)
         action = np.clip(action, [-3.14, -3.14, -3.14, -3.14, -3.14, 0.0, -0.873],
                          [3.14, 3.14, 3.14, 3.14, 3.14, 0.873, 0.0])
 

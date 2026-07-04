@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mujoco-bench-ido.local/schemas/welding_eml_schema.json",
+  "title": "Welding EML Node Schema",
+  "description": "八元数EML节点数据模式 — 章锋2026-07-04论文《面向硅基生命操作系统的焊接机器人多模态数据采集与因果蒸馏框架》",
+  "type": "object",
+  "required": ["node_id", "q_state", "psi_constraints", "meta"],
+  "additionalProperties": false,
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "description": "EML节点唯一标识符",
+      "pattern": "^[A-Z]+_[0-9]+$",
+      "examples": ["SIM_42", "WPS_001", "PQR_007"]
+    },
+    "q_state": {
+      "type": "object",
+      "description": "八元数状态向量 (8个分量, 对应Cayley-Dickson构造的8个基底)",
+      "required": ["components"],
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "type": "array",
+          "description": "八元数的8个实系数 [e0, e1, e2, e3, e4, e5, e6, e7]",
+          "items": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+          "minItems": 8,
+          "maxItems": 8
+        },
+        "norm": {
+          "type": "number",
+          "description": "八元数范数 |q| = sqrt(sum(qi^2))",
+          "minimum": 0.0,
+          "readOnly": true
+        },
+        "weld_type": {
+          "type": "string",
+          "description": "焊接姿态类型",
+          "enum": ["flat", "horizontal", "vertical", "overhead"]
+        },
+        "snap_id": {
+          "type": "string",
+          "description": "κ-Snap审计ID (留空表示未审计)"
+        }
+      }
+    },
+    "phi_result": {
+      "type": "array",
+      "description": "Φ(q, ω) = (q·ω)·q 流贯演化结果 (8分量)",
+      "items": {"type": "number"},
+      "minItems": 8,
+      "maxItems": 8
+    },
+    "eta_residual": {
+      "type": "number",
+      "description": "η残差 = ||Φ(q,ω) - ω||^2, 非负",
+      "minimum": 0.0
+    },
+    "psi_constraints": {
+      "type": "object",
+      "description": "Ψ-Anchor安全约束",
+      "required": ["max_current", "min_stick_out", "max_stick_out", "porosity_threshold"],
+      "additionalProperties": false,
+      "properties": {
+        "max_current": {
+          "type": "number",
+          "description": "最大允许电流 (A)",
+          "minimum": 50.0,
+          "maximum": 400.0,
+          "default": 200.0
+        },
+        "min_stick_out": {
+          "type": "number",
+          "description": "最小干伸长 (mm)",
+          "minimum": 3.0,
+          "maximum": 10.0,
+          "default": 3.0
+        },
+        "max_stick_out": {
+          "type": "number",
+          "description": "最大干伸长 (mm)",
+          "minimum": 10.0,
+          "maximum": 30.0,
+          "default": 15.0
+        },
+        "porosity_threshold": {
+          "type": "number",
+          "description": "气孔风险阈值 (0-1)",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.3
+        },
+        "max_voltage": {
+          "type": "number",
+          "description": "最大允许电压 (V)",
+          "minimum": 14.0,
+          "maximum": 40.0,
+          "default": 32.0
+        },
+        "min_travel_speed": {
+          "type": "number",
+          "description": "最小焊接速度 (mm/s)",
+          "minimum": 1.0,
+          "maximum": 5.0,
+          "default": 2.0
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "元数据",
+      "required": ["source", "material", "thickness_mm", "joint_type"],
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "数据来源",
+          "enum": ["DreamerV3_MuJoCo", "WPS_Document", "PQR_Document", "Manual_Entry", "Hardware_KSnap"]
+        },
+        "episode": {
+          "type": "integer",
+          "description": "DreamerV3训练episode编号",
+          "minimum": 0
+        },
+        "reward": {
+          "type": "number",
+          "description": "累计奖励值"
+        },
+        "material": {
+          "type": "string",
+          "description": "母材材质",
+          "examples": ["SUS304", "Q235", "SUS316L", "Al5052"]
+        },
+        "thickness_mm": {
+          "type": "number",
+          "description": "板厚 (mm)",
+          "minimum": 0.5,
+          "maximum": 50.0
+        },
+        "joint_type": {
+          "type": "string",
+          "description": "接头类型",
+          "enum": ["Butt", "Fillet", "Lap", "Tee", "Corner", "Edge"]
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "节点创建时间 (ISO 8601)"
+        }
+      }
+    },
+    "distillation": {
+      "type": "object",
+      "description": "蒸馏相关信息 (可选, 仅训练后填充)",
+      "additionalProperties": false,
+      "properties": {
+        "loss_total": {
+          "type": "number",
+          "description": "总蒸馏损失 L = α·L_recon + β·L_eta + γ·L_pareto + δ·L_sparse",
+          "minimum": 0.0
+        },
+        "loss_recon": {"type": "number", "minimum": 0.0},
+        "loss_eta": {"type": "number", "minimum": 0.0},
+        "loss_pareto": {"type": "number", "minimum": 0.0},
+        "loss_sparse": {"type": "number", "minimum": 0.0},
+        "alpha": {"type": "number", "description": "重建损失权重", "default": 1.0},
+        "beta": {"type": "number", "description": "η损失权重", "default": 0.5},
+        "gamma": {"type": "number", "description": "Pareto损失权重", "default": 0.3},
+        "delta": {"type": "number", "description": "稀疏损失权重", "default": 0.01},
+        "epoch": {"type": "integer", "minimum": 0},
+        "backend": {
+          "type": "string",
+          "enum": ["pytorch", "numpy"],
+          "description": "蒸馏后端"
+        }
+      }
+    },
+    "ksnap_audit": {
+      "type": "object",
+      "description": "κ-Snap审计信息 (可选)",
+      "additionalProperties": false,
+      "properties": {
+        "snap_id": {"type": "string"},
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256哈希 (八元数节点to_bytes()的哈希)"
+        },
+        "psi_passed": {"type": "boolean"},
+        "violation_code": {"type": "integer", "minimum": 0, "maximum": 255},
+        "timestamp_ns": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "octonion_components": {
+      "type": "array",
+      "description": "八元数8分量定义",
+      "items": [
+        {"type": "number", "description": "e0: 焊接电流归一化"},
+        {"type": "number", "description": "e1: 焊接电压归一化"},
+        {"type": "number", "description": "e2: 焊接速度归一化"},
+        {"type": "number", "description": "e3: 干伸长归一化"},
+        {"type": "number", "description": "e4: 热输入归一化"},
+        {"type": "number", "description": "e5: 熔深归一化"},
+        {"type": "number", "description": "e6: 气孔风险归一化"},
+        {"type": "number", "description": "e7: 角变形归一化"}
+      ]
+    }
+  }
+}

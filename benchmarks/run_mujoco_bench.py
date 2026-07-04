@@ -698,6 +698,83 @@ def run_sip_benchmark(task: str = 'humanoid-stand',
     return sip_summary
 
 
+# ═══════════════════════════════════════════════════════════════════
+# v0.17.0: 焊接 Benchmark 入口
+# ═══════════════════════════════════════════════════════════════════
+
+def run_welding_benchmark(
+    weld_type: str = 'flat',
+    method: str = 'ido',
+    n_episodes: int = 10,
+) -> dict:
+    """运行焊接 benchmark.
+
+    Args:
+        weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead").
+        method: 评估方法 ("ido", "dreamer", "pid", "vla", "compare").
+        n_episodes: episode 数.
+
+    Returns:
+        benchmark 结果字典.
+    """
+    print(f"\n{'='*60}")
+    print(f"  焊接 Benchmark — {weld_type} / {method}")
+    print(f"{'='*60}\n")
+
+    # 延迟导入焊接模块
+    try:
+        from envs.welding_env import WeldingEnv
+        from benchmarks.welding_compare import WeldingCompare
+        _welding_available = True
+    except ImportError as e:
+        print(f"Error: 焊接模块不可用: {e}")
+        return {"status": "error", "error": str(e)}
+
+    if method == 'compare':
+        # 运行所有方法对比
+        env = None
+        try:
+            env = WeldingEnv(weld_type=weld_type)
+        except Exception as e:
+            print(f"Warning: WeldingEnv 创建失败: {e}, 使用基准数据")
+
+        compare = WeldingCompare(env=env)
+        results = compare.run_all(n_episodes=n_episodes)
+
+        print("\n=== 焊接方法对比 ===\n")
+        print(compare.generate_markdown_table(results))
+        print()
+        print(compare.generate_latex_table(results))
+
+        return {"status": "ok", "results": results}
+
+    else:
+        # 运行单个方法
+        env = None
+        try:
+            env = WeldingEnv(weld_type=weld_type)
+        except Exception as e:
+            print(f"Error: WeldingEnv 创建失败: {e}")
+            return {"status": "error", "error": str(e)}
+
+        compare = WeldingCompare(env=env)
+
+        method_map = {
+            'ido': 'IDO/TOMAS',
+            'dreamer': 'DreamerV3',
+            'pid': 'PID',
+            'vla': 'VLA',
+        }
+        method_name = method_map.get(method, method.upper())
+        result = compare._run_method(method_name, n_episodes)
+
+        print(f"\n=== {method_name} 评估结果 ===\n")
+        for key, value in result.items():
+            print(f"  {key}: {value:.4f}")
+
+        return {"status": "ok", "method": method_name, "metrics": result}
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="IDO/TOMAS MuJoCo Benchmark Runner (v0.2.0)")
@@ -713,11 +790,27 @@ if __name__ == '__main__':
                              "'sip' (SIP-Bench longitudinal)")
     parser.add_argument('--evolution_rounds', type=int, default=3,
                         help="Number of ψ-Anchor evolution rounds for SIP-Bench T1 phase")
+    # ── v0.17.0: 焊接 benchmark 入口 ──
+    parser.add_argument('--welding', action='store_true',
+                        help="运行焊接benchmark")
+    parser.add_argument('--weld-type', type=str, default='flat',
+                        choices=['flat', 'horizontal', 'vertical', 'overhead'],
+                        help="焊接姿态类型")
+    parser.add_argument('--weld-method', type=str, default='ido',
+                        choices=['ido', 'dreamer', 'pid', 'vla', 'compare'],
+                        help="焊接评估方法")
     args = parser.parse_args()
 
     enable_critique: bool = not args.no_critique
 
-    if args.eval_mode == 'sip':
+    # ── 焊接 benchmark 分支 ──
+    if args.welding:
+        run_welding_benchmark(
+            weld_type=args.weld_type,
+            method=args.weld_method,
+            n_episodes=args.episodes,
+        )
+    elif args.eval_mode == 'sip':
         run_sip_benchmark(
             task=args.task,
             episodes=args.episodes,

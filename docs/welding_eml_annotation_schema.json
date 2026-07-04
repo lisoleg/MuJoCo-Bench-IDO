@@ -1,0 +1,298 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Welding EML Annotation Schema",
+  "description": "焊接EML (Epistemic Markup Language) 标注Schema — 章锋2026-07-04论文定义的焊接专家知识标注格式",
+  "type": "object",
+  "required": ["annotation_id", "weld_type", "expert_label", "physics_params", "eta_target", "ksnap_chain_ref"],
+  "properties": {
+    "annotation_id": {
+      "type": "string",
+      "description": "标注唯一ID (UUID v4)",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "weld_type": {
+      "type": "string",
+      "enum": ["flat", "horizontal", "vertical", "overhead"],
+      "description": "焊接姿态类型"
+    },
+    "expert_label": {
+      "type": "object",
+      "required": ["expert_id", "qualification", "label_date"],
+      "properties": {
+        "expert_id": {
+          "type": "string",
+          "description": "焊接专家唯一标识"
+        },
+        "qualification": {
+          "type": "string",
+          "enum": ["CWRI", "CWET", "IWE", "CWS", "SCWI"],
+          "description": "焊接资质等级 (中国焊接资格等级)"
+        },
+        "label_date": {
+          "type": "string",
+          "format": "date",
+          "description": "标注日期 (ISO 8601)"
+        },
+        "experience_years": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50,
+          "description": "焊接经验年限"
+        }
+      }
+    },
+    "physics_params": {
+      "type": "object",
+      "required": ["current", "voltage", "travel_speed", "stickout"],
+      "properties": {
+        "current": {
+          "type": "number",
+          "minimum": 50,
+          "maximum": 350,
+          "description": "焊接电流 (A)",
+          "unit": "A"
+        },
+        "voltage": {
+          "type": "number",
+          "minimum": 14,
+          "maximum": 32,
+          "description": "焊接电压 (V)",
+          "unit": "V"
+        },
+        "travel_speed": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 15,
+          "description": "焊接速度 (mm/s)",
+          "unit": "mm/s"
+        },
+        "stickout": {
+          "type": "number",
+          "minimum": 8,
+          "maximum": 25,
+          "description": "干伸长 (mm)",
+          "unit": "mm"
+        },
+        "weave": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "摆动幅度 (mm)",
+          "unit": "mm",
+          "default": 2.0
+        },
+        "wire_feed": {
+          "type": "number",
+          "minimum": 4,
+          "maximum": 12,
+          "description": "送丝速度 (m/min)",
+          "unit": "m/min",
+          "default": 8.0
+        },
+        "gas_flow": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 25,
+          "description": "保护气体流量 (L/min)",
+          "unit": "L/min",
+          "default": 15.0
+        },
+        "gas_type": {
+          "type": "string",
+          "description": "保护气体类型",
+          "default": "Ar+CO2 80/20"
+        }
+      }
+    },
+    "material_info": {
+      "type": "object",
+      "properties": {
+        "base_material": {
+          "type": "string",
+          "description": "母材牌号 (如 Q235, Q345, 304)"
+        },
+        "thickness_mm": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 50,
+          "description": "板厚 (mm)",
+          "unit": "mm"
+        },
+        "wire_diameter_mm": {
+          "type": "number",
+          "minimum": 0.8,
+          "maximum": 2.0,
+          "description": "焊丝直径 (mm)",
+          "unit": "mm",
+          "default": 1.2
+        },
+        "joint_type": {
+          "type": "string",
+          "enum": ["butt", "lap", "tee", "corner", "edge"],
+          "description": "接头类型"
+        },
+        "groove_type": {
+          "type": "string",
+          "enum": ["square", "v-groove", "bevel", "u-groove", "j-groove"],
+          "description": "坡口形式"
+        }
+      }
+    },
+    "eta_target": {
+      "type": "object",
+      "required": ["eta_value", "eta_components"],
+      "properties": {
+        "eta_value": {
+          "type": "number",
+          "minimum": 0,
+          "description": "综合η残差目标值 (越低越好)"
+        },
+        "eta_components": {
+          "type": "object",
+          "properties": {
+            "eta_pen": {
+              "type": "number",
+              "description": "熔透残差分量"
+            },
+            "eta_porosity": {
+              "type": "number",
+              "description": "气孔残差分量"
+            },
+            "eta_distortion": {
+              "type": "number",
+              "description": "变形残差分量"
+            }
+          }
+        }
+      }
+    },
+    "quality_targets": {
+      "type": "object",
+      "properties": {
+        "max_porosity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "最大气孔率目标"
+        },
+        "max_distortion_deg": {
+          "type": "number",
+          "description": "最大角变形目标 (度)"
+        },
+        "min_penetration_mm": {
+          "type": "number",
+          "description": "最小熔深目标"
+        },
+        "max_heat_input_kjmm": {
+          "type": "number",
+          "description": "最大热输入目标 (kJ/mm)"
+        }
+      }
+    },
+    "psi_anchor_constraints": {
+      "type": "object",
+      "description": "Ψ-Anchor安全约束",
+      "properties": {
+        "stick_out_min_mm": {
+          "type": "number",
+          "default": 8.0,
+          "description": "最小干伸长"
+        },
+        "stick_out_max_mm": {
+          "type": "number",
+          "default": 25.0,
+          "description": "最大干伸长"
+        },
+        "burn_back_threshold_a": {
+          "type": "number",
+          "default": 350.0,
+          "description": "回烧电流阈值 (A)"
+        },
+        "burn_back_threshold_v": {
+          "type": "number",
+          "default": 5.0,
+          "description": "回烧电压阈值 (V)"
+        },
+        "porosity_var_threshold": {
+          "type": "number",
+          "default": 0.5,
+          "description": "气孔风险方差阈值"
+        }
+      }
+    },
+    "octonion_node": {
+      "type": "object",
+      "description": "八元数EML节点 (可选, 由EML蒸馏生成)",
+      "properties": {
+        "q_state": {
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 8,
+          "maxItems": 8,
+          "description": "八元数状态 [q0-q7]"
+        },
+        "omega_target": {
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 8,
+          "maxItems": 8,
+          "description": "目标陪集 [ω0-ω7]"
+        },
+        "phi_result": {
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 8,
+          "maxItems": 8,
+          "description": "Φ(q,ω)结果"
+        },
+        "eta_residual": {
+          "type": "number",
+          "description": "η残差 = ||Φ(q,ω) - ω||²"
+        }
+      }
+    },
+    "ksnap_chain_ref": {
+      "type": "object",
+      "required": ["chain_id", "block_height", "merkle_root"],
+      "properties": {
+        "chain_id": {
+          "type": "string",
+          "description": "κ-Snap审计链ID"
+        },
+        "block_height": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "区块高度"
+        },
+        "merkle_root": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Merkle根哈希 (SHA-256, 32字节hex)"
+        },
+        "prev_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "前一区块哈希"
+        }
+      }
+    },
+    "wps_pqr_ref": {
+      "type": "object",
+      "description": "关联的WPS/PQR文档引用",
+      "properties": {
+        "wps_id": {"type": "string"},
+        "pqr_id": {"type": "string"},
+        "docx_path": {"type": "string"}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "version": {"type": "string", "default": "0.3.0"},
+        "source": {"type": "string", "default": "MuJoCo-Bench-IDO"}
+      }
+    }
+  }
+}

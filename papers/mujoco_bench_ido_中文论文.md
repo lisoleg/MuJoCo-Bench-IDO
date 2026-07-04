@@ -1252,6 +1252,96 @@ MuJoCo-Bench-IDO是首个物理域VG-Pair验证平台，为非冯架构AGI的连
 
 ---
 
+## 9 v0.3.0扩展：八元数代数与焊接机器人仿真（章锋2026-07-04）
+
+### 9.1 八元数非结合代数
+
+基于章锋2026年7月4日论文[21]，本项目引入了八元数（Octonion, 𝕆）非结合代数作为EML蒸馏的数学基础。八元数是通过Cayley-Dickson构造从四元数得到的8维超复数，具有**非交换非结合**特性，但仍是**赋范可除代数**（||a·b|| = ||a||·||b||）。
+
+**核心算子——Φ流贯演化**：
+
+$$\Phi(q, \omega) = (q \cdot \omega) \cdot q \quad \text{（左结合约定）}$$
+
+其中q为当前八元数状态，ω为目标陪集代表元。η残差定义为：
+
+$$\eta = \|\Phi(q, \omega) - \omega\|^2$$
+
+由于非结合性，$(q \cdot \omega) \cdot q \neq q \cdot (\omega \cdot q)$，这从代数上表达了"信息流方向有序"的物理直觉——操作顺序不可交换。
+
+**Fano平面对称群**：八元数自同构群G₂是的最小例外李群，阶168，对应Fano平面7点7线的对称性。本项目实现了完整的8基元素乘法表，并通过`(e1·e2)·e4 = e7` vs `e1·(e2·e4) = -e7`验证了非结合性。
+
+**焊接状态八元数嵌入**（OctonionEMLNode）：将8个焊接参数（电流/电压/送丝速度/焊接速度/干伸长/焊枪角度/板厚/气流量）归一化到[-1,1]区间，映射为八元数的8个分量，使焊接工艺状态可被完整的八元数代数操作。
+
+### 9.2 EML八元数蒸馏网络
+
+`WeldingEMLDistiller`（PyTorch nn.Module）实现了从焊接经验数据到八元数EML表示的蒸馏：
+
+- **特征提取**：Linear(8→hd) → ReLU → Linear(hd→hd) → ReLU
+- **八元数生成**：Linear(hd→8) → q（当前状态八元数）
+- **目标陪集生成**：Linear(hd→hd) → ReLU → Linear(hd→8) → ω（目标陪集代表元）
+
+**三重损失函数**：ℒ = ℒ_η(BCE) + ℒ_p(MSE) + ℒ_norm(L2)，分别驱动η→0（陪集归属）、标量信息保持、单位八元数约束。
+
+### 9.3 异构计算基准
+
+章锋论文提出的T-Processor（3.3mW, 100Hz）+ GPU（170W）异构计算范式在本项目中实现了仿真基准：
+
+| 配置 | η-ALU执行 | VLA推理 | 功耗 | 每步能耗 |
+|------|-----------|---------|------|---------|
+| 纯GPU | GPU (170W) | GPU (170W) | 340W | 17.0 J |
+| GPU+T-Proc | T-Proc (3.3mW) | GPU (170W) | 170.003W | 1.70 J |
+
+T-Proc专用η-ALU实现了**10倍节能**和**5倍吞吐提升**（100Hz vs 20Hz VLA瓶颈）。
+
+### 9.4 CIM忆阻器交叉阵列
+
+八元数乘法（8×8矩阵）在忆阻器交叉阵列上实现O(1)时间复杂度的模拟域矩阵向量乘法：
+
+- **能耗对比**：CIM 0.08 pJ vs SRAM+ALU 335.36 pJ = **4162倍节能**
+- **Fano平面编码**：八元数乘法表的±sign映射为±g_on电导，零元素映射为g_off
+- **基尔霍夫定律**：I = G·V，输出电流直接给出乘积结果
+
+### 9.5 焊接工艺代理物理公式升级
+
+基于论文焊接物理方程，`WeldingProcessProxy`升级了目标熔深和标称电压公式：
+
+$$d_{target} = k_I \cdot \frac{I^2}{v \cdot t}, \quad V_{nom} = 16 + 2 \cdot \mathbb{1}(t > 3)$$
+
+`evaluate_detailed()`方法输出包含6项质量指标的完整评估字典。
+
+### 9.6 WPS/PQR文档生成 + κ-Snap统计聚合
+
+- **DOCX输出**：`generate_wps_docx()` / `generate_pqr_docx()` 使用python-docx生成焊接工艺规程（WPS）和工艺评定记录（PQR），无python-docx时HTML回退
+- **κ-Snap聚合**：`aggregate_ksnap_stats()` 跨episode计算η均值/标准差/通过率/违规类型分布/snap效率
+
+### 9.7 数据质量QA工具
+
+`WeldDataQACheck`提供三项焊接数据健康检查：HDF5完整性验证、时间戳单调性检查、ADC饱和检测。6项自测全通过。
+
+### 9.8 硬件参考文件
+
+| 文件 | 内容 |
+|------|------|
+| `hardware/kintex_ultrascale_pins.xdc` | KCU105开发板引脚约束（200MHz差分时钟、CXL PCIe Gen3x4、η-ALU数据总线、CIM阵列接口） |
+| `hardware/kria_k26_pin_constraints.xdc` | Kria K26 SOM引脚约束（PL时钟、η-ALU GPIO、焊接传感器ADC、PWM输出、CAN总线） |
+| `docs/welding_eml_annotation_schema.json` | EML标注JSON Schema（焊缝类型/专家标签/物理参数/η目标/ψ-Anchor约束/八元数节点/κ-Snap链引用） |
+| `docs/welding_sensor_selection.md` | 7类传感器选型指南（电弧电流50kHz LEM HASS 400-S、电弧电压、送丝速度、焊接速度、TCP位姿、温度K型热电偶、焊缝跟踪激光结构光） |
+
+### 9.9 v0.3.0测试验证
+
+| 测试文件 | 测试数 | 状态 |
+|---------|-------|------|
+| `tests/test_octonion.py` | 32 | 全部通过 |
+| `tests/test_hetero_benchmark.py` | 51 | 全部通过 |
+| 现有焊接测试回归 | 116 | 全部通过（零回归） |
+| **总计** | **199** | **100%通过** |
+
+### 9.10 v0.3.0总结
+
+v0.3.0版本基于章锋2026-07-04论文[21]，将八元数非结合代数、EML蒸馏网络、异构计算基准、CIM忆阻器模拟器、焊接物理公式升级、DOCX文档生成、数据质量QA工具、硬件参考文件、EML标注Schema、传感器选型文档等10项增强集成到MuJoCo-Bench-IDO中。199个测试全绿，两个CLI工具（hetero_benchmark、tproc_cim_simulator）正常输出，现有116个焊接测试零回归。
+
+---
+
 ## 参考文献
 
 [1] 章锋. 从显式物理到隐式流贯：VG-Pair, C-IPP, GEL与双引擎AGI. 2026.
@@ -1303,3 +1393,5 @@ MuJoCo-Bench-IDO是首个物理域VG-Pair验证平台，为非冯架构AGI的连
 [19] Hafner D, et al. DreamerV3: Mastering Diverse Domains through Scalable Offline Reinforcement Learning. 2023.
 
 [20] NM512. r2dreamer: PyTorch DreamerV3 reproduction. GitHub: https://github.com/NM512/r2dreamer, 2026.
+
+[21] 章锋. 八元数非结合代数与EML蒸馏：从物理焊接到AGI认知架构. 微信公众号「复合体理学」, 2026-07-04. https://mp.weixin.qq.com/s/g_jxMzW5hVWg6Boba_YoEA

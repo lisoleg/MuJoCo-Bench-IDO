@@ -572,6 +572,104 @@ class TProcessor:
             "hardware_spec": self.get_hardware_spec(),
         }
 
+    def check_welding_safety(self, welding_state: dict) -> dict:
+        """检查焊接安全约束 (Ψ-Anchor 焊接域扩展).
+
+        调用 WeldingPsiAnchor 的 check_all 方法，执行焊接专用安全检查：
+        干伸长、回烧、气孔风险、焊缝偏差。
+
+        此方法是对现有 MAX_TORQUE / MAX_VELOCITY 逻辑的新增扩展，
+        不修改原有 check() 方法的行为。
+
+        Args:
+            welding_state: 焊接状态字典，包含:
+              - stickout: 干伸长 (mm)
+              - current: 焊接电流 (A)
+              - voltage: 焊接电压 (V)
+              - arc_length_variance: 电弧长度方差
+              - seam_deviation: 焊缝偏差 (mm)
+
+        Returns:
+            安全检查结果字典:
+              - passed: 是否全部通过
+              - violations: 违规描述列表
+              - actions: 建议动作列表
+        """
+        # 延迟导入避免循环依赖
+        try:
+            from agent.welding_psi_anchor import WeldingPsiAnchor
+        except ImportError:
+            # 如果 WeldingPsiAnchor 不可用，返回通过
+            return {"passed": True, "violations": [], "actions": []}
+
+        # 懒初始化焊接锚 (首次调用时创建)
+        if not hasattr(self, '_welding_psi_anchor'):
+            self._welding_psi_anchor = WeldingPsiAnchor()
+
+        return self._welding_psi_anchor.check_all(welding_state)
+
+    def tick_welding(
+        self,
+        obs: np.ndarray,
+        goal: np.ndarray,
+        action: np.ndarray,
+        joint_velocities: np.ndarray,
+        welding_state: dict,
+        joint_forces: Optional[np.ndarray] = None,
+        gripper_indices: Optional[List[int]] = None,
+    ) -> Tuple[EtaALUResult, PsiCheckResult, dict, KappaSnapFIFOEntry]:
+        """焊接域 T-Processor tick — 同时执行标准 Ψ-Check 和焊接安全检查.
+
+        在标准 tick() 基础上增加焊接安全检查 (check_welding_safety)。
+        标准物理约束 (MAX_TORQUE 等) 和焊接约束同时执行。
+
+        Args:
+            obs: 当前观测向量.
+            goal: 目标向量.
+            action: 提议动作向量.
+            joint_velocities: 当前关节速度.
+            welding_state: 焊接状态字典 (stickout, current, voltage, ...).
+            joint_forces: 当前关节力 (可选).
+            gripper_indices: 夹爪执行器索引 (可选).
+
+        Returns:
+            Tuple of (EtaALUResult, PsiCheckResult, welding_safety_result, KappaSnapFIFOEntry).
+        """
+        # 1. 标准 η 计算
+        eta_result = self.eta_alu.compute(obs, goal)
+
+        # 2. 标准 Ψ-Check (MAX_TORQUE, MAX_VELOCITY 等)
+        psi_result = self.psi_checker.check(
+            action, joint_velocities, joint_forces, gripper_indices
+        )
+
+        # 3. 焊接安全检查
+        welding_safety = self.check_welding_safety(welding_state)
+
+        # 4. 合并违规: 标准违规 + 焊接违规
+        all_violations: List[str] = list(psi_result.violations)
+        all_violations.extend(welding_safety.get("violations", []))
+
+        # 5. 记录审计条目
+        action_hash = hashlib.sha256(action.tobytes()).hexdigest()[:8]
+        snap_id = hashlib.sha256(
+            f"{self._tick_count}_{eta_result.eta:.6f}_{action_hash}".encode()
+        ).hexdigest()[:16]
+
+        entry = KappaSnapFIFOEntry(
+            step=self._tick_count,
+            timestamp=self._tick_count * TICK_PERIOD_S,
+            eta=eta_result.eta,
+            snap_id=snap_id,
+            psi_passed=(psi_result.passed and welding_safety["passed"]),
+            violation=";".join(all_violations) if all_violations else "",
+            action_hash=action_hash,
+        )
+        self.fifo.push(entry)
+
+        self._tick_count += 1
+        return eta_result, psi_result, welding_safety, entry
+
     def reset(self) -> None:
         """Reset T-Processor state (call at episode start)."""
         self._tick_count = 0

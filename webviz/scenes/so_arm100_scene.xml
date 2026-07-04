@@ -88,7 +88,7 @@
     <!-- Task A: Red Cube (50g, 5cm) — primary grasp target -->
     <body name="red_cube" pos="0.22 0.18 0.435">
       <freejoint name="cube_joint"/>
-      <geom name="cube_geom" type="box" size="0.025 0.025 0.025" mass="0.05" material="mat_red" class="object" friction="0.6 0.02 0.01"/>
+      <geom name="cube_geom" type="box" size="0.025 0.025 0.025" mass="0.05" material="mat_red" class="object" friction="1.2 0.05 0.02"/>
     </body>
 
     <!-- Task B: Blue Ball (2.7g, ping-pong ball) -->
@@ -141,16 +141,19 @@
                   <camera name="wrist_cam" pos="0 0 0.015" euler="-1.5708 0 0" fovy="1.0"/>
 
                   <!-- Left finger -->
+                  <!-- v0.16.31: Shorter finger geom at fingertip (was 8cm bar from hinge).
+                       Long bar swept into cube at full open, knocking it away.
+                       Now 8mm tip at 3.4-4.2cm from hinge → only tip can contact cube. -->
                   <body name="left_finger" pos="0 0.012 0.012">
                     <joint name="Gripper_Left" type="hinge" axis="0 1 0" range="0 0.873" class="finger"/>
-                    <geom name="left_finger_geom" type="box" size="0.005 0.003 0.04" pos="0 0 0.02" class="finger"/>
+                    <geom name="left_finger_geom" type="box" size="0.003 0.002 0.004" pos="0 0 0.038" class="finger"/>
                     <site name="fsr_left" pos="0 0 0.038" size="0.004" rgba="1 0 0 0.3"/>
                   </body>
 
                   <!-- Right finger -->
                   <body name="right_finger" pos="0 -0.012 0.012">
                     <joint name="Gripper_Right" type="hinge" axis="0 1 0" range="-0.873 0" class="finger"/>
-                    <geom name="right_finger_geom" type="box" size="0.005 0.003 0.04" pos="0 0 0.02" class="finger"/>
+                    <geom name="right_finger_geom" type="box" size="0.003 0.002 0.004" pos="0 0 0.038" class="finger"/>
                     <site name="fsr_right" pos="0 0 0.038" size="0.004" rgba="1 0 0 0.3"/>
                   </body>
                 </body>
@@ -163,6 +166,11 @@
   </worldbody>
 
   <!-- Contact exclusions: don't self-collide within arm segments -->
+  <!-- v0.16.32: Exclude gripper↔object collisions. The gripper_base box and
+       finger geoms were colliding with the cube during descend, launching it
+       at 13 m/s. Since we use kinematic cube attachment for grasping (cube
+       qpos is set directly to fingertip center), physical contact forces from
+       fingers are NOT needed. These exclusions prevent catastrophic collisions. -->
   <contact>
     <exclude body1="arm_base" body2="shoulder"/>
     <exclude body1="shoulder" body2="upper_arm"/>
@@ -172,6 +180,16 @@
     <exclude body1="wrist_roll" body2="gripper_base"/>
     <exclude body1="gripper_base" body2="left_finger"/>
     <exclude body1="gripper_base" body2="right_finger"/>
+    <!-- v0.16.32: Gripper vs objects — prevent collision launches -->
+    <exclude body1="gripper_base" body2="red_cube"/>
+    <exclude body1="left_finger" body2="red_cube"/>
+    <exclude body1="right_finger" body2="red_cube"/>
+    <exclude body1="gripper_base" body2="blue_ball"/>
+    <exclude body1="left_finger" body2="blue_ball"/>
+    <exclude body1="right_finger" body2="blue_ball"/>
+    <exclude body1="gripper_base" body2="white_tissue"/>
+    <exclude body1="left_finger" body2="white_tissue"/>
+    <exclude body1="right_finger" body2="white_tissue"/>
   </contact>
 
   <!-- Actuators: ST3215 servos with gear ratios -->
