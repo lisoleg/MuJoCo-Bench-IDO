@@ -1127,6 +1127,105 @@ IDO认知层预期在DreamerV3基础上提供1.03×增益，
 
 所有 VLA 输出经过 ψ-Anchor 物理安全约束（MAX_TORQUE, MAX_VELOCITY, MAX_GRIP_FORCE）后才送入 MuJoCo 执行，确保 VLA 的"自由意志"不违反物理定律。
 
+#### VLA模型四大派系对比
+
+当前开源VLA模型可分为四大派系：
+
+| 派系 | 代表模型 | 参数量 | 核心技术 | 开源程度 | IDO角色 |
+|------|---------|--------|---------|---------|---------|
+| 学院派 | OpenVLA | 7B | DINOv2+SigLIP+Llama-2, 击败RT2X | 权重开源 | P-Layer |
+| 学院派 | Octo | 93M | 多视角+Action Chunking, zero-shot泛化 | 开源 | P-Layer |
+| 巨头生态派 | GR00T N1 | — | 双系统(慢思考+快思考), 绑定NV生态 | 权重公开 | — |
+| 巨头生态派 | Gemini Robotics | 55B | RT2X, 与波士顿动力合作 | 闭源 | — |
+| 技术极致派 | π₀ (PI) | — | Flow Matching, 50Hz, Action Chunks | 权重开源 | 高密度φ-流 |
+| 中国力量 | XVLA(清华) | — | 彻底开源代码与真机数据 | 彻底开源 | — |
+
+**核心洞察**：所有VLA模型都是P-Layer（现象意识层）的进步——让机器人"会模仿"。但全员缺S-Layer（自我归因/κ-Snap）和C-Layer（ψ-锚硬约束）。MuJoCo-Bench-IDO的贡献：往这些开源VLA模型上焊S-Layer + C-Layer + GaussEx η归约验证，使之从**具身智能**（embodied AI）升格为**具身认知**（embodied cognition）——这就是"一行代码距离"的含义。
+
+#### π₀ Flow Matching 技术细节
+
+π₀采用双系统架构：VLM Backbone（PaliGemma 2B = SigLIP So400m/14视觉编码器 + Gemma 2B语言模型）+ Action Expert（300M Gemma模型）。
+
+**Flow Matching数学形式**：
+- 训练：$x_\tau = \tau \cdot \text{noise} + (1-\tau) \cdot A_t$, $u_\tau = \text{noise} - A_t$, $L = \mathbb{E}[\|v_\theta(x_\tau, o_t, \tau) - u_\tau\|^2]$
+- 推理：Euler法10步去噪，$x_{\tau-dt} = x_\tau + dt \cdot v_\theta(x_\tau, o_t, \tau)$, $dt = -1/\text{num\_steps}$
+- KV Cache优化：prefix（图像+语言）只算一次前向传播，后续10步去噪复用KV cache
+
+**Action Chunking**：action_horizon=50，一次预测50步动作序列，实现50Hz控制频率。与传统VLA（RT-2/OpenVLA）的2-10Hz autoregressive生成相比，π₀的50Hz使其能胜任叠衣服、洗碗等高精度柔性任务。
+
+**训练数据**：10000+小时演示数据，7种机器人配置，68个任务，加上OXE/DROID/Bridge v2开源数据集（占9.1%）。采用预训练-后训练范式（类似LLM的pretrain+fine-tune）。
+
+**LIBERO SOTA**：π₀.5在LIBERO基准上达到平均96.85%（Spatial 98.8, Object 98.2, Goal 98.0, 10 92.4），大幅领先OpenVLA(7B)和Octo(93M)。
+
+#### TOMAS框架的形式化基础
+
+基于"太一互搏视域下的具身智能"（复合体理学, 2026），TOMAS框架的核心公理包括：
+
+| 公理 | 内容 |
+|------|------|
+| A1 | 信息存在度ℐ∈[0,1]的Bayesian update规则 |
+| A2 | 时间箭头不可逆——κ-Snap链的因果方向不可篡改 |
+| A4 | ψ-锚约束目的——G_ego阴敛必读ψ-锚，子目标须经aligned_with检查 |
+| A5 | MUS（互斥稳态）——冲突经验双存不吞并不删除 |
+
+**κ-Gate双级检查**：
+- 一级：ψ-锚（一票否决）——终极目的层，若语义entail违背"服务有情众生之自主繁荣与去苦"，拒发motor-cmd
+- 二级：scene_profile（场景约束）——力矩上限、人距下限、速度限制等
+
+**κ-Snap因果快照**：每个SnapEvent包含`{subject, meta:{cited_ref, prev_snap_id, trigger_obs_id}}`，形成Merkle链，任何篡改会断裂链条，实现深于文本日志的全链审计。
+
+**六项补全**（从具身智能到具身认知的升维）：
+1. 动态信息存在度ℐ + MUS双存
+2. κ-Snap全溯源
+3. ψ-锚约束目的
+4. GPCT边界层重划（层创）
+5. κ-Gate硬锚保护
+6. HNC句类分析NLU前端
+
+#### SO-ARM100物理参数
+
+| 参数 | 值 | 来源 |
+|------|-----|------|
+| ST3215最大扭矩 | 0.050 N·m | psi_anchor_defaults.yaml |
+| 堵转扭矩 | ≈0.06 N·m @ 7.4V | ST3215规格 |
+| 速度极限 | ≈60 RPM ≈ 6.28 rad/s | ST3215规格 |
+| 总线延迟 | ≈1-2 ms/帧 | 实测 |
+| 控制频率 | 30 Hz | LeRobot默认 |
+| MuJoCo gear (J1-J3) | 50 | ctrlrange=[-1,1]→0.05 N·m |
+| MuJoCo gear (J4-J5) | 30 | — |
+| π₀ chunk_size | 50 (50Hz × 0.1s = 5 steps) | — |
+| EML-SemZip theta_dead | 0.45 | — |
+| Goal-EML容差 | 0.02 m | — |
+
+#### 整合生态架构
+
+```
+┌─────────────────────────────────────────────┐
+│          VLA FOUNDATION MODELS              │
+│  OpenVLA-7B / Octo / π₀ (weights only)     │
+└──────────────┬──────────────────────────────┘
+               │  Image+Lang+Proprio → Joint Cmd
+    ┌──────────▼──────────┐
+    │   TOMAS WRAPPER     │
+    │  ├─ S-Bridge (κ-Snap: 步级因果审计)
+    │  ├─ C-Gate (ψ-Anchor: 物理安全门控)
+    │  └─ EML-SemZip (OXE数据重加权)
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │  MuJoCo-Bench-IDO   │
+    │  ├─ κ-Snap η计算+审计 │
+    │  ├─ Noether能量/力矩检查│
+    │  ├─ Goal-EML陪集定义   │
+    │  └─ ψ-Anchor元管理层   │
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │  SIM: MuJoCo / Genesis│
+    │  REAL: SO-ARM100 + FSR│
+    └───────────────────────┘
+```
+
 ---
 
 ## 8 结论与未来工作

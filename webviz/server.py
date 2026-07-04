@@ -68,7 +68,7 @@ except ImportError as _tomas_err:
     TOMAS_AVAILABLE = False
     print(f"Warning: TOMAS wrapper not available: {_tomas_err}")
 
-WEBVIZ_VERSION: str = "v0.16.17"
+WEBVIZ_VERSION: str = "v0.16.18"
 
 # ── Bug 3 Fix: Baseline reference data for 7 core metrics ──
 # Source: dm_control PPO/SAC 100k step typical scores (paperswithcode, DM Control paper)
