@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Any
 import numpy as np
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from pydantic import BaseModel
 
 # ── Add project root to PYTHONPATH so imports work ──
@@ -53,6 +53,7 @@ from core.goal_eml_mj import GoalEML
 from core.kappa_snap_mj import gauss_ex_residual, FlowMatchingEtaPredictor
 from core.noether_check_mj import noether_check_mj
 from core.cq import ConscienceQuotient
+from core.gel_loss import GELLoss, GELConfig, compute_gel_from_step
 
 # v0.16.14: TOMAS wrapper for SO-ARM100 IDO integration
 # v0.16.17: Also import VLA adapter factory (lazy import in API endpoints)
@@ -68,7 +69,7 @@ except ImportError as _tomas_err:
     TOMAS_AVAILABLE = False
     print(f"Warning: TOMAS wrapper not available: {_tomas_err}")
 
-WEBVIZ_VERSION: str = "v0.16.18"
+WEBVIZ_VERSION: str = "v0.16.26"
 
 # ── Bug 3 Fix: Baseline reference data for 7 core metrics ──
 # Source: dm_control PPO/SAC 100k step typical scores (paperswithcode, DM Control paper)
@@ -181,16 +182,23 @@ arm100_persistent_port: int = 0
 arm100_tomas_wrapper = None            # type: Optional[Any]  # TOMASMuJoCoWrapper instance
 
 # v0.16.17: Simulation speed multiplier, direction cooldown, ARM100 manual/VLA control
-mjviser_sim_speed: int = 1           # v0.16.17: Simulation speed multiplier (1-63x)
+mjviser_sim_speed: int = 1           # v0.16.17: Simulation speed multiplier (1-64x)
 mjviser_last_dir_change_time: float = 0.0  # v0.16.17: Anti-backflip cooldown timer
 arm100_manual_mode: bool = False     # v0.16.17: SO-ARM100 manual control mode
 arm100_manual_target: Optional[np.ndarray] = None  # v0.16.17: Manual joint targets
 arm100_vla_adapter = None            # v0.16.17: VLA adapter instance
 arm100_vla_mode: bool = False        # v0.16.17: VLA inference mode
 arm100_vla_instruction: str = "pick up the red cube"  # v0.16.17: VLA language instruction
+arm100_cam_top_frame: Optional[bytes] = None       # v0.16.19: CAMKit top cam JPEG
+arm100_cam_wrist_frame: Optional[bytes] = None     # v0.16.19: CAMKit wrist cam JPEG
+arm100_cam_top_rgb: Optional["np.ndarray"] = None  # v0.16.19: CAMKit top cam RGB array (for VLA)
+arm100_cam_wrist_rgb: Optional["np.ndarray"] = None # v0.16.19: CAMKit wrist cam RGB array (for VLA)
 
 try:
     import mjviser
+    # v0.16.21: Patch mjviser _SPEEDS to support up to 64x (was max 8x)
+    if hasattr(mjviser, 'viewer') and hasattr(mjviser.viewer, '_SPEEDS'):
+        mjviser.viewer._SPEEDS = [1, 2, 4, 8, 16, 32, 64]
     MJVISER_AVAILABLE = True
 except ImportError:
     MJVISER_AVAILABLE = False
@@ -333,6 +341,50 @@ def run_episode_with_streaming(
     # v0.6.3: CQ tracker for per-step compliance monitoring
     cq_tracker = ConscienceQuotient()
 
+    # v0.16.19: GEL (Goal-EML Injection Loss) accumulator
+    gel_tracker = GELLoss(config=GELConfig())
+
+    # v0.16.26: Initialize new core modules for benchmark integration
+    # P0: KappaSnapTokenizer — encode κ-Snap events per step
+    _kappa_tokenizer = None
+    try:
+        from core.kappa_snap_tokenizer import KappaSnapTokenizer
+        _kappa_tokenizer = KappaSnapTokenizer(window_size=16, summary_dim=32)
+    except Exception:
+        pass
+
+    # P1: T-Processor — hardware η-ALU + ψ-Checker + κ-Snap FIFO
+    _t_processor = None
+    try:
+        from core.t_processor import TProcessor
+        _t_processor = TProcessor()
+    except Exception:
+        pass
+
+    # P2: Three-Body — Virtual→Software→Physical execution pipeline
+    _three_body = None
+    try:
+        from core.three_body import ThreeBodySystem
+        _three_body = ThreeBodySystem(sim_mode=True)
+    except Exception:
+        pass
+
+    # P2: HG-PINN — Hamiltonian-guided action head (residual mode)
+    _hg_pinn = None
+    try:
+        from core.hg_pinn import HGPINNActionHead, HGPINNConfig
+        _hg_pinn = HGPINNActionHead(HGPINNConfig())
+    except Exception:
+        pass
+
+    # P2: Nine-Layer registry — for architecture reporting
+    _nine_layer_registry = None
+    try:
+        from core.nine_layer import NineLayerRegistry
+        _nine_layer_registry = NineLayerRegistry()
+    except Exception:
+        pass
+
     # P0-2: per-task success criteria lookup
     success_fn = TASK_SUCCESS_CRITERIA.get(task_name, None) if task_name else None
 
@@ -405,6 +457,93 @@ def run_episode_with_streaming(
                                pgate_ok=kappa_snap_triggered,
                                sentient_ok=(psi_anchor_policy != 'freeze'))
 
+        # v0.16.19: Compute GEL (Goal-EML Injection Loss) for this step
+        gel_step = compute_gel_from_step(
+            eta=float(eta),
+            noether_result=nvr_result if not noether_ok and agent.prev_data is not None else None,
+            goal_max_energy=float(agent.goal.max_energy_inject),
+            collide_thresh=float(agent.goal.collide_thresh),
+            success=success,
+        )
+        gel_tracker.accumulate(gel_step)
+
+        # ── v0.16.26: New core module integration ──
+
+        # P1: T-Processor tick — hardware η-ALU + ψ-Checker + κ-Snap FIFO
+        _tp_eta = None
+        _tp_violation = None
+        _tp_kappa_entry = None
+        if _t_processor is not None:
+            try:
+                _tp_qvel = env.physics.data.qvel.copy()
+                _tp_qfrc = env.physics.data.qfrc_actuator.copy()
+                _tp_eta_result, _tp_psi_result, _tp_kappa_entry = _t_processor.tick(
+                    obs=z_i, goal=agent.goal, action=action,
+                    qvel=_tp_qvel, qfrc=_tp_qfrc,
+                )
+                _tp_eta = _tp_eta_result.eta_value
+                _tp_violation = _tp_psi_result.violations[0] if _tp_psi_result.violations else None
+            except Exception:
+                pass
+
+        # P0: KappaSnapTokenizer — encode κ-Snap events
+        _kappa_tokens = ""
+        _kappa_summary = [0.0] * 32
+        if _kappa_tokenizer is not None:
+            try:
+                _event_type = "SAFE_STEP"
+                if not noether_ok:
+                    _event_type = "NVT_VIOLATION"
+                elif _tp_violation is not None:
+                    _event_type = _tp_violation
+                elif kappa_snap_triggered:
+                    _event_type = "KAPPA_SNAP"
+
+                _eta_bucket = "mid"
+                if eta < 0.1:
+                    _eta_bucket = "vlo"
+                elif eta < 1.0:
+                    _eta_bucket = "lo"
+                elif eta < 10.0:
+                    _eta_bucket = "mid"
+                elif eta < 100.0:
+                    _eta_bucket = "hi"
+                else:
+                    _eta_bucket = "vhi"
+
+                _decision = "EXPLOIT" if kappa_snap_triggered else "EXPLORE"
+                _kappa_tokenizer.add_event(
+                    level="L6", event_type=_event_type,
+                    eta_bucket=_eta_bucket, decision=_decision,
+                )
+                _kappa_tokens = _kappa_tokenizer.get_token_string()
+                _kappa_summary = _kappa_tokenizer.get_summary_vector(dim=32).tolist()
+            except Exception:
+                pass
+
+        # P2: Three-Body — wrap action through Virtual→Software→Physical
+        _three_body_gap = None
+        if _three_body is not None:
+            try:
+                _bp, _op, _ap = _three_body.full_cycle(
+                    action=action, obs=z_i, reward=step_reward, eta=float(eta),
+                )
+                _three_body_gap = _three_body.physical.get_sim_real_gap(_three_body.virtual)
+            except Exception:
+                pass
+
+        # P2: HG-PINN — compute Hamiltonian energy stats
+        _hg_energy = None
+        if _hg_pinn is not None:
+            try:
+                _ee = np.array(ee_pos[:3]) if ee_pos else np.zeros(3)
+                _hg_stats = _hg_pinn.get_energy_stats()
+                _hg_energy = _hg_stats
+            except Exception:
+                pass
+
+        # ── End v0.16.26 integration ──
+
         # Motor IC-Values (handle empty macros gracefully)
         motor_ic_values: List[float] = []
         if hasattr(agent, 'macros') and agent.macros and len(agent.macros) > 0:
@@ -457,6 +596,19 @@ def run_episode_with_streaming(
             "target_speed": float(getattr(agent.goal, 'target_speed', 0.0)),
             "target_height": float(getattr(agent.goal, 'target_height', 0.0)),
             "target_upright": float(getattr(agent.goal, 'target_upright', 0.0)),
+            # v0.16.19: GEL auxiliary loss
+            "gel_loss": float(gel_step["total"]),
+            "gel_noether": float(gel_step["noether"]),
+            "gel_contact": float(gel_step["contact"]),
+            "gel_task": float(gel_step["task"]),
+            "gel_hinge": float(gel_step["hinge"]),
+            # v0.16.26: New core module data
+            "kappa_tokens": _kappa_tokens,
+            "kappa_summary": _kappa_summary,
+            "t_processor_eta": float(_tp_eta) if _tp_eta is not None else None,
+            "t_processor_violation": _tp_violation,
+            "three_body_gap": _three_body_gap,
+            "hg_pinn_energy": _hg_energy,
         }
 
         # Update run state
@@ -515,6 +667,9 @@ def run_episode_with_streaming(
     if hasattr(agent, 'psi_anchor') and agent.psi_anchor is not None:
         epiplexity_score = agent.psi_anchor.epiplexity_score
 
+    # v0.16.19: GEL mean loss for this episode
+    gel_mean = gel_tracker.mean_loss()
+
     return {
         'steps_to_goal': steps,
         'final_eta': final_eta,
@@ -526,6 +681,12 @@ def run_episode_with_streaming(
         'hesit_rmse': hesit_rmse,
         'retry_voc': retry_voc,
         'epiplexity_score': epiplexity_score,
+        # v0.16.19: GEL auxiliary loss
+        'gel_loss': gel_mean['total'],
+        'gel_noether': gel_mean['noether'],
+        'gel_contact': gel_mean['contact'],
+        'gel_task': gel_mean['task'],
+        'gel_hinge': gel_mean['hinge'],
     }
 
 
@@ -1562,15 +1723,17 @@ async def start_viewer() -> JSONResponse:
             ANKLE_AMP: float = 0.08          # v0.16.12: Gentler push-off (was 0.10)
             ARM_AMP: float = 0.10            # v0.16.12: Gentler arm swing (was 0.15)
 
-            # v0.16.12: Stronger root assist + gravity feedforward
-            # Without gravity FF, KP=500 spring sags 31cm under 157N gravity.
-            # With gravity FF, spring only handles deviations → can be stiffer.
-            KP_ROOT_Z: float = 1200.0        # Vertical spring (was 500)
-            KD_ROOT_Z: float = 80.0          # (was 50)
-            KP_ROOT_PITCH: float = 350.0     # Pitch spring (was 200)
-            KD_ROOT_PITCH: float = 40.0      # (was 30)
-            KP_ROOT_ROLL: float = 350.0      # Roll spring (was 200)
-            KD_ROOT_ROLL: float = 40.0       # (was 30)
+            # v0.16.24: Reduced root gains — robot was "too bouncy" with KP=1200.
+            #   - KP_ROOT_Z 1200→450 (less aggressive vertical push)
+            #   - KD_ROOT_Z 80→140  (stronger damping kills oscillation)
+            #   - Pitch/roll gains 350→220
+            #   - Asymmetric Z clip: max +500N (≈1x gravity), min -150N (gentle pull-down)
+            KP_ROOT_Z: float = 450.0         # v0.16.24: was 1200 (too bouncy)
+            KD_ROOT_Z: float = 140.0         # v0.16.24: was 80
+            KP_ROOT_PITCH: float = 220.0     # v0.16.24: was 350
+            KD_ROOT_PITCH: float = 45.0      # v0.16.24: was 40
+            KP_ROOT_ROLL: float = 220.0      # v0.16.24: was 350
+            KD_ROOT_ROLL: float = 45.0       # v0.16.24: was 40
             KP_ROOT_YAW: float = 30.0        # Yaw spring (was 50) — gentler turning
             KD_ROOT_YAW: float = 8.0         # (was 10)
             # v0.16.12: Clip limits
@@ -1593,11 +1756,28 @@ async def start_viewer() -> JSONResponse:
 
             # Warmup: let robot settle before walking
             WARMUP_DURATION: float = 3.0  # v0.16.12: Longer settle (was 2.0)
+            # v0.16.21: Ramp scene — shorter warmup so robot walks toward ramp sooner
+            if mjviser_scene_type == "ramp":
+                WARMUP_DURATION = 1.0
 
             # v0.16.12: Gravity feedforward — cancel gravity so spring handles only deviations
             # body_subtreemass[1] = total mass of robot (body 1 = torso, subtree = all)
             _robot_mass: float = float(mj_model.body_subtreemass[1])
             GRAVITY_FF: float = _robot_mass * 9.81  # ~157N for 16kg humanoid
+
+            # v0.16.21: Get torso body ID for ray casting exclusion
+            # (body 1 is NOT always torso — scenes with walls/platforms before torso in XML
+            #  have different body ordering, causing ray cast to hit robot's own body)
+            _torso_body_id: int = mj.mj_name2id(mj_model, mj.mjtObj.mjOBJ_BODY, 'torso')
+            if _torso_body_id < 0:
+                _torso_body_id = 1  # Fallback to body 1
+
+            # v0.16.23: Foot geom IDs for contact-based ground detection
+            _foot_geom_ids: tuple = (
+                mj.mj_name2id(mj_model, mj.mjtObj.mjOBJ_GEOM, 'foot_l_geom'),
+                mj.mj_name2id(mj_model, mj.mjtObj.mjOBJ_GEOM, 'foot_r_geom'),
+            )
+            _foot_geom_ids = tuple(gid for gid in _foot_geom_ids if gid >= 0)
 
             # ── Walking controller state ──
             walk_state: dict = {
@@ -1663,14 +1843,39 @@ async def start_viewer() -> JSONResponse:
                 # prevent collapse. Also boost pitch/roll when leaning > 30°.
                 # v0.16.7: Adaptive target_height — detect ground level via downward ray
                 # v0.16.12: Gravity feedforward + gradual fall_boost + gentler yaw
+                # v0.16.22: Airborne mode — when robot is far above ground (walked off
+                #   platform edge, launched by terrain), kill vertical spring + gait,
+                #   switch to pure angular damping. Prevents "sky tumbling" where
+                #   spring+PD oscillate the robot in mid-air indefinitely.
+                # v0.16.23: Ground-aware balance.
+                #   - One-way vertical spring (only pushes up when z<target) so the
+                #     robot is never pulled down into the ground on ramps.
+                #   - Foot-contact + ray height used for airborne detection: prevents
+                #     false "airborne" on ramps where the torso may be >1m above ground.
+                #   - Softer root gains on ramp/stairs/obstacle/maze to avoid launching.
+                is_airborne: bool = False
+                # v0.16.25: Flip detection state — initialized here so they're
+                # accessible in the gait section below.
+                _is_flipping: bool = False
+                _is_tilting: bool = False
+                yaw_err: float = 0.0
                 if not is_plain:
                     # Cast straight-down ray to find actual ground/platform height
                     ray_down = np.array([0.0, 0.0, -1.0])
                     ray_origin_down = np.array([float(root_pos[0]), float(root_pos[1]), float(root_pos[2]) + 0.1])
                     try:
-                        ground_dist = mj.mj_ray(mj_model, data, ray_origin_down, ray_down, None, 1, 1)
+                        ground_dist = mj.mj_ray(mj_model, data, ray_origin_down, ray_down, None, 1, _torso_body_id, None)
                     except Exception:
                         ground_dist = -1.0
+
+                    # v0.16.23: Contact-based ground detection (foot geoms)
+                    is_grounded = False
+                    for _c in range(data.ncon):
+                        _contact = data.contact[_c]
+                        if _contact.geom1 in _foot_geom_ids or _contact.geom2 in _foot_geom_ids:
+                            is_grounded = True
+                            break
+
                     # Adaptive target: standing height = ground_height + 0.85 (leg length)
                     if ground_dist > 0:
                         ground_z = float(ray_origin_down[2] - ground_dist)
@@ -1678,44 +1883,141 @@ async def start_viewer() -> JSONResponse:
                         # Smoothly blend toward adaptive target (avoid sudden jumps)
                         target_height = target_height * 0.95 + adaptive_target * 0.05
 
-                    height_error = target_height - float(root_pos[2])
-                    height_force = KP_ROOT_Z * height_error - KD_ROOT_Z * float(root_vel[2])
-                    # v0.16.12: Gradual anti-fall boost (was binary 3x at 70%)
-                    _height_ratio = float(root_pos[2]) / target_height if target_height > 0 else 1.0
-                    if _height_ratio < 0.7:
-                        height_force *= 1.0 + (0.7 - _height_ratio) * 3.0  # Gradual ramp
-                    height_force = float(np.clip(height_force, -CLIP_ROOT_Z, CLIP_ROOT_Z))
-                    data.qfrc_applied[2] += height_force
+                    # v0.16.26: Softer Z gain on uneven terrain to prevent launching,
+                    # BUT keep pitch/roll/yaw gains at FULL strength — terrain needs
+                    # MORE angular stability, not less. Previous code reduced ALL gains
+                    # by 0.7x which made the robot flip on exactly the terrain where
+                    # it needs the most stability.
+                    _terrain_z_scale = 0.7 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze") else 1.0
+                    _terrain_ang_scale = 1.0  # v0.16.26: Never reduce angular gains on terrain
+                    _kp_root_z = KP_ROOT_Z * _terrain_z_scale
+                    _kd_root_z = KD_ROOT_Z * _terrain_z_scale
+                    _kp_root_pitch = KP_ROOT_PITCH * _terrain_ang_scale
+                    _kd_root_pitch = KD_ROOT_PITCH * _terrain_ang_scale
+                    _kp_root_roll = KP_ROOT_ROLL * _terrain_ang_scale
+                    _kd_root_roll = KD_ROOT_ROLL * _terrain_ang_scale
+                    _kp_root_yaw = KP_ROOT_YAW * _terrain_ang_scale
+                    _kd_root_yaw = KD_ROOT_YAW * _terrain_ang_scale
 
-                    # v0.16.12: Gradual fall_boost (was binary 1.0/2.0 at 80%)
-                    fall_boost = 1.0 + max(0.0, (0.85 - _height_ratio) * 4.0)
-                    fall_boost = min(fall_boost, 3.0)  # Cap at 3x
+                    # v0.16.23: Airborne detection — true mid-air only when:
+                    #   ground far below (>1.5m), OR no ground, OR feet aren't touching
+                    #   AND torso is clearly above ground (>0.5m). This avoids killing
+                    #   balance on ramps where the torso can be >1m above the surface.
+                    is_airborne = (ground_dist < 0) or (ground_dist > 1.5) or (not is_grounded and ground_dist > 0.5)
 
-                    pitch_torque = KP_ROOT_PITCH * fall_boost * (-pitch) - KD_ROOT_PITCH * float(root_angvel[1])
-                    pitch_torque = float(np.clip(pitch_torque, -CLIP_ROOT_PITCH, CLIP_ROOT_PITCH))
-                    data.qfrc_applied[4] += pitch_torque
+                    if is_airborne:
+                        # v0.16.22: Airborne mode — NO vertical spring, NO pitch/roll
+                        # spring, ONLY strong angular velocity damping to bleed off spin.
+                        data.qfrc_applied[3] += -_kd_root_roll * 5.0 * float(root_angvel[0])
+                        data.qfrc_applied[4] += -_kd_root_pitch * 5.0 * float(root_angvel[1])
+                        data.qfrc_applied[5] += -_kd_root_yaw * 5.0 * float(root_angvel[2])
+                    else:
+                        # Ground mode — one-way vertical spring + PD + anti-fall
 
-                    roll_torque = KP_ROOT_ROLL * fall_boost * (-roll) - KD_ROOT_ROLL * float(root_angvel[0])
-                    roll_torque = float(np.clip(roll_torque, -CLIP_ROOT_ROLL, CLIP_ROOT_ROLL))
-                    data.qfrc_applied[3] += roll_torque
+                        # v0.16.26: Flip detection & proactive recovery.
+                        # Previous approach (v0.16.25): wait until 20°/30° then apply
+                        # 3x torque — too late and too aggressive (causes overshoot).
+                        # New approach: detect at 12°/20°, use HIGH DAMPING (not high
+                        # torque) to kill angular momentum, plus moderate torque boost.
+                        _abs_roll = abs(roll)
+                        _abs_pitch = abs(pitch)
+                        _is_flipping = (_abs_roll > 0.35) or (_abs_pitch > 0.35)  # >20° (was 30°)
+                        _is_tilting = (_abs_roll > 0.20) or (_abs_pitch > 0.20)   # >12° (was 20°)
 
-                    # v0.16.12: Much gentler yaw — turning via hip_z, not root torque
-                    # (was KP*2.0, clip 60 → KP*0.3, clip 15)
-                    yaw_err = float(np.arctan2(
-                        np.sin(mjviser_walk_direction - yaw),
-                        np.cos(mjviser_walk_direction - yaw)))
-                    # v0.16.17: Clamp yaw_err to prevent backflip on rapid direction changes
-                    yaw_err = float(np.clip(yaw_err, -np.pi / 4, np.pi / 4))  # Max 45° turn at once
-                    # v0.16.17: Stability guard — don't apply yaw torque when robot is falling
-                    if _height_ratio > 0.75:
-                        yaw_torque = KP_ROOT_YAW * 0.3 * yaw_err - KD_ROOT_YAW * float(root_angvel[2])
-                        yaw_torque = float(np.clip(yaw_torque, -CLIP_ROOT_YAW, CLIP_ROOT_YAW))
-                        data.qfrc_applied[5] += yaw_torque
+                        height_error = target_height - float(root_pos[2])
+
+                        # v0.16.25: Emergency crouch when tilting — lower COM to stabilize
+                        if _is_flipping:
+                            # Severe tilt: crouch hard (target -0.3m) + no gait
+                            height_error += 0.3  # Lower target by 30cm
+                        elif _is_tilting:
+                            # Mild tilt: crouch slightly (target -0.15m)
+                            height_error += 0.15
+
+                        # v0.16.24: Anti-bounce asymmetric damping.
+                        _vel_z = float(root_vel[2])
+                        # Up-spring (one-way: only push up when below target)
+                        _up_spring = _kp_root_z * max(0.0, height_error)
+                        # Damping: 3x when moving up (anti-bounce), 1x when moving down
+                        _damp_factor = 3.0 if _vel_z > 0.0 else 1.0
+                        _damping = _kd_root_z * _damp_factor * _vel_z
+                        height_force = _up_spring - _damping
+                        # v0.16.12: Gradual anti-fall boost (was binary 3x at 70%)
+                        # v0.16.24: Reduced range — only kicks in below 60% (was 70%)
+                        _height_ratio = float(root_pos[2]) / target_height if target_height > 0 else 1.0
+                        if _height_ratio < 0.6:
+                            height_force *= 1.0 + (0.6 - _height_ratio) * 2.0  # Max 1.6x (was 3.1x)
+                        # v0.16.24: Asymmetric Z clip — less UP force, normal DOWN force
+                        #   This is the key fix for "robot loves to jump" — clip UP to 500N
+                        #   and allow DOWN to -200N (gentle, not yanked down).
+                        height_force = float(np.clip(height_force, -200.0, 500.0))
+                        data.qfrc_applied[2] += height_force
+
+                        # v0.16.12: Gradual fall_boost (was binary 1.0/2.0 at 80%)
+                        # v0.16.24: Reduced max boost 3.0→1.6x to reduce bounce
+                        fall_boost = 1.0 + max(0.0, (0.85 - _height_ratio) * 1.5)
+                        fall_boost = min(fall_boost, 1.6)  # Cap at 1.6x (was 3.0x)
+
+                        # v0.16.26: Flip recovery — HIGH DAMPING + moderate torque.
+                        # Previous 3x torque caused overshoot oscillation. New approach:
+                        # 1.5x torque boost + 4x angular velocity damping kills momentum
+                        # without overshoot. Think of it as a shock absorber, not a spring.
+                        if _is_flipping:
+                            fall_boost = 1.5       # Moderate torque (was 3.0)
+                            _damp_boost = 4.0       # High damping to kill angular momentum
+                        elif _is_tilting:
+                            fall_boost = 1.2        # Mild torque boost (was 2.0)
+                            _damp_boost = 2.0       # Moderate damping
+                        else:
+                            _damp_boost = 1.0
+
+                        pitch_torque = _kp_root_pitch * fall_boost * (-pitch) - _kd_root_pitch * _damp_boost * float(root_angvel[1])
+                        # v0.16.26: Moderate clip expansion (was 3x — caused overshoot)
+                        _pitch_clip = CLIP_ROOT_PITCH * (1.8 if _is_flipping else (1.3 if _is_tilting else 1.0))
+                        pitch_torque = float(np.clip(pitch_torque, -_pitch_clip, _pitch_clip))
+                        data.qfrc_applied[4] += pitch_torque
+
+                        roll_torque = _kp_root_roll * fall_boost * (-roll) - _kd_root_roll * _damp_boost * float(root_angvel[0])
+                        _roll_clip = CLIP_ROOT_ROLL * (1.8 if _is_flipping else (1.3 if _is_tilting else 1.0))
+                        roll_torque = float(np.clip(roll_torque, -_roll_clip, _roll_clip))
+                        data.qfrc_applied[3] += roll_torque
+
+                        # v0.16.26: Proactive angular velocity damping — even when not
+                        # tilting, if angular velocity is high (>2 rad/s), add extra
+                        # damping to prevent the tilt from developing in the first place.
+                        _angvel_mag = abs(float(root_angvel[0])) + abs(float(root_angvel[1]))
+                        if _angvel_mag > 2.0 and not _is_flipping:
+                            _extra_damp = min(_angvel_mag - 2.0, 3.0) * _kd_root_pitch
+                            data.qfrc_applied[3] -= _extra_damp * float(root_angvel[0])
+                            data.qfrc_applied[4] -= _extra_damp * float(root_angvel[1])
+
+                        # v0.16.12: Much gentler yaw — turning via hip_z, not root torque
+                        # (was KP*2.0, clip 60 → KP*0.3, clip 15)
+                        yaw_err = float(np.arctan2(
+                            np.sin(mjviser_walk_direction - yaw),
+                            np.cos(mjviser_walk_direction - yaw)))
+                        # v0.16.17: Clamp yaw_err to prevent backflip on rapid direction changes
+                        yaw_err = float(np.clip(yaw_err, -np.pi / 4, np.pi / 4))  # Max 45° turn at once
+                        # v0.16.17: Stability guard — don't apply yaw torque when robot is falling
+                        if _height_ratio > 0.75:
+                            yaw_torque = _kp_root_yaw * 0.3 * yaw_err - _kd_root_yaw * float(root_angvel[2])
+                            yaw_torque = float(np.clip(yaw_torque, -CLIP_ROOT_YAW, CLIP_ROOT_YAW))
+                            data.qfrc_applied[5] += yaw_torque
 
                 # ── 3. Gait generation + balance-aware joint targets ──
                 phase: float = 2.0 * np.pi * WALK_FREQ * sim_time
                 # v0.16.7: walk_mult controlled by mjviser_walk_speed
                 walk_mult: float = (0.0 if is_warmup else 1.0) * mjviser_walk_speed
+
+                # v0.16.22: Freeze gait when airborne — leg motion generates
+                # reaction torques on torso that sustain tumbling in mid-air.
+                if is_airborne:
+                    walk_mult = 0.0
+
+                # v0.16.25: Freeze gait when flipping/tilting — leg swinging
+                # generates reaction torques that make the flip worse.
+                if _is_flipping or _is_tilting:
+                    walk_mult = 0.0
 
                 # v0.16.7: Ray casting for wall/terrain detection ──
                 # Cast forward ray to detect walls ahead (for maze navigation)
@@ -1727,7 +2029,7 @@ async def start_viewer() -> JSONResponse:
                 # Exclude robot's own body (body 0 is world, body 1 is usually torso)
                 # mj_ray returns distance to nearest geom or -1 if no hit
                 try:
-                    wall_dist = mj.mj_ray(mj_model, data, torso_pos, ray_fwd, None, 1, 1)
+                    wall_dist = mj.mj_ray(mj_model, data, torso_pos, ray_fwd, None, 1, _torso_body_id, None)
                 except Exception:
                     wall_dist = -1.0
 
@@ -1736,7 +2038,7 @@ async def start_viewer() -> JSONResponse:
                 left_y = float(np.sin(yaw + np.pi / 2))
                 ray_left = np.array([left_x, left_y, 0.0])
                 try:
-                    left_dist = mj.mj_ray(mj_model, data, torso_pos, ray_left, None, 1, 1)
+                    left_dist = mj.mj_ray(mj_model, data, torso_pos, ray_left, None, 1, _torso_body_id, None)
                 except Exception:
                     left_dist = -1.0
 
@@ -1744,7 +2046,7 @@ async def start_viewer() -> JSONResponse:
                 right_y = float(np.sin(yaw - np.pi / 2))
                 ray_right = np.array([right_x, right_y, 0.0])
                 try:
-                    right_dist = mj.mj_ray(mj_model, data, torso_pos, ray_right, None, 1, 1)
+                    right_dist = mj.mj_ray(mj_model, data, torso_pos, ray_right, None, 1, _torso_body_id, None)
                 except Exception:
                     right_dist = -1.0
 
@@ -1766,7 +2068,7 @@ async def start_viewer() -> JSONResponse:
                 ray_origin_high = torso_pos.copy()
                 ray_origin_high[2] += 0.1  # Start slightly above torso
                 try:
-                    terrain_dist = mj.mj_ray(mj_model, data, ray_origin_high, ray_down_fwd, None, 1, 1)
+                    terrain_dist = mj.mj_ray(mj_model, data, ray_origin_high, ray_down_fwd, None, 1, _torso_body_id, None)
                 except Exception:
                     terrain_dist = -1.0
 
@@ -1967,9 +2269,21 @@ async def start_viewer() -> JSONResponse:
                 v0.16.0: Set a stable standing pose. The physics controller will
                 maintain balance through joint torques and contact forces — no
                 kinematic locking.
+                v0.16.21: Use ray casting to detect ground/platform height at
+                reset position, preventing robot from sinking into floating platforms.
                 """
                 dat.qpos[:] = 0.0
-                dat.qpos[2] = target_height  # 1.285 for plain, 0.85 for scenes
+                # v0.16.21: Cast downward ray from above to find ground/platform height
+                _ray_origin = np.array([0.0, 0.0, 3.0])
+                _ray_dir = np.array([0.0, 0.0, -1.0])
+                _ground_z = 0.0
+                try:
+                    _hit_dist = mj.mj_ray(mdl, dat, _ray_origin, _ray_dir, None, 1, _torso_body_id, None)
+                    if _hit_dist > 0:
+                        _ground_z = float(_ray_origin[2] - _hit_dist)
+                except Exception:
+                    pass
+                dat.qpos[2] = target_height + _ground_z  # Stand on top of ground/platform
                 dat.qpos[3] = 1.0             # Upright quaternion (w=1)
                 dat.qvel[:] = 0.0
                 dat.qacc[:] = 0.0
@@ -1986,7 +2300,8 @@ async def start_viewer() -> JSONResponse:
                 server=viser_server,
             )
             # Start in paused mode: robot shows upright pose, user clicks Play to start
-            viewer._paused = True
+            # v0.16.21: Ramp scene auto-starts (unpaused) so robot walks toward ramp immediately
+            viewer._paused = (mjviser_scene_type != "ramp")
             mjviser_viewer_running = True
 
             # ── Manual viewer loop (replaces viewer.run()) ──
@@ -2042,12 +2357,20 @@ async def start_viewer() -> JSONResponse:
                         global mjviser_walk_speed
                         mjviser_walk_speed = 0.0
 
-                    # v0.16.17: Speed slider (1-63x simulation speed)
+                    # v0.16.17: Speed slider (1-64x simulation speed)
+                    # v0.16.24: Added marks (1, 8, 32, 64) so the user can see the
+                    #   slider track clearly in the viser panel — otherwise it just
+                    #   looks like the viewer's built-in Slower/1x/Faster buttons.
                     speed_slider = viser_server.gui.add_slider(
-                        "Speed (x)", min=1, max=63, step=1, initial=1
+                        "Speed (x)",
+                        min=1, max=64, step=1, initial_value=1,
+                        marks=(1, 8, 32, 64),
+                        hint="Drag to set simulation speed. 1=realtime, 64=64× faster.",
                     )
                     viser_server.gui.add_markdown(
-                        "Speed multiplier: 1x = real-time, 63x = 63× faster simulation"
+                        "**⏩ Sim Speed:** 1=realtime, 8=8×, 32=32×, **64=64× max**\n\n"
+                        "*(This is OUR slider — the Slower/1x/Faster buttons above are "
+                        "viser viewer's default time controls and are unrelated to this.)*"
                     )
 
                     @speed_slider.on_update
@@ -2233,6 +2556,103 @@ def _launch_arm100_viewer() -> None:
 
         print(f"v0.16.15: SO-ARM100 scene loaded — nq={arm_model.nq}, nu={arm_model.nu}, nsensor={arm_model.nsensor}")
 
+        # ── 2. Initialize CAMKit dual-camera renderer ──
+        # v0.16.19: CAMKit simulation — top_cam (fixed) + wrist_cam (on gripper)
+        # v0.16.25: Robust renderer init with fallback + error logging.
+        #   mj.Renderer needs a GL context; if it fails (headless, no EGL),
+        #   fall back to MjRenderContextOffscreen. If both fail, cameras will
+        #   show a placeholder image with joint info text overlay.
+        CAM_WIDTH = 320
+        CAM_HEIGHT = 240
+        cam_renderer = None
+        cam_render_ctx = None  # Fallback: MjRenderContextOffscreen
+        _cam_init_error: str = ""
+        try:
+            renderer_cls = getattr(mj, 'Renderer', None)
+            if renderer_cls is not None:
+                cam_renderer = renderer_cls(arm_model, CAM_HEIGHT, CAM_WIDTH)
+                # Find camera IDs
+                cam_ids = {mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, name): name
+                           for name in ['top_cam', 'wrist_cam']
+                           if mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, name) >= 0}
+                print(f"v0.16.25: CAMKit Renderer initialized — cameras: {cam_ids}, {CAM_WIDTH}x{CAM_HEIGHT}")
+            else:
+                _cam_init_error = "mj.Renderer class not found"
+                print(f"v0.16.25: mj.Renderer not available: {_cam_init_error}")
+        except Exception as cam_init_err:
+            _cam_init_error = str(cam_init_err)
+            print(f"v0.16.25: CAMKit Renderer init failed: {cam_init_err}")
+            cam_renderer = None
+
+        # v0.16.25: Fallback to MjRenderContextOffscreen
+        if cam_renderer is None:
+            try:
+                cam_render_ctx = mj.MjRenderContextOffscreen(arm_model, CAM_HEIGHT, CAM_WIDTH)
+                print(f"v0.16.25: CAMKit MjRenderContextOffscreen fallback initialized ({CAM_WIDTH}x{CAM_HEIGHT})")
+            except Exception as ctx_err:
+                print(f"v0.16.25: MjRenderContextOffscreen also failed: {ctx_err}")
+                cam_render_ctx = None
+
+        def _render_cam(cam_name: str) -> "np.ndarray":
+            """Render a single camera view. Returns RGB (H, W, 3) or info overlay on failure."""
+            # v0.16.25: Try mj.Renderer first, then MjRenderContextOffscreen, then overlay.
+            if cam_renderer is not None:
+                try:
+                    cam_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, cam_name)
+                    if cam_id < 0:
+                        return _make_cam_placeholder(cam_name, "camera not found in model")
+                    cam_renderer.update_scene(arm_data, camera=cam_id)
+                    pixels = cam_renderer.render()
+                    return pixels.astype(np.uint8)
+                except Exception as rend_err:
+                    print(f"v0.16.25: Renderer.render failed for {cam_name}: {rend_err}")
+                    return _make_cam_placeholder(cam_name, f"render error: {rend_err}")
+            elif cam_render_ctx is not None:
+                try:
+                    cam_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_CAMERA, cam_name)
+                    if cam_id < 0:
+                        return _make_cam_placeholder(cam_name, "camera not found in model")
+                    # MjRenderContextOffscreen: render to buffer
+                    cam_render_ctx.update_scene(arm_data, cam_id)
+                    pixels = cam_render_ctx.read_pixels(cam_id, depth=False)
+                    return pixels.astype(np.uint8)
+                except Exception as ctx_err:
+                    print(f"v0.16.25: MjRenderContextOffscreen failed for {cam_name}: {ctx_err}")
+                    return _make_cam_placeholder(cam_name, f"ctx error: {ctx_err}")
+            else:
+                return _make_cam_placeholder(cam_name, _cam_init_error or "no renderer available")
+
+        def _make_cam_placeholder(cam_name: str, error_msg: str = "") -> "np.ndarray":
+            """v0.16.25: Generate a info-overlay image when renderer is unavailable.
+            Shows camera name, joint positions, and error message on a colored background.
+            """
+            img = np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8)
+            # Dark blue background
+            img[:, :] = [20, 30, 60]
+            # Try to draw simple text using numpy (no PIL/cv2 dependency)
+            try:
+                from PIL import Image, ImageDraw
+                pil_img = Image.fromarray(img)
+                draw = ImageDraw.Draw(pil_img)
+                # Camera name
+                draw.text((10, 10), f"[{cam_name}]", fill=(100, 255, 100))
+                # Error message
+                if error_msg:
+                    draw.text((10, 30), f"Error: {error_msg[:50]}", fill=(255, 100, 100))
+                # Joint info
+                try:
+                    qpos = arm_data.qpos[:7]
+                    for i in range(min(7, len(qpos))):
+                        draw.text((10, 60 + i * 20), f"J{i}: {float(qpos[i]):+.3f}", fill=(200, 200, 200))
+                except Exception:
+                    pass
+                draw.text((10, CAM_HEIGHT - 20), "v0.16.25 CAMKit (no GL)", fill=(120, 120, 120))
+                img = np.array(pil_img)
+            except ImportError:
+                # No PIL — just return the colored background
+                pass
+            return img
+
         # ── 2. Initialize TOMAS wrapper + controller ──
         if not TOMAS_AVAILABLE:
             raise RuntimeError("TOMAS wrapper not available — cannot run SO-ARM100 viewer")
@@ -2258,6 +2678,8 @@ def _launch_arm100_viewer() -> None:
             """SO-ARM100 step with IDO/TOMAS audit — supports auto/manual/VLA modes."""
             global arm100_manual_mode, arm100_manual_target
             global arm100_vla_mode, arm100_vla_adapter, arm100_vla_instruction
+            global arm100_cam_top_rgb, arm100_cam_wrist_rgb
+            global arm100_cam_top_frame, arm100_cam_wrist_frame
 
             if arm100_manual_mode and arm100_manual_target is not None:
                 # v0.16.17: Manual control mode
@@ -2266,9 +2688,23 @@ def _launch_arm100_viewer() -> None:
                 note = f"manual control, joints={action[:5].round(2)}"
             elif arm100_vla_mode and arm100_vla_adapter is not None:
                 # v0.16.17: VLA inference mode
+                # v0.16.26: Decouple camera rendering from VLA prediction.
+                #   Previous code rendered cameras INSIDE the try block — if
+                #   _render_cam() threw, the entire VLA branch failed and fell
+                #   back to default controller. Now cameras are rendered separately
+                #   and VLA predict only needs proprio + language.
+                # v0.16.19: CAMKit — render dual cameras for VLA input (best-effort)
+                try:
+                    top_rgb = _render_cam('top_cam')
+                    wrist_rgb = _render_cam('wrist_cam')
+                    arm100_cam_top_rgb = top_rgb
+                    arm100_cam_wrist_rgb = wrist_rgb
+                except Exception:
+                    pass  # Camera failure should NOT block VLA execution
                 try:
                     obs_dict = {
-                        'rgb': None,  # No camera in simulation yet
+                        'rgb': arm100_cam_top_rgb if arm100_cam_top_rgb is not None else np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8),
+                        'wrist_rgb': arm100_cam_wrist_rgb if arm100_cam_wrist_rgb is not None else np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8),
                         'language': arm100_vla_instruction,
                         'proprio': arm_controller._get_arm_qpos(),
                     }
@@ -2308,6 +2744,36 @@ def _launch_arm100_viewer() -> None:
                 mj.mj_forward(model, data)
 
             _arm_step_count[0] += 1
+
+            # v0.16.19: Periodic CAMKit rendering (every 10 steps ≈ ~10 FPS at 100Hz sim)
+            if _arm_step_count[0] % 10 == 0 and cam_renderer is not None:
+                try:
+                    top_rgb = _render_cam('top_cam')
+                    wrist_rgb = _render_cam('wrist_cam')
+                    arm100_cam_top_rgb = top_rgb
+                    arm100_cam_wrist_rgb = wrist_rgb
+                    # Encode JPEG for API serving
+                    try:
+                        import cv2
+                        _, top_jpg = cv2.imencode('.jpg', top_rgb[:, :, ::-1])  # RGB→BGR
+                        _, wrist_jpg = cv2.imencode('.jpg', wrist_rgb[:, :, ::-1])
+                        arm100_cam_top_frame = top_jpg.tobytes()
+                        arm100_cam_wrist_frame = wrist_jpg.tobytes()
+                    except ImportError:
+                        # No cv2 — use PIL as fallback
+                        try:
+                            from PIL import Image
+                            import io
+                            for arr, attr in [(top_rgb, 'arm100_cam_top_frame'),
+                                              (wrist_rgb, 'arm100_cam_wrist_frame')]:
+                                img = Image.fromarray(arr)
+                                buf = io.BytesIO()
+                                img.save(buf, format='JPEG', quality=85)
+                                globals()[attr] = buf.getvalue()
+                        except ImportError:
+                            pass  # No image encoding available
+                except Exception:
+                    pass
 
             if _arm_step_count[0] % 50 == 0:
                 try:
@@ -2373,29 +2839,34 @@ def _launch_arm100_viewer() -> None:
         mj.mj_forward(arm_model, arm_data)
         viewer._setup_gui()
 
+        # v0.16.23: Reset GUI container to root before adding ARM100 panels.
+        # viewer._setup_gui() leaves the container inside its own tab; without
+        # resetting to root our tab group gets nested and its children don't render.
+        viser_server.gui._set_container_uuid("root")
+
         # v0.16.17: SO-ARM100 Full Control Panel
         try:
             import viser
             arm_ctrl_tabs = viser_server.gui.add_tab_group()
 
-            with arm_ctrl_tabs.add_tab("Manual Control", icon=viser.Icon.ANDROID):
+            with arm_ctrl_tabs.add_tab("Manual Control"):
                 viser_server.gui.add_markdown("**Manual Joint Control**\n\nToggle manual mode to control individual joints.")
 
-                manual_toggle = viser_server.gui.add_checkbox("Manual Mode", initial=False)
+                manual_toggle = viser_server.gui.add_checkbox("Manual Mode", initial_value=False)
 
                 # Joint sliders (7 DOF)
                 joint_names = ["Base", "Shoulder", "Elbow", "Wrist", "Wrist Roll", "Gripper L", "Gripper R"]
                 joint_sliders = []
                 for i, name in enumerate(joint_names):
                     if "Gripper L" in name:
-                        s = viser_server.gui.add_slider(name, min=0.0, max=0.873, step=0.01, initial=0.0)
+                        s = viser_server.gui.add_slider(name, min=0.0, max=0.873, step=0.01, initial_value=0.0)
                     elif "Gripper R" in name:
-                        s = viser_server.gui.add_slider(name, min=-0.873, max=0.0, step=0.01, initial=0.0)
+                        s = viser_server.gui.add_slider(name, min=-0.873, max=0.0, step=0.01, initial_value=0.0)
                     else:
-                        s = viser_server.gui.add_slider(name, min=-3.14, max=3.14, step=0.01, initial=0.0)
+                        s = viser_server.gui.add_slider(name, min=-3.14, max=3.14, step=0.01, initial_value=0.0)
                     joint_sliders.append(s)
 
-                home_btn = viser_server.gui.add_button("🏠 Home", icon=viser.Icon.HOME)
+                home_btn = viser_server.gui.add_button("🏠 Home")
                 gripper_open_btn = viser_server.gui.add_button("🖐 Open Gripper")
                 gripper_close_btn = viser_server.gui.add_button("✊ Close Gripper")
 
@@ -2444,7 +2915,7 @@ def _launch_arm100_viewer() -> None:
                     joint_sliders[5].value = 0.7
                     joint_sliders[6].value = -0.7
 
-            with arm_ctrl_tabs.add_tab("VLA Mode", icon=viser.Icon.BRAIN):
+            with arm_ctrl_tabs.add_tab("VLA Mode"):
                 viser_server.gui.add_markdown(
                     "**Vision-Language-Action Model**\n\n"
                     "Connect to open-source VLA models (OpenVLA, Octo, π₀) for "
@@ -2453,21 +2924,35 @@ def _launch_arm100_viewer() -> None:
                 )
 
                 vla_model_select = viser_server.gui.add_dropdown(
-                    "Model", options=["none", "openvla-7b", "octo-base", "pi0-base"], initial="none"
+                    "Model", options=["none", "demo-vla", "openvla-7b", "octo-base", "pi0-base"], initial_value="none"
                 )
 
                 vla_instruction = viser_server.gui.add_text(
-                    "Instruction", initial="pick up the red cube"
+                    "Instruction", initial_value="pick up the red cube"
                 )
 
-                vla_load_btn = viser_server.gui.add_button("Load Model", icon=viser.Icon.DOWNLOAD)
+                vla_load_btn = viser_server.gui.add_button("Load Model")
+                # v0.16.24: Explicit Submit button (in addition to on_update auto-binding).
+                # Pressing Enter on the text field triggers on_update; clicking Submit
+                # also commits the latest text value.
+                vla_submit_btn = viser_server.gui.add_button("Submit Instruction")
                 vla_status_text = viser_server.gui.add_markdown("Status: No model loaded")
+
+                def _commit_instruction() -> str:
+                    """Read the current text-field value into the global var. Returns the new value."""
+                    global arm100_vla_instruction
+                    try:
+                        arm100_vla_instruction = str(vla_instruction.value)
+                    except Exception:
+                        # Fall back to attribute access if .value is not yet synced
+                        arm100_vla_instruction = "pick up the red cube"
+                    return arm100_vla_instruction
 
                 @vla_load_btn.on_click
                 def _on_vla_load(_):
-                    global arm100_vla_adapter, arm100_vla_mode, arm100_vla_instruction
+                    global arm100_vla_adapter, arm100_vla_mode
+                    _commit_instruction()
                     model_name = vla_model_select.value
-                    arm100_vla_instruction = vla_instruction.value
                     if model_name == "none":
                         arm100_vla_mode = False
                         arm100_vla_adapter = None
@@ -2481,10 +2966,94 @@ def _launch_arm100_viewer() -> None:
                         except Exception as e:
                             vla_status_text.content = f"Status: ❌ Load failed: {e}"
 
+                @vla_submit_btn.on_click
+                def _on_vla_submit(_):
+                    """v0.16.25: Submit instruction — auto-enable VLA mode + demo adapter.
+                    If no real VLA model is loaded, create a DemoVLAAdapter that
+                    interprets the instruction and generates pick-and-place actions.
+                    Also unpause the viewer so the arm starts moving immediately.
+                    """
+                    global arm100_vla_instruction, arm100_vla_mode, arm100_vla_adapter
+                    val = _commit_instruction()
+                    # Auto-enable VLA mode
+                    arm100_vla_mode = True
+                    # If no adapter loaded, or adapter is a stub, create demo adapter
+                    if arm100_vla_adapter is None or not arm100_vla_adapter.is_loaded():
+                        try:
+                            from webviz.tomas_wrapper import create_vla_adapter
+                            arm100_vla_adapter = create_vla_adapter('demo-vla')
+                            vla_status_text.content = (
+                                f"Status: ✅ Demo VLA active\n"
+                                f"Instruction: '{val[:60]}{'...' if len(val) > 60 else ''}'\n"
+                                f"Mode: instruction-driven pick-and-place"
+                            )
+                        except Exception as demo_err:
+                            vla_status_text.content = f"Status: ❌ Demo adapter failed: {demo_err}"
+                    else:
+                        vla_status_text.content = (
+                            f"Status: ✅ Instruction updated\n"
+                            f"Instruction: '{val[:60]}{'...' if len(val) > 60 else ''}'\n"
+                            f"Model: {arm100_vla_adapter.model_name}"
+                        )
+                    # v0.16.26: Unpause viewer so arm starts moving.
+                    # Also reset _last_tick to avoid a huge dt jump that would
+                    # cause the physics to take a massive step.
+                    try:
+                        viewer._paused = False
+                        viewer._last_tick = time.perf_counter()
+                        print(f"v0.16.26: VLA submit — viewer unpaused, mode={arm100_vla_mode}, adapter={arm100_vla_adapter.model_name if arm100_vla_adapter else 'None'}")
+                    except Exception as unpause_err:
+                        print(f"v0.16.26: Failed to unpause viewer: {unpause_err}")
+
                 @vla_instruction.on_update
                 def _on_instruction_update(event):
+                    # v0.16.24: viser's on_update fires on every keystroke (including Enter).
+                    # We commit on every update so pressing Enter is enough.
+                    try:
+                        new_val = event.target.value
+                    except AttributeError:
+                        new_val = getattr(event, "value", None)
                     global arm100_vla_instruction
-                    arm100_vla_instruction = event.target.value
+                    if new_val is not None:
+                        arm100_vla_instruction = str(new_val)
+
+            # ── v0.16.19: CAMKit Dual Camera Tab ──
+            with arm_ctrl_tabs.add_tab("CAMKit"):
+                viser_server.gui.add_markdown(
+                    "**CAMKit Dual Camera System**\n\n"
+                    "Top Camera: fixed bird's-eye view of workspace\n"
+                    "Wrist Camera: mounted on gripper, follows grasp motion\n\n"
+                    "Frames rendered from MuJoCo at 320x240, ~10 FPS"
+                )
+                try:
+                    # v0.16.24: add_image signature is (image: ndarray, *, label: str)
+                    #                  passing a string as image is the bug — needs a real ndarray.
+                    #                  Start with a black 320x240 frame as the initial value.
+                    _cam_placeholder = np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8)
+                    top_img = viser_server.gui.add_image(
+                        _cam_placeholder, label="Top Camera (top_cam)", format="jpeg", jpeg_quality=70
+                    )
+                    wrist_img = viser_server.gui.add_image(
+                        _cam_placeholder, label="Wrist Camera (wrist_cam)", format="jpeg", jpeg_quality=70
+                    )
+                    cam_refresh_btn = viser_server.gui.add_button("Capture Frame")
+                    cam_status = viser_server.gui.add_markdown("Status: Ready")
+
+                    @cam_refresh_btn.on_click
+                    def _on_cam_refresh(_):
+                        global arm100_cam_top_rgb, arm100_cam_wrist_rgb
+                        top_rgb = _render_cam('top_cam')
+                        wrist_rgb = _render_cam('wrist_cam')
+                        arm100_cam_top_rgb = top_rgb
+                        arm100_cam_wrist_rgb = wrist_rgb
+                        try:
+                            top_img.image = top_rgb
+                            wrist_img.image = wrist_rgb
+                            cam_status.content = f"Status: Frame captured at step {_arm_step_count[0]}"
+                        except Exception as img_err:
+                            cam_status.content = f"Status: Display error: {img_err}"
+                except Exception as cam_gui_err:
+                    viser_server.gui.add_markdown(f"CAMKit display error: {cam_gui_err}")
 
         except Exception as gui_err:
             print(f"SO-ARM100 control panel setup warning: {gui_err}")
@@ -2493,18 +3062,64 @@ def _launch_arm100_viewer() -> None:
         viewer._last_tick = now
         viewer._stats_last_time = now
 
+        # v0.16.25: Initial camera render — show scene immediately, not black.
+        # This runs even when viewer is paused so users see the 3D scene.
+        try:
+            _init_top = _render_cam('top_cam')
+            _init_wrist = _render_cam('wrist_cam')
+            arm100_cam_top_rgb = _init_top
+            arm100_cam_wrist_rgb = _init_wrist
+            try:
+                top_img.image = _init_top
+                wrist_img.image = _init_wrist
+            except Exception:
+                pass  # top_img/wrist_img might not be defined if GUI setup failed
+            print(f"v0.16.25: Initial camera render done — top mean={float(np.mean(_init_top)):.1f}, wrist mean={float(np.mean(_init_wrist)):.1f}")
+        except Exception as init_cam_err:
+            print(f"v0.16.25: Initial camera render failed: {init_cam_err}")
+
         arm100_viewer_running = True
         arm100_viewer_error = ""
         print(f"v0.16.15: SO-ARM100 viewer running at {arm100_viewer_url}")
 
+        _cam_loop_counter = [0]
         try:
             while arm100_viewer_running:
                 # v0.16.17: Speed multiplier for ARM100 too
                 for _ in range(max(1, mjviser_sim_speed)):
                     if arm100_viewer_running:
                         viewer._tick()
+                        # v0.16.26: If VLA mode is on but viewer is paused,
+                        # manually step physics so VLA actions still execute.
+                        # This handles the case where the viser Play button
+                        # state is out of sync with viewer._paused.
+                        if viewer._paused and arm100_vla_mode and arm100_vla_adapter is not None:
+                            try:
+                                _arm_step_fn(arm_model, arm_data)
+                                mj.mj_step(arm_model, arm_data)
+                                viewer._dirty = True
+                            except Exception:
+                                pass
                     else:
                         break
+
+                # v0.16.25: Periodic camera rendering (every ~100 loop iterations ≈ 10 FPS).
+                # This ensures cameras update even when the viewer is paused.
+                _cam_loop_counter[0] += 1
+                if _cam_loop_counter[0] % 100 == 0:
+                    try:
+                        _top_rgb = _render_cam('top_cam')
+                        _wrist_rgb = _render_cam('wrist_cam')
+                        arm100_cam_top_rgb = _top_rgb
+                        arm100_cam_wrist_rgb = _wrist_rgb
+                        try:
+                            top_img.image = _top_rgb
+                            wrist_img.image = _wrist_rgb
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
                 _time.sleep(0.001)
         finally:
             # Don't stop the ViserServer — keep it persistent for reuse
@@ -2731,17 +3346,63 @@ async def arm100_vla_status() -> JSONResponse:
     })
 
 
+# ── v0.16.19: CAMKit Camera API ──
+@app.get("/api/arm100/cam/top")
+async def arm100_cam_top() -> Response:
+    """Get latest top camera JPEG frame (CAMKit top_cam)."""
+    if arm100_cam_top_frame is not None:
+        return Response(content=arm100_cam_top_frame, media_type="image/jpeg")
+    # Return a black frame if no data yet
+    try:
+        import io as _io
+        from PIL import Image as _PIL
+        img = _PIL.new('RGB', (320, 240), color=(10, 10, 10))
+        buf = _io.BytesIO()
+        img.save(buf, format='JPEG')
+        return Response(content=buf.getvalue(), media_type="image/jpeg")
+    except Exception:
+        return Response(content=b'', media_type="image/jpeg", status_code=503)
+
+
+@app.get("/api/arm100/cam/wrist")
+async def arm100_cam_wrist() -> Response:
+    """Get latest wrist camera JPEG frame (CAMKit wrist_cam)."""
+    if arm100_cam_wrist_frame is not None:
+        return Response(content=arm100_cam_wrist_frame, media_type="image/jpeg")
+    try:
+        import io as _io
+        from PIL import Image as _PIL
+        img = _PIL.new('RGB', (320, 240), color=(10, 10, 10))
+        buf = _io.BytesIO()
+        img.save(buf, format='JPEG')
+        return Response(content=buf.getvalue(), media_type="image/jpeg")
+    except Exception:
+        return Response(content=b'', media_type="image/jpeg", status_code=503)
+
+
+@app.get("/api/arm100/cam/status")
+async def arm100_cam_status() -> JSONResponse:
+    """Get CAMKit camera system status."""
+    return JSONResponse(content={
+        "available": arm100_viewer_running,
+        "top_cam_active": arm100_cam_top_frame is not None,
+        "wrist_cam_active": arm100_cam_wrist_frame is not None,
+        "resolution": "320x240",
+        "fps_target": 10,
+    })
+
+
 # v0.16.17: Simulation speed control API
 @app.post("/api/viewer_speed")
 async def viewer_speed(request: Request) -> JSONResponse:
-    """Set simulation speed multiplier (1-63x).
+    """Set simulation speed multiplier (1-64x).
 
     Body: {"speed": int}
     """
     global mjviser_sim_speed
     body = await request.json()
     speed = int(body.get("speed", 1))
-    mjviser_sim_speed = max(1, min(63, speed))
+    mjviser_sim_speed = max(1, min(64, speed))
     return JSONResponse(content={"status": "ok", "speed": mjviser_sim_speed})
 
 
@@ -2778,6 +3439,50 @@ async def tomas_summary() -> JSONResponse:
     summary = arm100_tomas_wrapper.get_summary()
     summary["available"] = True
     return JSONResponse(content=summary)
+
+
+# v0.16.26: Nine-Layer cognitive architecture API
+@app.get("/api/architecture")
+async def get_architecture() -> JSONResponse:
+    """Get the nine-layer cognitive architecture (L0-L8) mapping.
+
+    Returns the biological analogue, modules, and active status for each layer.
+    """
+    try:
+        from core.nine_layer import NineLayerRegistry
+        registry = NineLayerRegistry()
+        return JSONResponse(content={
+            "available": True,
+            "version": WEBVIZ_VERSION,
+            "layers": registry.get_architecture_summary(),
+        })
+    except Exception as e:
+        return JSONResponse(content={
+            "available": False,
+            "error": str(e),
+            "version": WEBVIZ_VERSION,
+        })
+
+
+# v0.16.26: T-Processor status API
+@app.get("/api/t_processor")
+async def get_t_processor_status() -> JSONResponse:
+    """Get T-Processor hardware simulation status (η-ALU, ψ-Checker, κ-Snap FIFO)."""
+    try:
+        from core.t_processor import TProcessor
+        tp = TProcessor()
+        return JSONResponse(content={
+            "available": True,
+            "spec": {
+                "gate_count": tp.gate_count,
+                "power_mw": tp.power_mw,
+                "clock_hz": tp.clock_hz,
+                "fifo_depth": tp.kappa_fifo.depth,
+                "sram_bytes": tp.kappa_fifo.sram_bytes,
+            },
+        })
+    except Exception as e:
+        return JSONResponse(content={"available": False, "error": str(e)})
 
 
 # v0.16.7: Direction control API — steer the robot in 3D viewer

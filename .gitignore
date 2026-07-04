@@ -46,3 +46,4 @@ third_party/r2dreamer/.pytest_cache/
 
 # r2dreamer zip download artifact
 third_party/r2dreamer.zip
+.venvs/

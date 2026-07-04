@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuJoCo-Bench-IDO Dashboard v0.16.17</title>
+  <title>MuJoCo-Bench-IDO Dashboard v0.16.26</title>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -514,30 +514,9 @@
           </button>
         </div>
         <span id="arm100Status" class="label-sm mt-1 block"></span>
-
-        <!-- v0.16.17: ARM100 Joint Control Panel (shown after viewer starts) -->
-        <div id="arm100ControlPanel" style="display: none; margin-top: 8px; padding: 6px; border: 1px solid #334155; border-radius: 4px;">
-          <label class="label-sm mb-1 block" style="color: #38bdf8;" data-i18n="label_arm_control">关节控制</label>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 4px;">
-            <button class="btn-sm" onclick="arm100Home()" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">🏠 Home</button>
-            <button class="btn-sm" onclick="arm100Gripper('open')" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">🖐 Open</button>
-            <button class="btn-sm" onclick="arm100Gripper('close')" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">✊ Close</button>
-            <button class="btn-sm" onclick="arm100Auto()" style="font-size:0.75rem; padding: 4px 8px; border-radius: 4px; background: #1e3a5f; color: #e2e8f0; border: none; cursor: pointer;">🔄 Auto</button>
-          </div>
-          <!-- VLA -->
-          <div style="margin-top: 6px;">
-            <label class="label-sm" style="color: #a78bfa;" data-i18n="label_vla_model">VLA 模型</label>
-            <select id="vlaModelSelect" style="width:100%; font-size:0.75rem; margin-top:2px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 2px;" onchange="arm100VlaLoad()">
-              <option value="none">None (Auto mode)</option>
-              <option value="openvla-7b">OpenVLA-7B</option>
-              <option value="octo-base">Octo</option>
-              <option value="pi0-base">π₀ (Pi-Zero)</option>
-            </select>
-            <input type="text" id="vlaInstruction" placeholder="pick up the red cube"
-                   style="width:100%; font-size:0.75rem; margin-top:2px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 2px;"
-                   onchange="arm100VlaLoad()">
-          </div>
-        </div>
+        <p class="hint-text" style="margin-top: 4px; font-size: 0.7rem;">
+          👉 关节控制 / VLA 模型 / CAMKit 双摄均在 3D 场景内的 Tab 面板中
+        </p>
       </div>
 
       <!-- Divider -->
@@ -547,7 +526,7 @@
       <div class="control-panel" style="margin-bottom: 10px;">
         <label class="label-sm mb-1 block" style="color: #fbbf24; font-weight: 600;" data-i18n="label_sim_speed">仿真速度</label>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-          <input type="range" id="speedSlider" min="1" max="63" step="1" value="1"
+          <input type="range" id="speedSlider" min="1" max="64" step="1" value="1"
                  style="flex: 1; accent-color: #fbbf24;"
                  oninput="updateSpeed(this.value)">
           <span id="speedDisplay" class="value-sm font-mono text-amber-400" style="min-width: 40px; text-align: right;">1x</span>
@@ -599,9 +578,9 @@
           <div id="metricReturn" class="value-lg font-mono text-emerald-400">0.00</div>
           <div class="hint-text" data-i18n="hint_metric_return">Cumulative reward per episode</div>
           <div id="baselineReturn" class="metric-baseline">
-            <span class="baseline-text"><span class="ref-line">参考：PPO ~200 / SAC ~200</span><span class="ido-target">IDO 目标：&gt;300</span></span>
+            <span class="baseline-text"><span class="ref-line">参考：加载中...</span><span class="ido-target">IDO η-mode 尺度说明</span></span>
             <span class="hint-icon">ⓘ</span>
-            <div class="baseline-tooltip">PPO/SAC 100k 后 ~200，IDO 目标 &gt;300</div>
+            <div class="baseline-tooltip">point η-mode: ~4-14（距离奖励）；locomotion η-mode: ~200（dm_control 标准）</div>
           </div>
         </div>
         <!-- Metric 2: Success Rate -->
@@ -816,6 +795,28 @@
         </div>
       </div>
 
+      <!-- ═══ v0.16.26: Nine-Layer Cognitive Architecture ═══ -->
+      <div class="card col-span-2" id="architecturePanel">
+        <div class="card-header flex items-center justify-between">
+          <span>Nine-Layer Cognitive Architecture (L0-L8)</span>
+          <span id="archVersionBadge" class="text-xs px-2 py-0.5 rounded-full"
+                style="background: #1e293b; color: #818cf8;">v0.16.26</span>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-2" id="archLayers">
+          <!-- Layers will be populated from /api/architecture -->
+          <div class="text-sm text-slate-400 col-span-3">Loading architecture...</div>
+        </div>
+        <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
+          <span>T-Processor:</span>
+          <span id="tpGateCount" class="font-mono text-cyan-400">—</span>
+          <span>gates</span>
+          <span id="tpPower" class="font-mono text-cyan-400">—</span>
+          <span>mW</span>
+          <span class="ml-4">κ-Snap Tokens:</span>
+          <span id="kappaTokenDisplay" class="font-mono text-emerald-400">—</span>
+        </div>
+      </div>
+
       <!-- ═══ SIP-Bench Results Panel ═══ -->
       <div class="card col-span-2" id="sipPanel" style="display: none;">
         <div class="card-header flex items-center justify-between">
@@ -923,6 +924,7 @@
         scene_stairs: "阶梯地形 (Stairs Arena)",
         scene_floating: "浮台地形 (Floating Platforms)",
         scene_maze: "迷宫场景 (Maze Arena)",
+        scene_arm100: "SO-ARM100 机械臂 (Pick & Place)",
         label_current_scene: "当前场景",
         label_3d_vis: "3D 可视化",
         btn_open_viewer: "🎮 打开 mjviser (8081)",
@@ -1001,6 +1003,7 @@
         badge_current_scene_stairs: "当前场景：阶梯地形",
         badge_current_scene_floating: "当前场景：浮台地形",
         badge_current_scene_maze: "当前场景：迷宫场景",
+        badge_current_scene_arm100: "当前场景：SO-ARM100 机械臂",
         // ── v0.5.3 5 Core Metrics ──
         metric_episode_return: "累计回报",
         hint_metric_return: "每回合累积奖励值",
@@ -1028,6 +1031,7 @@
         label_sim_speed: "仿真速度",
         label_arm_control: "关节控制",
         label_vla_model: "VLA 模型",
+        label_camkit: "CAMKit 双摄系统",
       },
       en: {
         dashboard_title: "MuJoCo-Bench-IDO",
@@ -1053,6 +1057,7 @@
         scene_stairs: "Stairs Arena",
         scene_floating: "Floating Platforms",
         scene_maze: "Maze Arena",
+        scene_arm100: "SO-ARM100 Pick & Place",
         label_current_scene: "Current Scene",
         label_3d_vis: "3D Visualization",
         btn_open_viewer: "🎮 Open mjviser (8081)",
@@ -1131,6 +1136,7 @@
         badge_current_scene_stairs: "Current Scene: Stairs Arena",
         badge_current_scene_floating: "Current Scene: Floating Platforms",
         badge_current_scene_maze: "Current Scene: Maze Arena",
+        badge_current_scene_arm100: "Current Scene: SO-ARM100 Pick & Place",
         // ── v0.5.3 5 Core Metrics ──
         metric_episode_return: "Episode Return",
         hint_metric_return: "Cumulative reward per episode",
@@ -1159,6 +1165,7 @@
         label_sim_speed: "Simulation Speed",
         label_arm_control: "Joint Control",
         label_vla_model: "VLA Model",
+        label_camkit: "CAMKit Dual Camera",
       }
     };
 
@@ -1246,6 +1253,7 @@
       'stairs': 'badge_current_scene_stairs',
       'floating': 'badge_current_scene_floating',
       'maze': 'badge_current_scene_maze',
+      'so_arm100': 'badge_current_scene_arm100',
     };
 
     // ── Chart Data ──
@@ -1657,6 +1665,12 @@
       if (data.merkle_entry) {
         addMerkleEntry(data.merkle_entry);
       }
+
+      // ── v0.16.26: Update κ-Snap token display ──
+      if (data.kappa_tokens) {
+        const el = document.getElementById('kappaTokenDisplay');
+        if (el) el.textContent = data.kappa_tokens.substring(0, 60);
+      }
     }
 
     // ── v0.6.0: Merkle Chain Entry Renderer ──
@@ -1720,6 +1734,39 @@
           badge.style.color = '#f87171';
         }
         document.getElementById('merkleChainLength').textContent = data.chain_length || 0;
+      }).catch(() => {});
+
+      // v0.16.26: Fetch architecture and T-Processor status
+      fetch('/api/architecture').then(r => r.json()).then(data => {
+        const container = document.getElementById('archLayers');
+        if (!data.available) {
+          container.innerHTML = '<div class="text-sm text-slate-400 col-span-3">Architecture modules not available</div>';
+          return;
+        }
+        container.innerHTML = '';
+        (data.layers || []).forEach(layer => {
+          const div = document.createElement('div');
+          div.className = 'p-2 rounded';
+          div.style.background = '#0f172a';
+          div.style.border = '1px solid #334155';
+          const activeColor = layer.active ? '#34d399' : '#64748b';
+          div.innerHTML = `
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-xs" style="color: ${activeColor};">${layer.id}</span>
+              <span class="text-sm font-medium">${layer.name_en}</span>
+            </div>
+            <div class="text-xs text-slate-400 mt-1">${layer.name_cn} (${layer.biological_analogue})</div>
+            <div class="text-xs text-slate-500 mt-1">${(layer.modules || []).join(', ')}</div>
+          `;
+          container.appendChild(div);
+        });
+      }).catch(() => {});
+
+      fetch('/api/t_processor').then(r => r.json()).then(data => {
+        if (data.available) {
+          document.getElementById('tpGateCount').textContent = (data.spec.gate_count / 1000).toFixed(0) + 'k';
+          document.getElementById('tpPower').textContent = data.spec.power_mw.toFixed(1);
+        }
       }).catch(() => {});
     }
 
@@ -1919,8 +1966,38 @@
       const dict = i18nDict[currentLang];
       const btn = document.getElementById('viewerBtn');
       const oldText = btn.innerHTML;
+      const sceneType = document.getElementById('sceneSelect').value;
       btn.disabled = true;
       btn.innerHTML = '⏳ ' + (currentLang === 'zh' ? '启动中...' : 'Starting...');
+
+      // v0.16.19: SO-ARM100 scene → launch ARM100 viewer instead of humanoid viewer
+      if (sceneType === 'so_arm100') {
+        fetch('/api/arm100/start', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+          btn.disabled = false;
+          btn.innerHTML = oldText;
+          if (data.status === 'error' || data.status === 'timeout') {
+            const errMsg = data.error || 'Unknown error';
+            addLog(`❌ SO-ARM100: ${errMsg}`);
+            document.getElementById('viewerStatus').textContent = '❌ ' + errMsg;
+          } else if (data.status === 'already_running') {
+            addLog(`SO-ARM100 already running at ${data.url}`);
+            document.getElementById('viewerStatus').textContent = `✅ ${data.url}`;
+            window.open(data.url, '_blank');
+          } else {
+            addLog(`✅ SO-ARM100 running at ${data.url}`);
+            document.getElementById('viewerStatus').textContent = `✅ ${data.url}`;
+            window.open(data.url, '_blank');
+          }
+        })
+        .catch(err => {
+          btn.disabled = false;
+          btn.innerHTML = oldText;
+          addLog(`SO-ARM100 viewer error: ${err.message}`);
+        });
+        return;
+      }
 
       fetch('/api/start_viewer', { method: 'POST' })
       .then(res => res.json())
@@ -1951,7 +2028,23 @@
     }
 
     // v0.16.14: Close mjviser — fully stops the ViserServer (frees port for next open)
+    // v0.16.19: Also closes SO-ARM100 viewer if active
     function closeViewer() {
+      const sceneType = document.getElementById('sceneSelect').value;
+      // v0.16.19: If ARM100 scene is selected, close ARM100 viewer
+      if (sceneType === 'so_arm100') {
+        fetch('/api/arm100/stop', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+          addLog('🔌 SO-ARM100 viewer closed');
+          document.getElementById('viewerStatus').textContent =
+            currentLang === 'zh' ? '已关闭' : 'Closed';
+        })
+        .catch(err => {
+          addLog(`Close ARM100 error: ${err.message}`);
+        });
+        return;
+      }
       fetch('/api/stop_viewer', { method: 'POST' })
       .then(res => res.json())
       .then(data => {
@@ -1985,12 +2078,10 @@
           addLog(`SO-ARM100 already running at ${data.url}`);
           document.getElementById('arm100Status').textContent = `✅ ${data.url}`;
           window.open(data.url, '_blank');
-          document.getElementById('arm100ControlPanel').style.display = 'block';
         } else {
           addLog(`✅ SO-ARM100 viewer running at ${data.url}`);
           document.getElementById('arm100Status').textContent = `✅ ${data.url}`;
           window.open(data.url, '_blank');
-          document.getElementById('arm100ControlPanel').style.display = 'block';
         }
       })
       .catch(err => {
@@ -2007,7 +2098,6 @@
         addLog('🔌 SO-ARM100 viewer closed');
         document.getElementById('arm100Status').textContent =
           currentLang === 'zh' ? '已关闭' : 'Closed';
-        document.getElementById('arm100ControlPanel').style.display = 'none';
       })
       .catch(err => {
         addLog(`Close SO-ARM100 error: ${err.message}`);
@@ -2024,58 +2114,9 @@
       });
     }
 
-    // ═══ v0.16.17: ARM100 Joint Control ═══
-    function arm100Home() {
-      fetch('/api/arm100/home', {method: 'POST'})
-        .then(r => r.json())
-        .then(d => addLog(`🏠 ARM100 home: ${d.pose ? d.pose.slice(0,5).map(v=>v.toFixed(2)) : 'N/A'}`))
-        .catch(e => addLog(`ARM100 home error: ${e.message}`));
-    }
-
-    function arm100Gripper(action) {
-      fetch('/api/arm100/gripper', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({action: action})
-      })
-        .then(r => r.json())
-        .then(d => addLog(`${action === 'open' ? '🖐' : '✊'} ARM100 gripper: ${action}`))
-        .catch(e => addLog(`ARM100 gripper error: ${e.message}`));
-    }
-
-    function arm100Auto() {
-      fetch('/api/arm100/control', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: 'auto'})
-      })
-        .then(r => r.json())
-        .then(d => addLog(`🔄 ARM100 auto mode`))
-        .catch(e => addLog(`ARM100 auto error: ${e.message}`));
-    }
-
-    function arm100VlaLoad() {
-      const model = document.getElementById('vlaModelSelect').value;
-      const instruction = document.getElementById('vlaInstruction').value || 'pick up the red cube';
-      if (model === 'none') {
-        fetch('/api/arm100/vla/unload', {method: 'POST'})
-          .then(r => r.json())
-          .then(d => addLog(`🔄 VLA unloaded, auto mode`))
-          .catch(e => addLog(`VLA unload error: ${e.message}`));
-      } else {
-        fetch('/api/arm100/vla/load', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({model: model, instruction: instruction})
-        })
-          .then(r => r.json())
-          .then(d => {
-            if (d.loaded) addLog(`🧠 VLA loaded: ${model}, instruction: "${instruction}"`);
-            else addLog(`❌ VLA load failed: ${d.error}`);
-          })
-          .catch(e => addLog(`VLA load error: ${e.message}`));
-      }
-    }
+    // v0.16.22: ARM100 joint control / VLA / CAMKit moved to 8091 3D viewer —
+    // use Manual Control tab (joint sliders) and VLA Mode tab inside the viewer.
+    // v0.16.21: CAMKit polling also removed (was in dashboard, now in 8091 viewer)
 
     // v0.16.10: Send direction control command to robot in 3D viewer
     function sendViewerCommand(action) {
@@ -2106,6 +2147,14 @@
       const badgeKey = sceneBadgeKeys[sceneType] || 'badge_current_scene_plain';
       const dict = i18nDict[currentLang];
       document.getElementById('currentSceneBadge').textContent = dict[badgeKey] || sceneType;
+
+      // v0.16.19: SO-ARM100 scene doesn't need humanoid scene API
+      if (sceneType === 'so_arm100') {
+        addLog('SO-ARM100 场景已选择 — 点击 Open mjviser 启动机械臂查看器');
+        document.getElementById('viewerStatus').textContent =
+          currentLang === 'zh' ? 'SO-ARM100 场景 — 点击打开启动' : 'SO-ARM100 scene — click Open to start';
+        return;
+      }
 
       fetch('/api/mjviser/scene', {
         method: 'POST',
@@ -2171,6 +2220,9 @@
         descEl.style.color = '#94a3b8';
         locParams.style.display = 'none';
       }
+      // v0.16.19: Reload baseline reference when eta_mode changes
+      // (episode_return display depends on eta_mode)
+      loadBaselineReference();
     }
 
     // ── Episodes Slider Update ──
@@ -2309,13 +2361,20 @@
             const ido = m.IDO_target !== undefined ? m.IDO_target : '—';
             // v0.16.10: IDO target on its own highlighted line, PPO/SAC as secondary ref
             // v0.16.16: Handle N/A values (e.g. epiplexity has no PPO/SAC baseline)
+            // v0.16.19: eta_mode-aware episode_return display — point η-mode uses
+            //   distance-based reward (~4-14), NOT dm_control scale (~200)
             let refText;
-            if (ppo === 'N/A' && sac === 'N/A') {
+            let idoText;
+            if (metricKey === 'episode_return' && currentEtaMode === 'point') {
+              refText = isZh ? 'IDO point η-mode: ~4-14 正常' : 'IDO point η-mode: ~4-14 normal';
+              idoText = isZh ? 'dm_control 参考: ~200（不同尺度，不直接可比）' : 'dm_control ref: ~200 (different scale, not comparable)';
+            } else if (ppo === 'N/A' && sac === 'N/A') {
               refText = isZh ? '参考：PPO/SAC N/A' : 'Ref: PPO/SAC N/A';
+              idoText = isZh ? `IDO 目标：${ido}` : `IDO Target: ${ido}`;
             } else {
               refText = isZh ? `参考：PPO ~${ppo} / SAC ~${sac}` : `Ref: PPO ~${ppo} / SAC ~${sac}`;
+              idoText = isZh ? `IDO 目标：${ido}` : `IDO Target: ${ido}`;
             }
-            const idoText = isZh ? `IDO 目标：${ido}` : `IDO Target: ${ido}`;
             return { text: refText, idoText: idoText, tooltip: m.interpretation || '' };
           }
 

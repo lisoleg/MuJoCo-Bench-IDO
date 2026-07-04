@@ -28,3 +28,5 @@ from core.duodecimal_base import DuodecimalBase, DuodecimalConfig
 from core.pre_affect import PreAffect
 from core.kappa_snap_jsonl import KappaSnapJSONLWriter, HermesTranslator
 from core.eml_semzip_ic import EMLSemZipIC
+# ── v0.16.19: GEL (Goal-EML Injection Loss) from VG-Pair theory ──
+from core.gel_loss import GELLoss, GELConfig, compute_gel_from_step

@@ -1035,3 +1035,134 @@ making unsafe decisions during transient perturbations.
    Offline Reinforcement Learning."
 
 10. NM512 (2026). "r2dreamer: PyTorch DreamerV3 reproduction." GitHub: https://github.com/NM512/r2dreamer
+
+11. 章锋 (2026). "从拟人化隐喻到具身工程范式：基于 IDO/TOMAS 九层认知架构的
+    智能体系统设计、LLM 融合与 T‑Processor 硬件实现." 微信公众号「复合体理学」.
+
+---
+
+## C.22  Nine-Layer Cognitive Architecture (v0.16.26)
+
+### C.22.1  Architecture Overview
+
+Based on Zhang (2026) [Ref 11], the nine-layer cognitive architecture maps
+biological body systems to computational modules:
+
+| Layer | Bio Analogue | Module | Status |
+|-------|-------------|--------|--------|
+| L0 | 心脏 (Heart) | T-Processor (η-ALU + ψ-Checker + κ-Snap FIFO) | ✅ Implemented |
+| L1 | 大脑 (Brain) | VLA (OpenVLA/Octo/π₀) + LLM Attribution | ✅ Adapter framework |
+| L2 | 骨架 (Skeleton) | Agent (IDOMuJoCoAgent + MotorPrimitives) | ✅ Core |
+| L3 | 性格 (Personality) | PreAffect + SafeFuse | ✅ v0.8.0 |
+| L4 | 感知 (Perception) | CAMKit (dual camera) + KappaSnapTokenizer | ✅ v0.16.26 |
+| L5 | 学识 (Knowledge) | SkillBank + EML-SemZip | ✅ v0.16.18 |
+| L6 | 手脚 (Hands/Feet) | PsiAnchorGate (ZMP+Energy) + PG-Gate | ✅ v0.16.26 |
+| L7 | 嘴 (Mouth) | S-Bridge (MetaQuery + LLM Attribution) | ✅ v0.16.26 |
+| L8 | 复盘 (Review) | DPO + Evolution (ψ-LoRA) | ✅ v0.16.26 |
+
+### C.22.2  T-Processor Hardware Specification
+
+The T-Processor is a hardware coprocessor simulation with three functional units:
+
+1. **η-ALU**: Q16.16 fixed-point GaussEx residual computation
+   - Input: observation vector + goal vector
+   - Output: η value (32-bit fixed-point)
+   - Latency: 1 cycle @ 100Hz
+
+2. **ψ-Checker**: Parallel physical constraint verification
+   - Constraints: MAX_TORQUE, MAX_VELOCITY, MAX_GRIP_FORCE, ENERGY_DRIFT
+   - Parallel check: 5 cycles
+   - Output: violation list + veto flag
+
+3. **κ-Snap FIFO**: 256-entry audit chain
+   - Each entry: subject, meta{cited_ref, prev_snap_id, trigger_obs_id}
+   - SRAM: 4KB
+   - Merkle chain hash for tamper detection
+
+**Implementation**: `core/t_processor.py`
+- Gate count: 65,000 @ 28nm
+- Power: 3.3mW
+- Clock: 100Hz tick rate
+
+### C.22.3  KappaSnapTokenizer
+
+κ-Snap audit events are encoded as special tokens for VLA/LLM context:
+
+```
+[KSNAP:<level>:<event_short>:<eta_bucket>:<decision_short>]
+```
+
+- **level**: L0-L8 cognitive layer
+- **event_short**: 6-char code (SAFE_ST, NVT_VIO, KAP_SNAP, etc.)
+- **eta_bucket**: vlo/lo/mid/hi/vhi (5-level quantization)
+- **decision_short**: EXP (exploit), EXR (explore), SAFE, etc.
+
+Sliding window of 16 events → 32-dimensional summary vector for VLA observation.
+
+**Implementation**: `core/kappa_snap_tokenizer.py`
+
+### C.22.4  Three-Body Architecture
+
+Sim-to-real gap measurement through three execution layers:
+
+1. **VirtualBody** (行为打印): Executes action in simulation, records BehaviorPrint
+2. **SoftwareBody** (操作打印): Translates behavior to motor commands, checks action isomorphism (joint limits)
+3. **PhysicalBody** (行动打印): Executes on hardware (sim mode: adds noise + latency), records ActionPrint
+
+Cross-body gap = ||BehaviorPrint - ActionPrint||₂
+
+**Implementation**: `core/three_body.py`
+
+### C.22.5  HG-PINN (Hamiltonian-Guided PINN)
+
+Action head with built-in energy conservation:
+
+H(q, p) = T(p) + V(q) = ||p||²/(2m) + V(q)
+
+Action = -∂V/∂q · α + λ · policy_residual + β · goal_diff
+
+where α=0.1 (gradient step), λ=0.3 (residual weight), β=0.6 (goal weight).
+
+By construction, the Hamiltonian H is conserved (dH/dt = 0), preventing
+energy injection artifacts.
+
+**Implementation**: `core/hg_pinn.py`
+
+### C.22.6  ψ-Anchor LoRA DPO
+
+Preference-based fine-tuning of the ψ-Anchor gate using LoRA:
+
+- **LoRA decomposition**: ΔW = A · B (rank-4, A∈ℝ^{d×4}, B∈ℝ^{4×d})
+- **DPO loss**: L = -log σ(β · (s_compliant - s_violating))
+- **Preference pairs**: Collected from κ-Snap audit trail
+  - Compliant: actions that passed ψ-Anchor without violation
+  - Violating: actions that were vetoed by ψ-Anchor
+- **Score function**: s(a) = w_ref · a + ΔW · a + b_ref
+
+**Implementation**: `core/psi_lora.py`
+
+### C.22.7  S-Bridge LLM Attribution
+
+The S-Bridge provides causal attribution for κ-Snap events:
+
+1. **Context gathering**: Extract recent steps, η trend, violation count, mode distribution
+2. **LLM attribution** (if LLM available): Few-shot prompt → `llm.complete()` → natural language explanation
+3. **Template fallback**: Rule-based causal chain (η trend → mode analysis → violation analysis → κ-Snap token reference)
+
+**Implementation**: `agent/s_bridge.py`, method `ask_why_llm()`
+
+### C.22.8  Benchmark Integration
+
+All six new modules are integrated into the `run_episode_with_streaming()` loop:
+
+| Module | Integration Point | Per-step Output |
+|--------|------------------|-----------------|
+| KappaSnapTokenizer | After η computation | token string + 32-dim summary |
+| T-Processor | After action execution | η-ALU value + ψ violations |
+| Three-Body | Wraps action execution | sim-to-real gap |
+| HG-PINN | Energy stats | Hamiltonian energy |
+| Nine-Layer | API reporting | L0-L8 layer status |
+| ψ-LoRA | Offline (preference collection) | DPO training pairs |
+
+WebSocket broadcast includes: `kappa_tokens`, `kappa_summary`, `t_processor_eta`,
+`t_processor_violation`, `three_body_gap`, `hg_pinn_energy`.

@@ -57,6 +57,17 @@
     <light directional="true" diffuse="0.8 0.8 0.8" pos="0 0 3" dir="0 0 -1"/>
     <light pos="1.5 -1.5 2" diffuse="0.4 0.4 0.4" dir="-0.5 0.5 -1"/>
 
+    <!-- ═══ CAMKit: Dual Camera System ═══ -->
+    <!-- Top Camera: fixed bird's-eye view of workspace -->
+    <!-- Positioned above table center (0.4, 0, 0.8), looking down -->
+    <!-- fovy ≈ 50° to cover ~0.5m × 0.5m workspace at 0.4m distance -->
+    <camera name="top_cam" pos="0.4 -0.35 0.85" euler="55 0 0" fovy="0.87"/>
+    <!-- Top cam resolution: 640×480 (set in renderer, not XML) -->
+
+    <!-- Wrist Camera: attached to gripper, looking forward -->
+    <!-- Offset: 0.02m above gripper base, tilted 90° to look along gripper axis -->
+    <!-- This camera moves with the gripper — provides close-up view for grasping -->
+
     <!-- Table -->
     <body name="table" pos="0.4 0 0.0">
       <geom name="table_top" type="box" size="0.25 0.35 0.01" pos="0 0 0.40" material="mat_table" condim="3"/>
@@ -122,6 +133,10 @@
 
                 <body name="gripper_base" pos="0 0 0.025">
                   <geom name="gripper_base_geom" type="box" size="0.012 0.02 0.01" material="mat_gripper"/>
+
+                  <!-- CAMKit wrist_cam: mounted on gripper, looks forward along -Z (toward objects) -->
+                  <!-- Small offset above fingers, 90° tilt to look down at grasp point -->
+                  <camera name="wrist_cam" pos="0 0 0.015" euler="-1.5708 0 0" fovy="1.0"/>
 
                   <!-- Left finger -->
                   <body name="left_finger" pos="0 0.012 0.012">

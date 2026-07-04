@@ -62,6 +62,8 @@ class PsiAnchorGate:
     - MAX_VELOCITY: Joint velocity safety limit
     - NO_SPILL: Object tilt must not exceed threshold (30° default)
     - MAX_GRIP_FORCE: Gripper force must not crush objects
+    - ZMP: Zero Moment Point must stay within support polygon (v0.16.25)
+    - ENERGY_DRIFT: Cumulative energy drift must not exceed budget (v0.16.25)
 
     When a violation is detected, the action is scaled down to comply.
     """
@@ -72,12 +74,22 @@ class PsiAnchorGate:
         max_velocity: float = 3.0,       # rad/s
         max_grip_force: float = 2.0,     # N·m at gripper joint
         no_spill_angle: float = 0.524,   # radians (30°)
+        # v0.16.25 P1: ZMP + ENERGY_DRIFT constraints
+        zmp_margin: float = 0.05,        # meters — ZMP must be within support polygon ± margin
+        max_energy_drift: float = 10.0,  # Joules — cumulative energy drift budget per episode
     ):
         self.max_torque = max_torque
         self.max_velocity = max_velocity
         self.max_grip_force = max_grip_force
         self.no_spill_angle = no_spill_angle
         self.violation_log: List[str] = []
+
+        # v0.16.25 P1: ZMP + Energy drift state
+        self.zmp_margin = zmp_margin
+        self.max_energy_drift = max_energy_drift
+        self._cumulative_energy_drift: float = 0.0
+        self._last_kinetic_energy: Optional[float] = None
+        self._last_potential_energy: Optional[float] = None
 
     def check_action(
         self,
@@ -151,8 +163,116 @@ class PsiAnchorGate:
             return reason
         return None
 
+    # ── v0.16.25 P1: ZMP (Zero Moment Point) Check ──
 
-# ──────────────────────────────────────────────────────────────────────
+    def check_zmp(
+        self,
+        com_pos: np.ndarray,
+        com_vel: np.ndarray,
+        com_accel: np.ndarray,
+        foot_positions: List[np.ndarray],
+        gravity: float = 9.81,
+    ) -> Optional[str]:
+        """v0.16.25 P1: Check Zero Moment Point stability.
+
+        Computes the ZMP from the Center of Mass (COM) dynamics and checks
+        whether it falls within the support polygon formed by the foot
+        positions. If the ZMP is outside the support polygon (plus margin),
+        the robot is dynamically unstable and at risk of falling.
+
+        ZMP Formula (simplified 2D projection):
+            zmp_x = com_x - (com_accel_x * com_z) / gravity
+            zmp_y = com_y - (com_accel_y * com_z) / gravity
+
+        Support polygon: convex hull of foot positions projected onto ground.
+
+        Args:
+            com_pos: Center of mass position [x, y, z] in world frame.
+            com_vel: COM velocity [vx, vy, vz] (unused in basic ZMP, kept for extensions).
+            com_accel: COM acceleration [ax, ay, az].
+            foot_positions: List of foot position arrays [[x,y,z], ...].
+            gravity: Gravitational acceleration (default 9.81 m/s²).
+
+        Returns:
+            Violation name string if ZMP outside support polygon, None if stable.
+        """
+        if len(foot_positions) < 1:
+            return None  # Can't check without foot positions
+
+        com_z = max(float(com_pos[2]), 0.01)  # Avoid division by zero
+        ax = float(com_accel[0])
+        ay = float(com_accel[1])
+
+        # ZMP projection onto ground plane
+        zmp_x = float(com_pos[0]) - (ax * com_z) / gravity
+        zmp_y = float(com_pos[1]) - (ay * com_z) / gravity
+
+        # Support polygon: find min/max of foot positions (simplified bounding box)
+        foot_xs = [float(f[0]) for f in foot_positions]
+        foot_ys = [float(f[1]) for f in foot_positions]
+
+        min_x = min(foot_xs) - self.zmp_margin
+        max_x = max(foot_xs) + self.zmp_margin
+        min_y = min(foot_ys) - self.zmp_margin
+        max_y = max(foot_ys) + self.zmp_margin
+
+        if zmp_x < min_x or zmp_x > max_x or zmp_y < min_y or zmp_y > max_y:
+            reason = f"ZMP_VIOLATION(zmp=({zmp_x:.3f},{zmp_y:.3f}), support=[{min_x:.3f},{max_x:.3f}]x[{min_y:.3f},{max_y:.3f}])"
+            self.violation_log.append(reason)
+            return reason
+
+        return None
+
+    # ── v0.16.25 P1: ENERGY_DRIFT Check ──
+
+    def check_energy_drift(
+        self,
+        kinetic_energy: float,
+        potential_energy: float,
+    ) -> Optional[str]:
+        """v0.16.25 P1: Check cumulative energy drift against budget.
+
+        Monitors the drift between expected and actual total mechanical
+        energy. In a perfectly conservative system, KE + PE should be
+        constant. Drift indicates non-conservative forces (friction,
+        control inputs, numerical errors) are changing the energy budget.
+
+        The cumulative drift is tracked across steps. If it exceeds
+        max_energy_drift (Joules), a violation is flagged.
+
+        Args:
+            kinetic_energy: Current total kinetic energy (Joules).
+            potential_energy: Current total potential energy (Joules).
+
+        Returns:
+            Violation name string if cumulative drift exceeds budget, None otherwise.
+        """
+        current_total = kinetic_energy + potential_energy
+
+        if self._last_kinetic_energy is not None and self._last_potential_energy is not None:
+            last_total = self._last_kinetic_energy + self._last_potential_energy
+            step_drift = abs(current_total - last_total)
+            self._cumulative_energy_drift += step_drift
+
+        self._last_kinetic_energy = kinetic_energy
+        self._last_potential_energy = potential_energy
+
+        if self._cumulative_energy_drift > self.max_energy_drift:
+            reason = f"ENERGY_DRIFT(cumulative={self._cumulative_energy_drift:.2f}J, budget={self.max_energy_drift:.1f}J)"
+            self.violation_log.append(reason)
+            return reason
+
+        return None
+
+    def reset_energy_tracker(self) -> None:
+        """Reset the energy drift tracker (call at episode start)."""
+        self._cumulative_energy_drift = 0.0
+        self._last_kinetic_energy = None
+        self._last_potential_energy = None
+
+    def get_energy_drift(self) -> float:
+        """Get current cumulative energy drift."""
+        return self._cumulative_energy_drift
 # 3. TOMASMuJoCoWrapper — IDO Audit Layer around MuJoCo
 # ──────────────────────────────────────────────────────────────────────
 
@@ -995,6 +1115,147 @@ class Pi0Adapter(VLAAdapter):
         return [super().predict(obs_dict) for _ in range(self.chunk_size)]
 
 
+class DemoVLAAdapter(VLAAdapter):
+    """v0.16.25: Demo VLA adapter — instruction-driven pick-and-place.
+
+    When no real VLA model is loaded, this adapter interprets natural-language
+    instructions and generates a time-based action sequence that performs
+    pick-and-place. This lets users see the arm move in response to their
+    instructions without requiring GPU model inference.
+
+    Supported instruction patterns:
+        - "pick up/grab/grasp [object]" → reach → descend → grasp → lift → transport → release
+        - "open [gripper]" → open gripper
+        - "close [gripper]" → close gripper
+        - "home/reset" → return to home pose
+        - "move to [location]" → reach toward location
+        - Default (unrecognized) → full pick-and-place cycle
+
+    The adapter cycles through phases with ~50 steps per phase (≈1.5s at 30Hz).
+    """
+
+    def __init__(self):
+        super().__init__(model_name="demo-vla")
+        self.loaded = True  # Demo adapter is always "loaded"
+        self._step_counter: int = 0
+        self._phase_idx: int = 0
+        self._instruction: str = ""
+        self._action_dim: int = 7
+
+    def _parse_instruction(self, instruction: str) -> List[str]:
+        """Parse instruction text into a list of phase keywords."""
+        text = instruction.lower().strip()
+        phases: List[str] = []
+
+        if any(kw in text for kw in ["pick", "grab", "grasp", "抓", "拿", "取"]):
+            phases = ["reach", "descend", "grasp", "lift", "transport", "release", "retreat"]
+        elif any(kw in text for kw in ["open", "打开", "松开"]):
+            phases = ["open_gripper"]
+        elif any(kw in text for kw in ["close", "关闭", "合上"]):
+            phases = ["close_gripper"]
+        elif any(kw in text for kw in ["home", "reset", "归零", "复位", "回家"]):
+            phases = ["home"]
+        elif any(kw in text for kw in ["move", "go", "reach", "移动", "去"]):
+            phases = ["reach", "hold"]
+        elif any(kw in text for kw in ["place", "put", "drop", "放", "放置"]):
+            phases = ["transport", "release", "retreat"]
+        else:
+            # Default: full pick-and-place cycle
+            phases = ["reach", "descend", "grasp", "lift", "transport", "release", "retreat"]
+
+        return phases
+
+    def _get_phase_target(self, phase: str, proprio: np.ndarray) -> np.ndarray:
+        """Get target joint positions for a given phase."""
+        # Home pose
+        home = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+
+        if phase == "home":
+            return home
+        elif phase == "reach":
+            # Reach toward cube (approximate IK toward front-center-low)
+            return np.array([0.0, 0.5, -0.8, 0.3, 0.0, 0.0, 0.0])
+        elif phase == "descend":
+            # Lower to object
+            return np.array([0.0, 0.6, -1.0, 0.4, 0.0, 0.0, 0.0])
+        elif phase == "grasp":
+            # Close gripper at current position
+            target = proprio.copy()
+            target[5] = 0.7   # Close left
+            target[6] = -0.7  # Close right
+            return target
+        elif phase == "lift":
+            # Lift up while keeping gripper closed
+            return np.array([0.0, 0.2, -0.3, 0.0, 0.0, 0.7, -0.7])
+        elif phase == "transport":
+            # Move to tray (right side)
+            return np.array([0.8, 0.3, -0.5, 0.0, 0.0, 0.7, -0.7])
+        elif phase == "release":
+            # Open gripper over tray
+            return np.array([0.8, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
+        elif phase == "retreat":
+            # Return to home
+            return home
+        elif phase == "open_gripper":
+            target = proprio.copy()
+            target[5] = 0.0
+            target[6] = 0.0
+            return target
+        elif phase == "close_gripper":
+            target = proprio.copy()
+            target[5] = 0.7
+            target[6] = -0.7
+            return target
+        elif phase == "hold":
+            return proprio.copy()
+        else:
+            return home
+
+    def predict(self, obs_dict: Dict[str, Any]) -> np.ndarray:
+        """Generate instruction-driven action sequence."""
+        instruction = obs_dict.get('language', '')
+        if instruction != self._instruction:
+            # New instruction → restart sequence
+            self._instruction = instruction
+            self._phases = self._parse_instruction(instruction)
+            self._phase_idx = 0
+            self._step_counter = 0
+            print(f"DemoVLA: New instruction '{instruction[:50]}' → phases: {self._phases}")
+
+        if not hasattr(self, '_phases') or not self._phases:
+            self._phases = self._parse_instruction(instruction)
+            self._phase_idx = 0
+            self._step_counter = 0
+
+        STEPS_PER_PHASE = 30  # v0.16.26: ~1s at 30Hz (was 50 — too slow)
+
+        # Advance phase
+        if self._step_counter >= STEPS_PER_PHASE:
+            self._phase_idx += 1
+            self._step_counter = 0
+            if self._phase_idx >= len(self._phases):
+                # All phases complete → restart from beginning (loop)
+                self._phase_idx = 0
+                print(f"DemoVLA: Cycle complete, restarting '{instruction[:30]}'")
+
+        current_phase = self._phases[self._phase_idx]
+        proprio = obs_dict.get('proprio', np.zeros(7))
+        if not isinstance(proprio, np.ndarray):
+            proprio = np.array(proprio, dtype=np.float64)
+        if len(proprio) < 7:
+            proprio = np.pad(proprio, (0, 7 - len(proprio)))
+        target = self._get_phase_target(current_phase, proprio)
+
+        # v0.16.26: Faster interpolation (was 0.15 — too slow to see motion)
+        # 30% per step reaches target in ~10 steps (0.3s), visible to user
+        action = proprio + (target - proprio) * 0.30
+        action = np.clip(action, [-3.14, -3.14, -3.14, -3.14, -3.14, 0.0, -0.873],
+                         [3.14, 3.14, 3.14, 3.14, 3.14, 0.873, 0.0])
+
+        self._step_counter += 1
+        return action.astype(np.float64)
+
+
 def create_vla_adapter(model_name: str) -> VLAAdapter:
     """Factory function to create a VLA adapter by name.
 
@@ -1024,6 +1285,7 @@ def create_vla_adapter(model_name: str) -> VLAAdapter:
         'openvla-7b': OpenVLAAdapter,
         'octo-base': OctoAdapter,
         'pi0-base': Pi0Adapter,
+        'demo-vla': DemoVLAAdapter,
     }
 
     cls = adapters.get(model_name)
