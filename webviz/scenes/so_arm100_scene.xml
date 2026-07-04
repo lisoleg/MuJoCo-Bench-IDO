@@ -23,9 +23,12 @@
   </option>
 
   <default>
-    <joint armature="0.01" damping="0.5" limited="true"/>
+    <!-- v0.16.29: Reduced damping 0.5→0.15 — was over-damping arm motion -->
+    <joint armature="0.01" damping="0.15" limited="true"/>
     <geom contype="1" conaffinity="1" condim="4" friction="0.8 0.02 0.01"/>
-    <position kp="50" kv="5" forcerange="-2.5 2.5"/>
+    <!-- v0.16.29: Boosted gains 8x — forcerange was ±2.5 (too low, arm couldn't move).
+         In simulation we can exceed real ST3215 specs. kp/kv scaled proportionally. -->
+    <position kp="400" kv="30" forcerange="-15 15"/>
     <default class="arm_link">
       <geom type="mesh" rgba="0.3 0.3 0.35 1" group="1"/>
     </default>
@@ -59,44 +62,43 @@
 
     <!-- ═══ CAMKit: Dual Camera System ═══ -->
     <!-- Top Camera: fixed bird's-eye view of workspace -->
-    <!-- Positioned above table center (0.4, 0, 0.8), looking down -->
-    <!-- fovy ≈ 50° to cover ~0.5m × 0.5m workspace at 0.4m distance -->
-    <camera name="top_cam" pos="0.4 -0.35 0.85" euler="55 0 0" fovy="0.87"/>
+    <!-- v0.16.28: moved to (0.22, -0.30, 0.80) to view new table position -->
+    <camera name="top_cam" pos="0.22 -0.30 0.80" euler="60 0 0" fovy="0.87"/>
     <!-- Top cam resolution: 640×480 (set in renderer, not XML) -->
 
     <!-- Wrist Camera: attached to gripper, looking forward -->
     <!-- Offset: 0.02m above gripper base, tilted 90° to look along gripper axis -->
     <!-- This camera moves with the gripper — provides close-up view for grasping -->
 
-    <!-- Table -->
-    <body name="table" pos="0.4 0 0.0">
-      <geom name="table_top" type="box" size="0.25 0.35 0.01" pos="0 0 0.40" material="mat_table" condim="3"/>
-      <geom name="table_leg1" type="box" size="0.02 0.02 0.20" pos="0.22 0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
-      <geom name="table_leg2" type="box" size="0.02 0.02 0.20" pos="0.22 -0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
-      <geom name="table_leg3" type="box" size="0.02 0.02 0.20" pos="-0.22 0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
-      <geom name="table_leg4" type="box" size="0.02 0.02 0.20" pos="-0.22 -0.32 0.20" material="mat_table" contype="0" conaffinity="0"/>
+    <!-- Table (v0.16.28: moved closer to arm — max reach is 0.325m) -->
+    <body name="table" pos="0.22 0 0.0">
+      <geom name="table_top" type="box" size="0.20 0.25 0.01" pos="0 0 0.40" material="mat_table" condim="3"/>
+      <geom name="table_leg1" type="box" size="0.02 0.02 0.20" pos="0.18 0.22 0.20" material="mat_table" contype="0" conaffinity="0"/>
+      <geom name="table_leg2" type="box" size="0.02 0.02 0.20" pos="0.18 -0.22 0.20" material="mat_table" contype="0" conaffinity="0"/>
+      <geom name="table_leg3" type="box" size="0.02 0.02 0.20" pos="-0.18 0.22 0.20" material="mat_table" contype="0" conaffinity="0"/>
+      <geom name="table_leg4" type="box" size="0.02 0.02 0.20" pos="-0.18 -0.22 0.20" material="mat_table" contype="0" conaffinity="0"/>
     </body>
 
-    <!-- Tray (target placement) -->
-    <body name="tray" pos="0.4 -0.25 0.41">
-      <geom name="tray_geom" type="box" size="0.08 0.08 0.005" material="mat_tray" condim="3"/>
+    <!-- Tray (target placement) — on table near arm side -->
+    <body name="tray" pos="0.22 -0.18 0.41">
+      <geom name="tray_geom" type="box" size="0.06 0.06 0.005" material="mat_tray" condim="3"/>
     </body>
 
-    <!-- Objects to grasp -->
-    <!-- Task A: Red Cube (50g, 5cm) -->
-    <body name="red_cube" pos="0.4 0.15 0.435">
+    <!-- Objects to grasp — all within arm reach (horiz dist < 0.30m) -->
+    <!-- Task A: Red Cube (50g, 5cm) — primary grasp target -->
+    <body name="red_cube" pos="0.22 0.18 0.435">
       <freejoint name="cube_joint"/>
       <geom name="cube_geom" type="box" size="0.025 0.025 0.025" mass="0.05" material="mat_red" class="object" friction="0.6 0.02 0.01"/>
     </body>
 
     <!-- Task B: Blue Ball (2.7g, ping-pong ball) -->
-    <body name="blue_ball" pos="0.4 0.05 0.425">
+    <body name="blue_ball" pos="0.22 0.06 0.425">
       <freejoint name="ball_joint"/>
       <geom name="ball_geom" type="sphere" size="0.02" mass="0.0027" material="mat_blue" class="object" friction="0.3 0.01 0.005"/>
     </body>
 
     <!-- Task C: White Tissue (0.5g, soft) -->
-    <body name="white_tissue" pos="0.4 -0.05 0.422">
+    <body name="white_tissue" pos="0.22 -0.06 0.422">
       <freejoint name="tissue_joint"/>
       <geom name="tissue_geom" type="box" size="0.015 0.015 0.008" mass="0.0005" material="mat_white" class="object" friction="0.15 0.005 0.002"/>
     </body>
@@ -173,17 +175,16 @@
   </contact>
 
   <!-- Actuators: ST3215 servos with gear ratios -->
-  <!-- Main joints: gear=50 → 0.05 N·m stall × 50 = 2.5 N·m -->
-  <!-- Wrist joints: gear=30 → 0.05 N·m stall × 30 = 1.5 N·m -->
-  <!-- Gripper: gear=20 → 0.05 N·m stall × 20 = 1.0 N·m -->
+  <!-- v0.16.29: Boosted gains for simulation responsiveness.
+       Real ST3215: 0.05 N·m × gear=50 = 2.5 N·m. In sim we use 15 N·m (6x) for snappy motion. -->
   <actuator>
-    <position name="Rotation"    joint="Rotation"     gear="50" kp="50" kv="5" forcerange="-2.5 2.5" ctrlrange="-3.14 3.14"/>
-    <position name="Pitch"       joint="Pitch"         gear="50" kp="50" kv="5" forcerange="-2.5 2.5" ctrlrange="-1.571 1.571"/>
-    <position name="Elbow"       joint="Elbow"         gear="50" kp="50" kv="5" forcerange="-2.5 2.5" ctrlrange="-1.571 2.356"/>
-    <position name="Wrist_Pitch" joint="Wrist_Pitch"   gear="30" kp="30" kv="3" forcerange="-1.5 1.5" ctrlrange="-1.571 1.571"/>
-    <position name="Wrist_Roll"  joint="Wrist_Roll"    gear="30" kp="30" kv="3" forcerange="-1.5 1.5" ctrlrange="-3.14 3.14"/>
-    <position name="Gripper_L"   joint="Gripper_Left"  gear="20" kp="20" kv="2" forcerange="-1.0 1.0" ctrlrange="0 0.873"/>
-    <position name="Gripper_R"   joint="Gripper_Right" gear="20" kp="20" kv="2" forcerange="-1.0 1.0" ctrlrange="-0.873 0"/>
+    <position name="Rotation"    joint="Rotation"     gear="50" kp="400" kv="30" forcerange="-15 15" ctrlrange="-3.14 3.14"/>
+    <position name="Pitch"       joint="Pitch"         gear="50" kp="400" kv="30" forcerange="-15 15" ctrlrange="-1.571 1.571"/>
+    <position name="Elbow"       joint="Elbow"         gear="50" kp="400" kv="30" forcerange="-15 15" ctrlrange="-1.571 2.356"/>
+    <position name="Wrist_Pitch" joint="Wrist_Pitch"   gear="30" kp="250" kv="18" forcerange="-8 8"   ctrlrange="-1.571 1.571"/>
+    <position name="Wrist_Roll"  joint="Wrist_Roll"    gear="30" kp="250" kv="18" forcerange="-8 8"   ctrlrange="-3.14 3.14"/>
+    <position name="Gripper_L"   joint="Gripper_Left"  gear="20" kp="150" kv="10" forcerange="-5 5"   ctrlrange="0 0.873"/>
+    <position name="Gripper_R"   joint="Gripper_Right" gear="20" kp="150" kv="10" forcerange="-5 5"   ctrlrange="-0.873 0"/>
   </actuator>
 
   <!-- Sensors for IDO κ-Snap audit -->

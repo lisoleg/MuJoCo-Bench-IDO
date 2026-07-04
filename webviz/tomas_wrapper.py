@@ -1134,13 +1134,22 @@ class DemoVLAAdapter(VLAAdapter):
     The adapter cycles through phases with ~50 steps per phase (≈1.5s at 30Hz).
     """
 
-    def __init__(self):
+    def __init__(self, model=None, data=None):
         super().__init__(model_name="demo-vla")
         self.loaded = True  # Demo adapter is always "loaded"
         self._step_counter: int = 0
         self._phase_idx: int = 0
         self._instruction: str = ""
         self._action_dim: int = 7
+        # v0.16.28: Store model and data references for FK-based IK.
+        # Use a separate cache data object to avoid interfering with simulation.
+        self._model = model
+        if model is not None and data is not None:
+            import mujoco as _mj
+            import numpy as _np
+            self._data_cache = _mj.MjData(model)
+        else:
+            self._data_cache = None
 
     def _parse_instruction(self, instruction: str) -> List[str]:
         """Parse instruction text into a list of phase keywords."""
@@ -1167,79 +1176,149 @@ class DemoVLAAdapter(VLAAdapter):
 
     def _get_phase_target(self, phase: str, proprio: np.ndarray, obs_dict: dict = None) -> np.ndarray:
         """Get target joint positions for a given phase.
+        v0.16.28: Uses scipy.optimize to do real FK-based IK on the actual MuJoCo model.
         v0.16.27: Uses IK based on actual object positions from obs_dict.
         """
         home = np.array([0.0, 0.3, -0.5, 0.0, 0.0, 0.0, 0.0])
 
-        # v0.16.27: Extract object positions for IK
+        # v0.16.28: Extract object positions for IK
         obj_positions = obs_dict.get('object_positions', {}) if obs_dict else {}
         arm_base_z = obs_dict.get('arm_base_z', 0.40) if obs_dict else 0.40
-        target_obj = obj_positions.get('red_cube', np.array([0.4, 0.15, 0.435]))
-        tray_pos = obj_positions.get('tray', np.array([0.4, -0.25, 0.41]))
+        target_obj = obj_positions.get('red_cube', np.array([0.22, 0.18, 0.435]))
+        tray_pos = obj_positions.get('tray', np.array([0.22, -0.18, 0.41]))
 
         import math as _math
 
-        def _simple_ik(world_xyz: np.ndarray, gripper_closed: bool = False) -> np.ndarray:
-            """Simple geometric IK: compute arm joints to reach a world position.
-            Arm base is at (0, 0, arm_base_z). Joints: rotation, pitch, elbow, wrist.
+        def _ik_to_target(target_world: np.ndarray, gripper_closed: bool = False) -> np.ndarray:
+            """v0.16.29: Use scipy.optimize on the real MuJoCo FK to compute IK.
+            v0.16.29: Optimize for FINGERTIP CENTER (avg of fsr_left + fsr_right),
+            not gripper_base. The old code placed gripper_base at the target, but
+            the fingertips are ~5cm offset — causing the gripper to overshoot the
+            object by 10cm. Now the IK naturally aligns fingertips with the target.
+            Falls back to a geometric approximation if scipy fails.
             """
-            dx = float(world_xyz[0]) - 0.0  # arm base x=0
-            dy = float(world_xyz[1]) - 0.0  # arm base y=0
-            dz = float(world_xyz[2]) - arm_base_z
-            # Base rotation: face the target
-            base_rot = _math.atan2(dy, dx)
-            # Horizontal distance
-            horiz = _math.sqrt(dx * dx + dy * dy)
-            # Total reach needed
-            reach = _math.sqrt(horiz * horiz + dz * dz)
-            # Arm segments: upper=0.12, forearm=0.115, wrist+gripper=0.04+0.025=0.065
-            L1, L2, L3 = 0.145, 0.115, 0.065
-            # Shoulder angle (from horizontal)
-            shoulder = _math.atan2(dz, horiz) if horiz > 0.01 else 0.0
-            # Elbow: bend to reach the target distance
-            # Using law of cosines on L1+L2
-            total_reach = L1 + L2
-            if reach > total_reach - 0.01:
-                reach = total_reach - 0.01  # Clamp to reachable
-            if reach < 0.05:
-                reach = 0.05
-            cos_elbow = (L1 * L1 + L2 * L2 - reach * reach) / (2 * L1 * L2)
-            cos_elbow = max(-1.0, min(1.0, cos_elbow))
-            elbow_angle = -(_math.pi - _math.acos(cos_elbow))  # Negative = bend forward
-            # Adjust shoulder for elbow bend
-            shoulder += _math.atan2(L2 * _math.sin(-elbow_angle), L1 + L2 * _math.cos(-elbow_angle))
-            # Wrist pitch: keep gripper pointing down
-            wrist_p = -(shoulder + elbow_angle)
-            # Gripper
+            target_world = np.asarray(target_world, dtype=np.float64)
+            # Gripper fingers open/closed
             grip_l = 0.7 if gripper_closed else 0.0
             grip_r = -0.7 if gripper_closed else 0.0
-            return np.array([base_rot, shoulder * 0.8, elbow_angle, wrist_p, 0.0, grip_l, grip_r])
+            # First, try the geometric IK as initial guess
+            try:
+                geom_init = _geometric_ik(target_world, arm_base_z, gripper_closed)
+            except Exception:
+                geom_init = home.copy()
+            # Use scipy to refine
+            try:
+                from scipy.optimize import minimize
+                import mujoco as _mj
+                # v0.16.29: Pre-compute site IDs for fingertip center
+                _fsr_l_id = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_SITE, "fsr_left")
+                _fsr_r_id = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_SITE, "fsr_right")
+
+                def _cost(params):
+                    rot, pitch, elbow, wrist = params
+                    # Clamp to joint ranges
+                    rot = max(-3.14, min(3.14, rot))
+                    pitch = max(-1.5, min(1.5, pitch))
+                    elbow = max(-1.5, min(2.3, elbow))
+                    wrist = max(-1.5, min(1.5, wrist))
+                    # FK using local copy of data
+                    d = self._data_cache
+                    d.qpos[21] = rot
+                    d.qpos[22] = pitch
+                    d.qpos[23] = elbow
+                    d.qpos[24] = wrist
+                    d.qpos[25] = 0.0
+                    d.qpos[26] = grip_l
+                    d.qpos[27] = grip_r
+                    _mj.mj_forward(self._model, d)
+                    # v0.16.29: Use fingertip center instead of gripper_base
+                    if _fsr_l_id >= 0 and _fsr_r_id >= 0:
+                        ft_center = (d.site_xpos[_fsr_l_id] + d.site_xpos[_fsr_r_id]) * 0.5
+                    else:
+                        # Fallback to gripper_base
+                        grip_id = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_BODY, "gripper_base")
+                        if grip_id < 0:
+                            return 1e6
+                        ft_center = d.xpos[grip_id]
+                    err = float(np.linalg.norm(ft_center - target_world))
+                    # Add small penalty for joint range violations
+                    range_pen = 0.0
+                    for v, lo, hi in [(pitch, -1.5, 1.5), (elbow, -1.5, 2.3), (wrist, -1.5, 1.5)]:
+                        if v < lo:
+                            range_pen += (lo - v) * 0.1
+                        if v > hi:
+                            range_pen += (v - hi) * 0.1
+                    return err + range_pen
+                # Try multiple starting points for robustness
+                best = None
+                for x0 in [geom_init[:4], [0.0, -0.8, -0.8, 0.2], [-0.7, -1.0, -0.5, 0.0],
+                          [0.7, -1.0, -0.5, 0.0], [-1.0, -1.2, -0.3, 0.5]]:
+                    r = minimize(_cost, x0=x0, method='Nelder-Mead',
+                                 options={'xatol': 1e-3, 'fatol': 1e-4, 'maxiter': 200})
+                    if best is None or r.fun < best.fun:
+                        best = r
+                rot, pitch, elbow, wrist = best.x
+            except Exception:
+                # Fall back to geometric IK
+                rot, pitch, elbow, wrist = geom_init[:4]
+            return np.array([rot, pitch, elbow, wrist, 0.0, grip_l, grip_r])
+
+        def _geometric_ik(world_xyz: np.ndarray, arm_base_z: float, gripper_closed: bool) -> np.ndarray:
+            """v0.16.28: Approximate geometric IK — used as initial guess for scipy.
+            Handles the 4-DOF arm (rotation, pitch, elbow, wrist) with L1=0.145, L2=0.115, L3=0.065.
+            """
+            dx = float(world_xyz[0]) - 0.0
+            dy = float(world_xyz[1]) - 0.0
+            dz = float(world_xyz[2]) - arm_base_z
+            base_rot = -_math.atan2(dy, dx)
+            horiz = _math.sqrt(dx * dx + dy * dy)
+            # Total reach
+            reach = _math.sqrt(horiz * horiz + dz * dz)
+            L1, L2, L3 = 0.145, 0.115, 0.065
+            # In MuJoCo convention (verified by optimization on real FK):
+            #   rot=-atan2(dy,dx), pitch=-atan2(horiz,dz), elbow=−π+acos(...)
+            # Place wrist at distance d = reach - L3 (assuming wrist points at target)
+            d = max(abs(L1 - L2) + 0.01, min(reach - L3, L1 + L2 - 0.01))
+            if reach < L3 + 0.01:
+                d = abs(L1 - L2) + 0.01
+            cos_elbow = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2)
+            cos_elbow = max(-1.0, min(1.0, cos_elbow))
+            elbow_angle = -(_math.pi - _math.acos(cos_elbow))
+            # Shoulder angle (in MuJoCo: negative pitch leans forward)
+            target_angle = _math.atan2(horiz, dz) if (horiz > 0.01 or abs(dz) > 0.01) else 0.0
+            half_e = 0.0
+            if d > 0.01:
+                half_e = _math.asin(min(1.0, (L2 * _math.sin(_math.acos(cos_elbow))) / d))
+            shoulder = -(target_angle - half_e)
+            # Wrist pitch: align gripper with target
+            wrist_p = 0.0
+            grip_l = 0.7 if gripper_closed else 0.0
+            grip_r = -0.7 if gripper_closed else 0.0
+            return np.array([base_rot, shoulder, elbow_angle, wrist_p, 0.0, grip_l, grip_r])
 
         if phase == "home":
             return home
         elif phase == "reach":
-            # Reach to above the object (8cm above)
-            return _simple_ik(target_obj + np.array([0, 0, 0.08]), gripper_closed=False)
+            # v0.16.29: Fingertip target 8cm above object (approach from above)
+            return _ik_to_target(target_obj + np.array([0, 0, 0.08]), gripper_closed=False)
         elif phase == "descend":
-            # Lower to object (2cm above for grasp)
-            return _simple_ik(target_obj + np.array([0, 0, 0.02]), gripper_closed=False)
+            # v0.16.29: Fingertip at object center height (ready to grasp)
+            return _ik_to_target(target_obj + np.array([0, 0, 0.0]), gripper_closed=False)
         elif phase == "grasp":
-            # Close gripper at current position
             target = proprio.copy()
             target[5] = 0.7
             target[6] = -0.7
             return target
         elif phase == "lift":
-            # Lift up 15cm while keeping gripper closed
-            lift_target = target_obj + np.array([0, 0, 0.17])
-            return _simple_ik(lift_target, gripper_closed=True)
+            # v0.16.29: Fingertip 15cm above object (lifted clear)
+            lift_target = target_obj + np.array([0, 0, 0.15])
+            return _ik_to_target(lift_target, gripper_closed=True)
         elif phase == "transport":
-            # Move to above tray (8cm above)
-            return _simple_ik(tray_pos + np.array([0, 0, 0.08]), gripper_closed=True)
+            # v0.16.29: Fingertip 5cm above tray (approach tray)
+            return _ik_to_target(tray_pos + np.array([0, 0, 0.05]), gripper_closed=True)
         elif phase == "release":
-            # Open gripper over tray
-            target = _simple_ik(tray_pos + np.array([0, 0, 0.08]), gripper_closed=False)
-            return target
+            # v0.16.29: Same position, open gripper
+            return _ik_to_target(tray_pos + np.array([0, 0, 0.05]), gripper_closed=False)
         elif phase == "retreat":
             return home
         elif phase == "open_gripper":
@@ -1273,7 +1352,10 @@ class DemoVLAAdapter(VLAAdapter):
             self._phase_idx = 0
             self._step_counter = 0
 
-        STEPS_PER_PHASE = 30  # v0.16.26: ~1s at 30Hz (was 50 — too slow)
+        # v0.16.29: 50 steps per phase (~1.7s at 30Hz). Was 30 — too short for
+        # actuator to converge even with kinematic assist. 50 gives the arm
+        # enough time to reach target and stabilize before next phase.
+        STEPS_PER_PHASE = 50
 
         # Advance phase
         if self._step_counter >= STEPS_PER_PHASE:
@@ -1302,7 +1384,7 @@ class DemoVLAAdapter(VLAAdapter):
         return action.astype(np.float64)
 
 
-def create_vla_adapter(model_name: str) -> VLAAdapter:
+def create_vla_adapter(model_name: str, model=None, data=None) -> VLAAdapter:
     """Factory function to create a VLA adapter by name.
 
     Supported models span three VLA factions:
@@ -1341,6 +1423,11 @@ def create_vla_adapter(model_name: str) -> VLAAdapter:
             f"Available: {list(adapters.keys())}"
         )
 
-    adapter = cls()
+    # v0.16.28: Pass model+data to DemoVLAAdapter for FK-based IK.
+    # Real VLA adapters don't need this.
+    if model_name == 'demo-vla':
+        adapter = cls(model=model, data=data)
+    else:
+        adapter = cls()
     print(f"VLA adapter created: {model_name} (loaded={adapter.is_loaded()})")
     return adapter

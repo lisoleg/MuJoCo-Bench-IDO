@@ -69,7 +69,7 @@ except ImportError as _tomas_err:
     TOMAS_AVAILABLE = False
     print(f"Warning: TOMAS wrapper not available: {_tomas_err}")
 
-WEBVIZ_VERSION: str = "v0.16.27"
+WEBVIZ_VERSION: str = "v0.16.29"
 
 # ── Bug 3 Fix: Baseline reference data for 7 core metrics ──
 # Source: dm_control PPO/SAC 100k step typical scores (paperswithcode, DM Control paper)
@@ -1884,17 +1884,23 @@ async def start_viewer() -> JSONResponse:
                         ground_z = float(ray_origin_down[2] - ground_dist)
                         adaptive_target = ground_z + 0.85
                         # v0.16.27: Lower target on terrain for stability
+                        # v0.16.28: Reduced crouch 10cm→5cm — 10cm was too low and
+                        #   made the robot look like it was about to fall.
                         if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze"):
-                            adaptive_target -= 0.10  # Crouch 10cm lower on terrain
-                        # Smoothly blend toward adaptive target (avoid sudden jumps)
-                        target_height = target_height * 0.95 + adaptive_target * 0.05
+                            adaptive_target -= 0.05  # Crouch 5cm lower on terrain (was 10cm)
+                        # v0.16.28: Slower blend (0.02 instead of 0.05) — at 200Hz,
+                        # 0.05 = 10x faster than 0.02, causing the target to jitter
+                        # visibly. 0.02 reaches adaptive target in ~1.5s, smooth.
+                        target_height = target_height * 0.98 + adaptive_target * 0.02
 
                     # v0.16.27: On terrain, BOOST angular gains (not just keep at 1.0).
                     # Terrain generates larger disturbances from uneven foot placement,
                     # so the robot needs MORE angular stability, not the same amount.
                     # Z gain is still reduced (0.7x) to prevent vertical launching.
+                    # v0.16.28: Reduced 1.5x→1.2x — 1.5x was over-damping and causing
+                    #   visible "stiff" oscillation on plain ground (false triggering).
                     _terrain_z_scale = 0.7 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze") else 1.0
-                    _terrain_ang_scale = 1.5 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze") else 1.0  # v0.16.27: was 1.0
+                    _terrain_ang_scale = 1.2 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze") else 1.0  # v0.16.28: was 1.5
                     _kp_root_z = KP_ROOT_Z * _terrain_z_scale
                     _kd_root_z = KD_ROOT_Z * _terrain_z_scale
                     _kp_root_pitch = KP_ROOT_PITCH * _terrain_ang_scale
@@ -2026,8 +2032,10 @@ async def start_viewer() -> JSONResponse:
 
                 # v0.16.27: Reduce gait amplitude on terrain — smaller steps
                 # mean less destabilizing torques from uneven foot placement.
+                # v0.16.28: Reduced penalty 40%→25% — 40% was too restrictive and
+                #   made the robot barely move on stairs.
                 if mjviser_scene_type in ("ramp", "stairs", "obstacle", "maze"):
-                    walk_mult *= 0.6  # 40% reduction on terrain
+                    walk_mult *= 0.75  # 25% reduction on terrain (was 40%)
 
                 # v0.16.7: Ray casting for wall/terrain detection ──
                 # Cast forward ray to detect walls ahead (for maze navigation)
@@ -2404,7 +2412,12 @@ async def start_viewer() -> JSONResponse:
             try:
                 while mjviser_viewer_running:
                     # v0.16.17: Run multiple physics steps for speed multiplier
-                    for _ in range(max(1, mjviser_sim_speed)):
+                    # v0.16.28: Clamp effective sim steps per tick to prevent flash.
+                    #   At 64x speed with mjviser_viewer's internal speed=1, the robot
+                    #   moves too fast for 30Hz rendering — visible "flash" effect.
+                    #   Cap outer-loop multiplier at 4 so each tick is bounded.
+                    _effective_speed = min(max(1, mjviser_sim_speed), 4)
+                    for _ in range(_effective_speed):
                         if mjviser_viewer_running:
                             viewer._tick()
                         else:
@@ -2679,44 +2692,70 @@ def _launch_arm100_viewer() -> None:
                 return _make_cam_placeholder(cam_name, _cam_init_error or "no renderer available")
 
         def _make_cam_placeholder(cam_name: str, error_msg: str = "") -> "np.ndarray":
-            """v0.16.27: Generate a info-overlay image when renderer is unavailable.
-            Shows camera name, joint positions, gripper state, and error message
+            """v0.16.28: Generate a clear info-overlay image when renderer is unavailable.
+            v0.16.27: Shows camera name, joint positions, gripper state, and error message
             on a GREEN background (clearly NOT black so user knows it's a fallback).
+            v0.16.28: Compact layout (5 zones, max 4 lines) — readable on 320x240.
             """
             img = np.zeros((CAM_HEIGHT, CAM_WIDTH, 3), dtype=np.uint8)
             # Dark green background — clearly visible, not "black"
             img[:, :] = [20, 80, 20]
             try:
-                from PIL import Image, ImageDraw
+                from PIL import Image, ImageDraw, ImageFont
                 pil_img = Image.fromarray(img)
                 draw = ImageDraw.Draw(pil_img)
-                # Camera name (bright yellow)
-                draw.text((10, 10), f"[{cam_name}]", fill=(255, 255, 0))
-                # Error message (red)
+                # Try a default font; fallback to default
+                try:
+                    font = ImageFont.truetype("arial.ttf", 11)
+                    font_small = ImageFont.truetype("arial.ttf", 9)
+                except Exception:
+                    font = ImageFont.load_default()
+                    font_small = font
+                # Title bar (yellow on dark green)
+                draw.rectangle([(0, 0), (CAM_WIDTH, 18)], fill=(0, 60, 0))
+                draw.text((4, 3), f"[{cam_name}]", fill=(255, 255, 0), font=font)
+                # Error / status line (red) — wrap to one short line
                 if error_msg:
-                    draw.text((10, 30), f"Error: {error_msg[:50]}", fill=(255, 80, 80))
-                # Live joint positions (white) — shows arm is actually moving
+                    short_err = error_msg[:60] if len(error_msg) > 60 else error_msg
+                    draw.text((4, 20), short_err, fill=(255, 80, 80), font=font_small)
+                # Live joint positions (white) — compact 2-column grid
                 try:
                     qpos = arm_data.qpos[:7]
-                    labels = ["Rot", "Pit", "Elb", "WPi", "WRo", "GrL", "GrR"]
+                    labels = ["Rot", "Pit", "Elb", "WPi", "WRo", "GL", "GR"]
                     for i in range(min(7, len(qpos))):
-                        draw.text((10, 60 + i * 20), f"{labels[i]}: {float(qpos[i]):+.3f}", fill=(200, 255, 200))
+                        col = i // 4  # 0 or 1
+                        row = i % 4
+                        x = 4 + col * 160
+                        y = 38 + row * 14
+                        draw.text((x, y), f"{labels[i]}={float(qpos[i]):+.2f}",
+                                  fill=(200, 255, 200), font=font_small)
                 except Exception:
                     pass
-                # Object positions
+                # Object distances from gripper (compact, single line)
                 try:
-                    for obj_name, color in [("red_cube", (255, 100, 100)),
-                                             ("blue_ball", (100, 100, 255)),
-                                             ("tray", (150, 150, 150))]:
-                        obj_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, obj_name)
-                        if obj_id >= 0:
-                            pos = arm_data.xpos[obj_id]
-                            draw.text((10, 210), f"{obj_name}: ({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f})",
-                                      fill=color)
+                    grip_id = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, "gripper_base")
+                    if grip_id >= 0:
+                        gp = arm_data.xpos[grip_id]
+                        line_y = 110
+                        for obj_name, color in [("red_cube", (255, 100, 100)),
+                                                 ("tray", (180, 180, 180))]:
+                            oid = mj.mj_name2id(arm_model, mj.mjtObj.mjOBJ_BODY, obj_name)
+                            if oid >= 0:
+                                op = arm_data.xpos[oid]
+                                d = float(np.linalg.norm(op - gp))
+                                draw.text((4, line_y), f"{obj_name}: {d*100:.1f}cm",
+                                          fill=color, font=font_small)
+                                line_y += 13
                 except Exception:
                     pass
-                draw.text((10, CAM_HEIGHT - 15), "v0.16.27 CAMKit (no GL — showing live joint data)",
-                          fill=(120, 200, 120))
+                # Footer (cyan) — what the user CAN do
+                draw.rectangle([(0, CAM_HEIGHT - 32), (CAM_WIDTH, CAM_HEIGHT)], fill=(0, 50, 0))
+                draw.text((4, CAM_HEIGHT - 30), "GPU-less mode: live data only",
+                          fill=(100, 200, 255), font=font_small)
+                draw.text((4, CAM_HEIGHT - 18), "See Telemetry tab for full state",
+                          fill=(100, 200, 255), font=font_small)
+                draw.text((4, CAM_HEIGHT - 6), "v0.16.28 CAMKit fallback",
+                          fill=(80, 160, 80), font=font_small)
                 img = np.array(pil_img)
             except ImportError:
                 # No PIL — just return the colored background
@@ -2827,6 +2866,20 @@ def _launch_arm100_viewer() -> None:
             # The humanoid step_fn calls mj_step at line 2214, but the ARM100
             # step_fn was missing it entirely.
             mj.mj_step(model, data)
+
+            # v0.16.29: Kinematic assist — after mj_step, nudge qpos toward ctrl.
+            # Even with boosted actuator gains (kp=400, forcerange=±15), position
+            # actuators need many steps to converge. This 30% nudge per step
+            # ensures the arm reaches its target within ~10 steps (0.3s at 30Hz),
+            # making pick-and-place visible to the user. Without this, the arm
+            # barely moved (34cm error after 50 steps).
+            _ARM_QPOS_OFFSET = 21  # qpos[21:28] = arm joints (7 DOF)
+            for _ji in range(min(7, model.nu)):
+                _qi = _ARM_QPOS_OFFSET + _ji
+                if _qi < data.qpos.shape[0]:
+                    _diff = float(data.ctrl[_ji]) - float(data.qpos[_qi])
+                    data.qpos[_qi] += _diff * 0.30
+            mj.mj_forward(model, data)  # Update derived quantities after qpos change
 
             if np.any(np.isnan(data.qpos)):
                 mj.mj_resetData(model, data)
@@ -3071,7 +3124,8 @@ def _launch_arm100_viewer() -> None:
                     if arm100_vla_adapter is None or not arm100_vla_adapter.is_loaded():
                         try:
                             from webviz.tomas_wrapper import create_vla_adapter
-                            arm100_vla_adapter = create_vla_adapter('demo-vla')
+                            # v0.16.28: Pass model+data for FK-based IK (was 40cm error)
+                            arm100_vla_adapter = create_vla_adapter('demo-vla', model=arm_model, data=arm_data)
                             vla_status_text.content = (
                                 f"Status: ✅ Demo VLA active\n"
                                 f"Instruction: '{val[:60]}{'...' if len(val) > 60 else ''}'\n"
