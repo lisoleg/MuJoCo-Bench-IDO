@@ -1,0 +1,26 @@
+{
+  "deploy_report": {
+    "status": "success",
+    "total_steps": 200,
+    "total_episodes": 2,
+    "avg_eta": 0.103415,
+    "final_eta": 0.119896,
+    "psi_violations": 0,
+    "kappa_snap_count": 100,
+    "safety_report": {
+      "total_violations": 0,
+      "violation_breakdown": {},
+      "chain_integrity": true,
+      "steps_executed": 100,
+      "violation_rate": 0.0
+    },
+    "elapsed_seconds": 99.73,
+    "meta_queries_count": 2,
+    "learned_skills_count": 0,
+    "failure_attributions_count": 0
+  },
+  "per_episode": [],
+  "vla_model": "demo-vla",
+  "vla_loaded": true,
+  "instruction": "pick up the red cube and place it on the tray"
+}

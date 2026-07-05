@@ -143,9 +143,16 @@ class TOMASMuJoCoWrapper:
         return None
 
     def _compute_eta(self, obs: np.ndarray) -> float:
-        """Compute GaussEx residual η (L2 distance to goal).
+        """Compute GaussEx residual η (physical distance to goal).
 
-        η = ||obs[:goal_dim] - goal||₂
+        v0.17.2 FIX: Previously used obs[:3] (joint angles) vs goal=[0,0,0],
+        which gave meaningless eta = ||joint_angles|| ≈ 1.5. Now uses
+        obs[14:17] (gripper-to-target distance vector) when available,
+        giving the true physical eta = ||gripper_pos - target_pos||.
+
+        For environments where obs[14:17] is the distance vector:
+            eta = ||obs[14:17]||
+        For other environments, falls back to obs[:goal_dim] vs goal.
 
         Args:
             obs: Current observation.
@@ -153,6 +160,13 @@ class TOMASMuJoCoWrapper:
         Returns:
             η value (float).
         """
+        # v0.17.2: Use distance vector from obs[14:17] if available
+        # (HeadlessMuJoCoEnv provides gripper-to-target distance at [14:17])
+        if len(obs) >= 17:
+            dist_vec = obs[14:17]
+            return float(np.linalg.norm(dist_vec))
+
+        # Fallback: use first goal_dim elements vs goal
         goal_dim = min(len(self.goal), len(obs))
         diff = obs[:goal_dim] - self.goal[:goal_dim]
         return float(np.linalg.norm(diff))
@@ -274,7 +288,12 @@ class TOMASMuJoCoWrapper:
             raise ValueError(f"Unexpected env.step() return length: {len(result)}")
 
         # ── Post-step: compute η and update ψ-Anchor ──
-        self._last_eta = self._compute_eta(mujoco_obs)
+        # v0.17.2: Use env's physical eta if available (more accurate than
+        # recomputing from obs, since env has direct access to body positions)
+        if "eta" in info and info["eta"] is not None:
+            self._last_eta = float(info["eta"])
+        else:
+            self._last_eta = self._compute_eta(mujoco_obs)
         self.psi_anchor.update_eta_history(self._last_eta)
 
         # Update adjusted δ_K based on η trend
