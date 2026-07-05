@@ -1256,7 +1256,7 @@ MuJoCo-Bench-IDO是首个物理域VG-Pair验证平台，为非冯架构AGI的连
 
 ### 9.1 八元数非结合代数
 
-基于章锋2026年7月4日论文[21]，本项目引入了八元数（Octonion, 𝕆）非结合代数作为EML蒸馏的数学基础。八元数是通过Cayley-Dickson构造从四元数得到的8维超复数，具有**非交换非结合**特性，但仍是**赋范可除代数**（||a·b|| = ||a||·||b||）。
+基于章锋2026年7月4日论文[25]，本项目引入了八元数（Octonion, 𝕆）非结合代数作为EML蒸馏的数学基础。八元数是通过Cayley-Dickson构造从四元数得到的8维超复数，具有**非交换非结合**特性，但仍是**赋范可除代数**（||a·b|| = ||a||·||b||）。
 
 **核心算子——Φ流贯演化**：
 
@@ -1338,13 +1338,13 @@ $$d_{target} = k_I \cdot \frac{I^2}{v \cdot t}, \quad V_{nom} = 16 + 2 \cdot \ma
 
 ### 9.10 v0.3.0总结
 
-v0.3.0版本基于章锋2026-07-04论文[21]，将八元数非结合代数、EML蒸馏网络、异构计算基准、CIM忆阻器模拟器、焊接物理公式升级、DOCX文档生成、数据质量QA工具、硬件参考文件、EML标注Schema、传感器选型文档等10项增强集成到MuJoCo-Bench-IDO中。199个测试全绿，两个CLI工具（hetero_benchmark、tproc_cim_simulator）正常输出，现有116个焊接测试零回归。
+v0.3.0版本基于章锋2026-07-04论文[25]，将八元数非结合代数、EML蒸馏网络、异构计算基准、CIM忆阻器模拟器、焊接物理公式升级、DOCX文档生成、数据质量QA工具、硬件参考文件、EML标注Schema、传感器选型文档等10项增强集成到MuJoCo-Bench-IDO中。199个测试全绿，两个CLI工具（hetero_benchmark、tproc_cim_simulator）正常输出，现有116个焊接测试零回归。
 
 ---
 
 ## 10 v0.4.0扩展：SLOS硅基生命操作系统（章锋2026-07-04第二版）
 
-基于章锋SLOS（Silicon Life Operating System）论文第二版[22]，将三脑分立架构、PCM相变忆阻器CIM、Psi-Anchor纯组合逻辑安全门、kappa-Snap根因代码、EML到PCM电导标定、MPW投片规划、竞品分析等10项增强集成到MuJoCo-Bench-IDO中。
+基于章锋SLOS（Silicon Life Operating System）论文第二版[26]，将三脑分立架构、PCM相变忆阻器CIM、Psi-Anchor纯组合逻辑安全门、kappa-Snap根因代码、EML到PCM电导标定、MPW投片规划、竞品分析等10项增强集成到MuJoCo-Bench-IDO中。
 
 ### 10.1 SLOS三脑分立架构
 
@@ -1622,26 +1622,24 @@ server = None        # 清除引用
 
 [19] TOMAS RSI安全治理架构: PG-Gate硬锚点与MUS双存. yb.tencent.com, 2026.
 
-[15] Hafner D, et al. DreamerV3: Mastering Diverse Domains through Scalable Offline Reinforcement Learning. 2023.
+[20] Hafner D, et al. DreamerV3: Mastering Diverse Domains through Scalable Offline Reinforcement Learning. 2023.
 
-[16] 智谱 GLM-5.2: long-horizon CoT VG-Pair self-verify (digital engine). 2026.
+[21] 智谱 GLM-5.2: long-horizon CoT VG-Pair self-verify (digital engine). 2026.
 
-[17] 银河通用 Galbot S1 @ CATL: WAM+WBC VG-Pair verified (embodied engine). 7×24 autonomous operation >3 months, 2025-2026.
+[22] 银河通用 Galbot S1 @ CATL: WAM+WBC VG-Pair verified (embodied engine). 7×24 autonomous operation >3 months, 2025-2026.
 
-[18] 章锋. 从皮克定理到工业智造：IDO/TOMAS下的离散几何先验. 微信公众号「复合体理学」, 2026.
+[23] 章锋. 从皮克定理到工业智造：IDO/TOMAS下的离散几何先验. 微信公众号「复合体理学」, 2026.
 
-[19] Hafner D, et al. DreamerV3: Mastering Diverse Domains through Scalable Offline Reinforcement Learning. 2023.
+[24] NM512. r2dreamer: PyTorch DreamerV3 reproduction. GitHub: https://github.com/NM512/r2dreamer, 2026.
 
-[20] NM512. r2dreamer: PyTorch DreamerV3 reproduction. GitHub: https://github.com/NM512/r2dreamer, 2026.
+[25] 章锋. 八元数非结合代数与EML蒸馏：从物理焊接到AGI认知架构. 微信公众号「复合体理学」, 2026-07-04. https://mp.weixin.qq.com/s/g_jxMzW5hVWg6Boba_YoEA
 
-[21] 章锋. 八元数非结合代数与EML蒸馏：从物理焊接到AGI认知架构. 微信公众号「复合体理学」, 2026-07-04. https://mp.weixin.qq.com/s/g_jxMzW5hVWg6Boba_YoEA
+[26] 章锋. 硅基生命操作系统（SLOS）：基于可控相变忆阻器存内计算的具身因果焊接机器人架构. 微信公众号「复合体理学」, 2026-07-04. https://mp.weixin.qq.com/s/6VvFnVwnsF5pHyyS8NY2uA
 
-[22] 章锋. 硅基生命操作系统（SLOS）：基于可控相变忆阻器存内计算的具身因果焊接机器人架构. 微信公众号「复合体理学」, 2026-07-04. https://mp.weixin.qq.com/s/6VvFnVwnsF5pHyyS8NY2uA
+[27] Kim M, et al. OpenVLA: An Open-Source Vision-Language-Action Model. arXiv:2406.09246, 2024.
 
-[23] Kim M, et al. OpenVLA: An Open-Source Vision-Language-Action Model. arXiv:2406.09246, 2024.
+[28] Octo Model Team. Octo: An Open-Source Generalist Robot Policy. arXiv:2405.12213, 2024.
 
-[24] Octo Model Team. Octo: An Open-Source Generalist Robot Policy. arXiv:2405.12213, 2024.
+[29] Brohan A, et al. RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control. arXiv:2307.15818, 2023.
 
-[25] Brohan A, et al. RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control. arXiv:2307.15818, 2023.
-
-[26] Viser: 3D Visualization Toolkit for Robotics. GitHub: https://github.com/nerfstudio-project/viser, 2024.
+[30] Viser: 3D Visualization Toolkit for Robotics. GitHub: https://github.com/nerfstudio-project/viser, 2024.

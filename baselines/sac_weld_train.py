@@ -41,6 +41,7 @@ try:
     from stable_baselines3 import SAC
     from stable_baselines3.common.callbacks import BaseCallback
     from stable_baselines3.common.noise import NormalActionNoise
+    from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
     _HAS_SB3: bool = True
 except ImportError:
     _HAS_SB3 = False
@@ -84,6 +85,7 @@ DEFAULT_BATCH_SIZE: int = 256
 DEFAULT_GAMMA: float = 0.99
 DEFAULT_TAU: float = 0.005
 DEFAULT_CHECKPOINT_DIR: str = "checkpoints/sac_weld"
+DEFAULT_N_ENVS: int = 1  # Number of parallel environments (1 = single env)
 
 
 @dataclass
@@ -578,25 +580,46 @@ class NumpySACStub:
 # Training function
 # ═══════════════════════════════════════════════════════════════
 
+def _make_env(weld_type: str, max_steps: int, seed: int = 0):
+    """Create a WeldingGymWrapper environment factory for VecEnv.
+
+    Args:
+        weld_type: Type of weld.
+        max_steps: Max steps per episode.
+        seed: Random seed for this env.
+
+    Returns:
+        A function that creates a WeldingGymWrapper instance.
+    """
+    def _init():
+        env = WeldingGymWrapper(weld_type=weld_type, max_steps=max_steps)
+        env.reset(seed=seed)
+        return env
+    return _init
+
+
 def train_sac(
     episodes: int = DEFAULT_EPISODES,
     max_steps: int = DEFAULT_STEPS,
     weld_type: str = DEFAULT_WELD_TYPE,
     learning_rate: float = DEFAULT_LEARNING_RATE,
     checkpoint_dir: str = DEFAULT_CHECKPOINT_DIR,
+    n_envs: int = DEFAULT_N_ENVS,
     verbose: int = 1,
 ) -> TrainingStats:
     """Train SAC on the welding environment.
 
     Uses stable-baselines3 SAC if available; otherwise falls back to
-    the numpy SAC stub.
+    the numpy SAC stub. Supports parallel environments via SubprocVecEnv
+    for accelerated training when n_envs > 1.
 
     Args:
         episodes: Number of training episodes.
         max_steps: Maximum steps per episode.
-        weld_type: Type of weld (flat, horizontal, vertical).
+        weld_type: Type of weld (flat, horizontal, vertical, overhead).
         learning_rate: Learning rate.
         checkpoint_dir: Directory for checkpoints.
+        n_envs: Number of parallel environments (1=single, >1=parallel).
         verbose: Verbosity level.
 
     Returns:
@@ -611,8 +634,28 @@ def train_sac(
         if verbose > 0:
             print(f"[SAC] Using stable-baselines3 SAC")
             print(f"  Episodes: {episodes}, Steps: {max_steps}, Weld: {weld_type}")
+            print(f"  Parallel envs: {n_envs}")
 
-        env = WeldingGymWrapper(weld_type=weld_type, max_steps=max_steps)
+        if n_envs > 1:
+            # ── Multi-env: SubprocVecEnv for true parallelism ──
+            env_fns = [
+                _make_env(weld_type=weld_type, max_steps=max_steps, seed=42 + i)
+                for i in range(n_envs)
+            ]
+            try:
+                vec_env = SubprocVecEnv(env_funs)
+                if verbose > 0:
+                    print(f"  Using SubprocVecEnv with {n_envs} workers")
+            except Exception as e:
+                if verbose > 0:
+                    print(f"  SubprocVecEnv failed ({e}), falling back to DummyVecEnv")
+                vec_env = DummyVecEnv(env_fns)
+        else:
+            # ── Single env ──
+            vec_env = DummyVecEnv([_make_env(weld_type=weld_type, max_steps=max_steps)])
+
+        # Wrap with VecMonitor for episode info logging
+        env = VecMonitor(vec_env)
 
         model = SAC(
             "MlpPolicy",
@@ -638,6 +681,8 @@ def train_sac(
         model.save(ckpt_path)
         if verbose > 0:
             print(f"  Checkpoint saved: {ckpt_path}.zip")
+
+        env.close()
 
     else:
         # ── Numpy SAC Stub Training ──
@@ -734,8 +779,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--weld-type", type=str, default=DEFAULT_WELD_TYPE,
-        choices=["flat", "horizontal", "vertical"],
+        choices=["flat", "horizontal", "vertical", "overhead"],
         help=f"Weld type (default: {DEFAULT_WELD_TYPE})",
+    )
+    parser.add_argument(
+        "--n-envs", type=int, default=DEFAULT_N_ENVS,
+        help=f"Number of parallel environments (default: {DEFAULT_N_ENVS}, "
+             f"recommend 4-8 for speedup)",
     )
     parser.add_argument(
         "--lr", type=float, default=DEFAULT_LEARNING_RATE,
@@ -764,6 +814,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  Episodes:    {args.episodes}")
     print(f"  Steps/ep:    {args.steps}")
     print(f"  Weld type:   {args.weld_type}")
+    print(f"  Parallel:    {args.n_envs} env(s)")
     print(f"  Learning rate: {args.lr}")
     print(f"  SB3 available: {_HAS_SB3}")
     print(f"  Gym available:  {_HAS_GYM}")
@@ -775,6 +826,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         weld_type=args.weld_type,
         learning_rate=args.lr,
         checkpoint_dir=args.checkpoint_dir,
+        n_envs=args.n_envs,
         verbose=args.verbose,
     )
 

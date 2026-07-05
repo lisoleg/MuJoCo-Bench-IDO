@@ -58,6 +58,22 @@ DEFAULT_SAC_CHECKPOINT: str = os.path.join(
     _PROJECT_ROOT, "checkpoints", "sac_weld", "sac_weld_flat.zip"
 )
 
+# ── 焊缝类型 → 最优参数映射 (AWS D1.1 经验值) ──
+WELD_TYPE_OPTIMAL: Dict[str, np.ndarray] = {
+    "flat":        np.array([200.0, 24.0, 2.0, 6.0]),   # 平焊: 标准参数
+    "horizontal":  np.array([180.0, 22.0, 3.0, 5.0]),   # 横焊: 降电流防铁水下淌
+    "vertical":    np.array([160.0, 20.0, 4.0, 4.0]),   # 立焊: 更低电流+大摆动
+    "overhead":    np.array([170.0, 21.0, 2.0, 7.0]),   # 仰焊: 高速防滴落
+}
+
+# ── 焊缝类型 → SAC checkpoint 路径 ──
+WELD_TYPE_CHECKPOINT: Dict[str, str] = {
+    wt: os.path.join(_PROJECT_ROOT, "checkpoints", "sac_weld", f"sac_weld_{wt}.zip")
+    for wt in WELD_TYPE_OPTIMAL
+}
+
+ALL_WELD_TYPES: List[str] = list(WELD_TYPE_OPTIMAL.keys())
+
 # 9 metrics definition: name -> (lower_better, unit, display_name)
 METRIC_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "eta_residual": {"lower_better": True, "unit": "", "display": "eta residual"},
@@ -114,18 +130,24 @@ class RandomAgent:
 class ConstantAgent:
     """Agent that always outputs fixed near-optimal parameters.
 
-    Uses [200A, 24V, 2mm weave, 6mm/s speed] which is close to the
-    optimal welding parameters but never adjusts.
+    Uses weld-type-specific optimal parameters from WELD_TYPE_OPTIMAL.
+    For flat welding: [200A, 24V, 2mm weave, 6mm/s speed].
 
     Attributes:
         name: Agent identifier.
         action: Fixed action array.
     """
 
-    def __init__(self) -> None:
-        """Initialize the constant agent."""
+    def __init__(self, weld_type: str = DEFAULT_WELD_TYPE) -> None:
+        """Initialize the constant agent with weld-type-specific params.
+
+        Args:
+            weld_type: Welding posture type for parameter selection.
+        """
         self.name: str = "Constant"
-        self.action: np.ndarray = np.array([200.0, 24.0, 2.0, 6.0], dtype=np.float64)
+        self.action: np.ndarray = WELD_TYPE_OPTIMAL.get(
+            weld_type, WELD_TYPE_OPTIMAL["flat"]
+        ).copy()
 
     def act(self, obs: np.ndarray) -> np.ndarray:
         """Return the fixed action.
@@ -158,6 +180,7 @@ class SACAgent:
     def __init__(
         self,
         checkpoint_path: str = DEFAULT_SAC_CHECKPOINT,
+        weld_type: str = DEFAULT_WELD_TYPE,
     ) -> None:
         """Initialize the SAC agent.
 
@@ -166,6 +189,7 @@ class SACAgent:
 
         Args:
             checkpoint_path: Path to the SAC checkpoint .zip file.
+            weld_type: Welding posture type for fallback parameters.
         """
         self.name: str = "SAC"
         self.model: Optional[Any] = None
@@ -182,8 +206,8 @@ class SACAgent:
         elif not os.path.exists(checkpoint_path):
             print(f"Warning: SAC checkpoint not found at {checkpoint_path}, using constant fallback")
 
-        # Fallback to constant near-optimal parameters
-        self._fallback: ConstantAgent = ConstantAgent()
+        # Fallback to weld-type-specific constant parameters
+        self._fallback: ConstantAgent = ConstantAgent(weld_type=weld_type)
 
     def act(self, obs: np.ndarray) -> np.ndarray:
         """Generate an action using the SAC model or fallback.
@@ -214,23 +238,27 @@ class SACAgent:
 class ExpertAgent:
     """Agent that uses near-optimal parameters with small perturbation.
 
-    Outputs [200 +/- 10, 24 +/- 1, 2 +/- 0.5, 6 +/- 0.5] with small
-    Gaussian noise each step. Represents a skilled human welder.
+    Outputs weld-type-specific optimal params +/- Gaussian noise.
+    Represents a skilled human welder who knows the right parameters
+    for each welding position.
 
     Attributes:
         name: Agent identifier.
         rng: numpy random generator.
     """
 
-    def __init__(self, seed: int = 456) -> None:
-        """Initialize the expert agent.
+    def __init__(self, seed: int = 456, weld_type: str = DEFAULT_WELD_TYPE) -> None:
+        """Initialize the expert agent with weld-type-specific params.
 
         Args:
             seed: Random seed for reproducibility.
+            weld_type: Welding posture type for parameter selection.
         """
         self.name: str = "Expert"
         self.rng: np.random.Generator = np.random.default_rng(seed)
-        self._base: np.ndarray = np.array([200.0, 24.0, 2.0, 6.0], dtype=np.float64)
+        self._base: np.ndarray = WELD_TYPE_OPTIMAL.get(
+            weld_type, WELD_TYPE_OPTIMAL["flat"]
+        ).copy()
         self._noise_std: np.ndarray = np.array([10.0, 1.0, 0.5, 0.5], dtype=np.float64)
 
     def act(self, obs: np.ndarray) -> np.ndarray:
@@ -268,25 +296,32 @@ class WeldingEvaluator:
         self,
         weld_type: str = DEFAULT_WELD_TYPE,
         max_steps: int = DEFAULT_MAX_STEPS,
-        sac_checkpoint: str = DEFAULT_SAC_CHECKPOINT,
+        sac_checkpoint: str = "",
     ) -> None:
         """Initialize the welding evaluator.
 
         Args:
             weld_type: Welding posture type.
             max_steps: Maximum simulation steps per agent.
-            sac_checkpoint: Path to SAC checkpoint file.
+            sac_checkpoint: Path to SAC checkpoint file. If empty, auto-resolve by weld_type.
         """
         self.weld_type: str = weld_type
         self.max_steps: int = max_steps
-        self.sac_checkpoint: str = sac_checkpoint
 
-        # Build agent list
+        # Auto-resolve SAC checkpoint by weld_type if not specified
+        if sac_checkpoint:
+            self.sac_checkpoint: str = sac_checkpoint
+        else:
+            self.sac_checkpoint = WELD_TYPE_CHECKPOINT.get(
+                weld_type, DEFAULT_SAC_CHECKPOINT
+            )
+
+        # Build agent list with weld-type-specific parameters
         self.agents: List[Any] = [
             RandomAgent(seed=123),
-            ConstantAgent(),
-            SACAgent(checkpoint_path=sac_checkpoint),
-            ExpertAgent(seed=456),
+            ConstantAgent(weld_type=weld_type),
+            SACAgent(checkpoint_path=self.sac_checkpoint, weld_type=weld_type),
+            ExpertAgent(seed=456, weld_type=weld_type),
         ]
 
     def _run_agent(self, agent: Any) -> Dict[str, float]:
@@ -517,9 +552,9 @@ class WeldingEvaluator:
 def run_evaluation(
     weld_type: str = DEFAULT_WELD_TYPE,
     max_steps: int = DEFAULT_MAX_STEPS,
-    sac_checkpoint: str = DEFAULT_SAC_CHECKPOINT,
+    sac_checkpoint: str = "",
 ) -> Dict[str, Any]:
-    """Run the full welding baseline evaluation.
+    """Run the full welding baseline evaluation for a single weld type.
 
     Convenience function that creates a WeldingEvaluator, runs it,
     and returns the result dictionary.
@@ -527,7 +562,7 @@ def run_evaluation(
     Args:
         weld_type: Welding posture type (flat, horizontal, vertical, overhead).
         max_steps: Maximum simulation steps per agent.
-        sac_checkpoint: Path to SAC checkpoint file.
+        sac_checkpoint: Path to SAC checkpoint file. If empty, auto-resolve.
 
     Returns:
         Evaluation result dictionary with agents, metrics, metric_info,
@@ -541,6 +576,71 @@ def run_evaluation(
     return evaluator.evaluate()
 
 
+def run_multi_type_evaluation(
+    weld_types: Optional[List[str]] = None,
+    max_steps: int = DEFAULT_MAX_STEPS,
+) -> Dict[str, Any]:
+    """Run evaluation across multiple weld types and generate cross-type comparison.
+
+    Args:
+        weld_types: List of weld types to evaluate. If None, evaluates all 4 types.
+        max_steps: Maximum simulation steps per agent.
+
+    Returns:
+        Dictionary with per-type results and cross-type summary:
+        {
+            "per_type": {weld_type: evaluation_result, ...},
+            "cross_type_summary": {agent_name: {weld_type: episode_return, ...}, ...},
+            "best_agent_overall": "Expert",
+            "timestamp": "..."
+        }
+    """
+    if weld_types is None:
+        weld_types = ALL_WELD_TYPES
+
+    print(f"\n{'#'*60}")
+    print(f"# Multi-Type Welding Evaluation: {weld_types}")
+    print(f"{'#'*60}")
+
+    per_type: Dict[str, Dict[str, Any]] = {}
+    cross_type: Dict[str, Dict[str, float]] = {}
+
+    for wt in weld_types:
+        print(f"\n{'='*60}")
+        print(f"Evaluating weld type: {wt}")
+        print(f"  Optimal params: {WELD_TYPE_OPTIMAL[wt]}")
+        print(f"{'='*60}")
+
+        result = run_evaluation(weld_type=wt, max_steps=max_steps)
+
+        # Add weld-type-specific info
+        result["optimal_params"] = WELD_TYPE_OPTIMAL[wt].tolist()
+        per_type[wt] = result
+
+        # Collect cross-type data
+        for agent_name, metrics in result.get("agents", {}).items():
+            if agent_name not in cross_type:
+                cross_type[agent_name] = {}
+            cross_type[agent_name][wt] = metrics.get("episode_return", 0.0)
+
+    # Determine best agent overall (highest mean return across types)
+    best_agent: str = "Expert"
+    best_mean_return: float = float("-inf")
+    for agent_name, type_returns in cross_type.items():
+        mean_ret = float(np.mean(list(type_returns.values())))
+        if mean_ret > best_mean_return:
+            best_mean_return = mean_ret
+            best_agent = agent_name
+
+    return {
+        "per_type": per_type,
+        "cross_type_summary": cross_type,
+        "best_agent_overall": best_agent,
+        "weld_types_evaluated": weld_types,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
 # CLI Entry Point
 # ═══════════════════════════════════════════════════════════════
@@ -550,29 +650,112 @@ def main() -> int:
 
     Runs the evaluation, prints JSON and Markdown table to stdout.
 
+    Supports:
+      --weld-type flat|horizontal|vertical|overhead  (default: flat)
+      --all-types                                    (evaluate all 4 types)
+      --max-steps N                                  (default: 3500)
+
     Returns:
         Exit code (0 = success).
     """
-    result: Dict[str, Any] = run_evaluation(
-        weld_type=DEFAULT_WELD_TYPE,
-        max_steps=DEFAULT_MAX_STEPS,
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Welding baseline evaluation engine"
     )
+    parser.add_argument(
+        "--weld-type", type=str, default=DEFAULT_WELD_TYPE,
+        choices=ALL_WELD_TYPES,
+        help=f"Weld type to evaluate (default: {DEFAULT_WELD_TYPE})",
+    )
+    parser.add_argument(
+        "--all-types", action="store_true",
+        help="Evaluate all 4 weld types (flat, horizontal, vertical, overhead)",
+    )
+    parser.add_argument(
+        "--max-steps", type=int, default=DEFAULT_MAX_STEPS,
+        help=f"Max steps per agent (default: {DEFAULT_MAX_STEPS})",
+    )
+    parser.add_argument(
+        "--output", type=str, default="",
+        help="Output JSON file path (default: stdout only)",
+    )
+    args = parser.parse_args()
 
-    # Print JSON output
-    print("\n" + "=" * 60)
-    print("JSON Output")
-    print("=" * 60)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    if args.all_types:
+        # ── Multi-type evaluation ──
+        result = run_multi_type_evaluation(max_steps=args.max_steps)
 
-    # Print Markdown table
-    evaluator: WeldingEvaluator = WeldingEvaluator()
-    md_table: str = evaluator.generate_markdown_table(result)
+        print("\n" + "=" * 60)
+        print("Multi-Type Evaluation — Cross-Type Summary")
+        print("=" * 60)
 
-    print("\n" + "=" * 60)
-    print("Markdown Comparison Table")
-    print("=" * 60)
-    print(md_table)
-    print("=" * 60)
+        # Print cross-type table
+        weld_types = result["weld_types_evaluated"]
+        agents = list(result["cross_type_summary"].keys())
+
+        header = "| Agent |" + "|".join(f" {wt} " for wt in weld_types) + "| Mean |"
+        sep = "|-------|" + "|".join(["------"] * len(weld_types)) + "|------|"
+        print(header)
+        print(sep)
+        for agent in agents:
+            cells = []
+            vals = []
+            for wt in weld_types:
+                v = result["cross_type_summary"][agent].get(wt, 0.0)
+                vals.append(v)
+                cells.append(f" {v:.2f} ")
+            mean_v = float(np.mean(vals))
+            cells.append(f" {mean_v:.2f} ")
+            print(f"| {agent} |" + "|".join(cells) + "|")
+
+        print(f"\n**Best Agent Overall:** {result['best_agent_overall']}")
+
+        # Print per-type details
+        for wt in weld_types:
+            type_result = result["per_type"][wt]
+            evaluator = WeldingEvaluator(weld_type=wt)
+            md_table = evaluator.generate_markdown_table(type_result)
+            print(f"\n--- {wt.upper()} ---")
+            print(f"Optimal: {WELD_TYPE_OPTIMAL[wt]}")
+            print(md_table)
+
+        # Save to file if requested
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            print(f"\nResults saved to: {args.output}")
+
+    else:
+        # ── Single-type evaluation ──
+        result = run_evaluation(
+            weld_type=args.weld_type,
+            max_steps=args.max_steps,
+        )
+
+        print(f"\nOptimal params for {args.weld_type}: {WELD_TYPE_OPTIMAL[args.weld_type]}")
+
+        # Print JSON output
+        print("\n" + "=" * 60)
+        print("JSON Output")
+        print("=" * 60)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+        # Print Markdown table
+        evaluator = WeldingEvaluator(weld_type=args.weld_type)
+        md_table = evaluator.generate_markdown_table(result)
+
+        print("\n" + "=" * 60)
+        print("Markdown Comparison Table")
+        print("=" * 60)
+        print(md_table)
+        print("=" * 60)
+
+        # Save to file if requested
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            print(f"\nResults saved to: {args.output}")
 
     return 0
 
