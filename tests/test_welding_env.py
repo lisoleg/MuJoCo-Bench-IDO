@@ -283,8 +283,8 @@ class TestWaypoints:
         """环境生成焊缝 waypoints."""
         env = WeldingEnv(weld_type="flat")
         assert env.waypoints is not None
-        assert env.waypoints.shape == (100, 3), \
-            f"Expected (100, 3), got {env.waypoints.shape}"
+        assert env.waypoints.shape == (20, 3), \
+            f"Expected (20, 3), got {env.waypoints.shape}"
 
     def test_waypoints_along_x(self):
         """焊缝 waypoints 沿 X 轴方向."""

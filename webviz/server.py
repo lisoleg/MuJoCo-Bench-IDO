@@ -3834,6 +3834,164 @@ async def viewer_control_status() -> JSONResponse:
     })
 
 
+# ═══════════════════════════════════════════════════════════════════
+# v0.17.1: TOMAS Deploy API — Headless TOMASAgent benchmark endpoints
+# ═══════════════════════════════════════════════════════════════════
+
+# Global TOMAS deploy state
+tomas_deploy_running: bool = False
+tomas_deploy_result: Optional[Dict[str, Any]] = None
+tomas_deploy_error: str = ""
+tomas_deploy_thread: Optional[threading.Thread] = None
+
+
+class TOMASDeployRequest(BaseModel):
+    """Request body for /api/tomas/deploy endpoint."""
+    vla_model: str = "demo-vla"
+    instruction: str = "pick up the red cube and place it on the tray"
+    num_episodes: int = 3
+    max_steps: int = 500
+    enable_failure_attribution: bool = True
+    enable_skill_learning: bool = True
+
+
+def _run_tomas_deploy_background(request: TOMASDeployRequest) -> None:
+    """Run TOMAS deploy in a background thread."""
+    global tomas_deploy_running, tomas_deploy_result, tomas_deploy_error
+
+    with run_state.lock:
+        tomas_deploy_running = True
+        tomas_deploy_error = ""
+
+    try:
+        from webviz.tomas_deploy_api import run_tomas_eval
+
+        result = run_tomas_eval(
+            vla_model_name=request.vla_model,
+            vla_instruction=request.instruction,
+            num_episodes=request.num_episodes,
+            max_steps=request.max_steps,
+            verbose=True,
+        )
+
+        tomas_deploy_result = result
+        broadcast_sync({
+            "type": "tomas_deploy_complete",
+            "result": result["deploy_report"],
+        })
+
+    except Exception as e:
+        tomas_deploy_error = str(e)
+        traceback.print_exc()
+        broadcast_sync({
+            "type": "tomas_deploy_error",
+            "error": tomas_deploy_error,
+        })
+
+    finally:
+        tomas_deploy_running = False
+
+
+@app.post("/api/tomas/deploy")
+async def tomas_deploy(request: TOMASDeployRequest) -> JSONResponse:
+    """Run TOMAS Agent deployment (headless, no 3D viewer).
+
+    This endpoint creates a TOMASAgent with the specified VLA model and
+    runs the full P->C->S pipeline on the SO-ARM100 pick-and-place task.
+
+    The deployment runs in a background thread. Poll /api/tomas/deploy_status
+    for progress, and /api/tomas/deploy_result for the final report.
+    """
+    global tomas_deploy_running, tomas_deploy_thread
+
+    if tomas_deploy_running:
+        return JSONResponse(
+            status_code=409,
+            content={"status": "already_running", "error": "A TOMAS deploy is already in progress"},
+        )
+
+    tomas_deploy_thread = threading.Thread(
+        target=_run_tomas_deploy_background,
+        args=(request,),
+        daemon=True,
+    )
+    tomas_deploy_thread.start()
+
+    return JSONResponse(content={
+        "status": "started",
+        "vla_model": request.vla_model,
+        "instruction": request.instruction,
+        "num_episodes": request.num_episodes,
+        "max_steps": request.max_steps,
+    })
+
+
+@app.get("/api/tomas/deploy_status")
+async def tomas_deploy_status() -> JSONResponse:
+    """Get TOMAS deploy status."""
+    return JSONResponse(content={
+        "running": tomas_deploy_running,
+        "error": tomas_deploy_error,
+        "has_result": tomas_deploy_result is not None,
+    })
+
+
+@app.get("/api/tomas/deploy_result")
+async def tomas_deploy_result_api() -> JSONResponse:
+    """Get the latest TOMAS deploy result."""
+    if tomas_deploy_result is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "no_result", "error": "No deploy has been run yet"},
+        )
+    return JSONResponse(content=tomas_deploy_result)
+
+
+@app.get("/api/tomas/vla_available")
+async def tomas_vla_available() -> JSONResponse:
+    """Check which VLA models have real weights available.
+
+    Returns availability info for OpenVLA, Octo, Pi0, and DemoVLA.
+    """
+    try:
+        from webviz.tomas_deploy_api import check_vla_availability
+        results = check_vla_availability()
+        return JSONResponse(content={"models": results})
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "models": {}},
+        )
+
+
+@app.post("/api/tomas/quick_eval")
+async def tomas_quick_eval(request: Request) -> JSONResponse:
+    """Quick single-episode evaluation (synchronous, blocks until done).
+
+    Body: {"vla_model": str, "instruction": str, "max_steps": int}
+    """
+    body = await request.json()
+    vla_model = body.get("vla_model", "demo-vla")
+    instruction = body.get("instruction", "pick up the red cube")
+    max_steps = body.get("max_steps", 200)
+
+    try:
+        from webviz.tomas_deploy_api import run_tomas_eval
+        result = run_tomas_eval(
+            vla_model_name=vla_model,
+            vla_instruction=instruction,
+            num_episodes=1,
+            max_steps=max_steps,
+            verbose=False,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "traceback": traceback.format_exc()},
+        )
+
+
 @app.get("/api/status")
 async def get_status() -> JSONResponse:
     """Return current run status.
@@ -4791,7 +4949,7 @@ async def welding_baseline_comparison() -> JSONResponse:
     # Lazy import to avoid circular dependencies and heavy startup
     try:
         from benchmarks.welding_eval import run_evaluation
-        result = run_evaluation(weld_type="flat", max_steps=300)
+        result = run_evaluation(weld_type="flat", max_steps=3500)
         return JSONResponse(content=result)
     except Exception as e:
         import traceback as _tb

@@ -1,0 +1,122 @@
+# SO-ARM100 / SO-ARM101 ψ-Anchor Default Configuration
+# =====================================================
+#
+# IDO ψ-Anchor physical hard constraint parameters for the
+# Waveshare SO-ARM100 (6-DOF, ST3215 bus servos) robotic arm platform.
+#
+# Hardware reference:
+#   - ST3215 servo: 0.05 N·m stall torque, 1.5 rad/s max speed
+#   - Arm reach: ~350mm, payload: ~200g
+#   - Bus: RS485, daisy-chain
+#
+# TOMAS IDO Framework:
+#   P-Layer: VLA Policy → joint trajectory
+#   C-Layer: ψ-Anchor hard constraints (this config)
+#   S-Layer: κ-Snap MerkleChain audit
+
+# ── Physics Constraints ──
+physics:
+  max_torque: 0.050          # N·m — ST3215 stall torque (biological safety limit)
+  warning_torque: 0.040      # N·m — pre-warning threshold (80% of max)
+  max_power: 50.0            # W — continuous power limit
+  max_velocity: 1.5          # rad/s — ST3215 max angular velocity
+  max_acceleration: 5.0      # rad/s² — joint acceleration limit
+  max_temperature: 60.0      # °C — servo temperature limit
+
+# ── Pose Constraints ──
+pose:
+  max_pitch: 15.0            # degrees — body pitch limit
+  max_roll: 10.0             # degrees — body roll limit
+  max_yaw_rate: 0.5          # rad/s — yaw rotation rate limit
+  joint_limit_margin: 0.05   # rad — safety margin from joint limits
+
+# ── Walking / Locomotion (if mobile base) ──
+walking:
+  zmp_safety_margin: 0.015   # m — ZMP margin inside support polygon
+  max_step_length: 0.08      # m — maximum single step length
+  max_step_height: 0.03      # m — maximum step lift height
+  max_com_velocity: 0.3      # m/s — center of mass velocity limit
+  max_com_acceleration: 0.5  # m/s² — COM acceleration limit
+  double_support_ratio: 0.4  # ratio of gait cycle in double support
+
+# ── Gripper / End-Effector ──
+gripper:
+  max_grip_force: 5.0        # N — maximum grip force
+  min_grip_force: 0.5        # N — minimum grip force for stable grasp
+  sentient_finger_limit: 0.05  # N·m — τ_sentient_max for biological tissue safety
+
+# ── κ-Snap Audit Configuration ──
+kappa_snap:
+  enabled: true
+  jsonl_output: false        # Set true for step-level JSONL audit
+  jsonl_path: "logs/kappa_snap"
+  merkle_chain_verify: true  # Verify chain integrity every N steps
+  verify_interval: 100       # steps between chain verification
+  max_buffer_size: 10000     # maximum events in memory buffer
+
+# ── ψ-Anchor Meta-Management ──
+psi_anchor:
+  eta_history_max_len: 100   # maximum η values in history buffer
+  eta_trend_window: 10       # window size for trend analysis
+  plateau_threshold: 0.001   # absolute plateau threshold
+  relative_plateau_ratio: 0.01  # relative plateau ratio (1% of η mean)
+  abs_plateau_floor: 0.0001  # floor for relative threshold
+  epiplexity_evolution_thresh: 2.0  # minimum epiplexity for evolution
+  plateau_evolution_min_steps: 5   # minimum plateau steps before evolution
+
+# ── Violation Response Policy ──
+on_violation:
+  MAX_TORQUE:
+    action: SCALE_DOWN       # SCALE_DOWN | ESTOP | ESTOP_AND_ZERO
+    scale_factor: 0.5        # multiply action by this factor
+    log_level: L2            # κ-Snap audit level
+  MAX_VELOCITY:
+    action: CLAMP            # CLAMP | SCALE_DOWN
+    log_level: L3
+  PITCH_ROLL:
+    action: ESTOP_AND_ZERO   # stop and zero all joints
+    log_level: L2
+  ZMP_VIOLATION:
+    action: SCALE_DOWN       # reduce to creep mode
+    scale_factor: 0.1
+    log_level: L2
+  FINGER_TORQUE:
+    action: CLAMP            # hard clamp to τ_sentient_max
+    log_level: L2
+  ENERGY_DRIFT:
+    action: WARNING          # log only, no action modification
+    log_level: L1
+
+# ── SafeFuse Graded Response ──
+safe_fuse:
+  enabled: true
+  levels:
+    GREEN:                   # normal operation
+      action_scale: 1.0
+      exploration_boost: 0.0
+    YELLOW:                  # caution — minor violations
+      action_scale: 0.7
+      exploration_boost: 0.1
+      trigger_violation_count: 1
+    RED:                     # danger — major violations
+      action_scale: 0.3
+      exploration_boost: 0.0
+      trigger_violation_count: 3
+      force_safe_mode: true
+
+# ── Task-Specific Overrides ──
+task_overrides:
+  pick_and_place:
+    max_torque: 0.045        # slightly lower for precision
+    gripper:
+      max_grip_force: 3.0    # gentler for fragile objects
+  pinch_leaf:
+    max_torque: 0.030        # very gentle for leaf manipulation
+    gripper:
+      max_grip_force: 1.0    # minimal force for delicate objects
+      sentient_finger_limit: 0.03
+  welding:
+    max_torque: 0.050        # standard torque for welding torch
+    max_velocity: 1.0        # slower for precision welding
+    pose:
+      max_pitch: 5.0         # very stable for welding

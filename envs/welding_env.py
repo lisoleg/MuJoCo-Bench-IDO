@@ -63,7 +63,7 @@ WELD_TYPE_KEYFRAMES: Dict[str, str] = {
 
 # ── 焊缝 waypoint 配置 ──
 WAYPOINT_SPACING_MM: float = 2.0   # 焊缝上相邻 waypoint 间距
-NUM_WAYPOINTS: int = 100           # 焊缝上的 waypoint 数量
+NUM_WAYPOINTS: int = 20            # 焊缝上的 waypoint 数量 (20×2mm=40mm, 3500步可跑完)
 
 # ── 工件参数 (与 XML 一致) ──
 WORKPIECE_CENTER: np.ndarray = np.array([1.0, 0.0, 0.265])  # 工件中心世界坐标

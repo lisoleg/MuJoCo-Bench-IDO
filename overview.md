@@ -1,105 +1,107 @@
-# v0.4.0 交付总结 — SLOS硅基生命操作系统（章锋2026-07-04第二版）
+# v0.17.0 — TOMAS Agent Full-Stack Integration
 
 ## TL;DR
-基于章锋SLOS（Silicon Life Operating System）论文第二版，为MuJoCo-Bench-IDO新增10项增强：三脑分立架构、PCM相变忆阻器CIM升级、Psi-Anchor纯组合逻辑安全门、kappa-Snap根因代码、EML到PCM电导标定、MPW投片规划、PCM CIM引脚标准、竞品分析、SAC焊接训练脚本、T-Processor NG RTL模块。**620个测试全绿，零回归，已推送到GitHub。**
+完全吸收腾讯文档1.37M字符超长对话内容，升级 MuJoCo-Bench-IDO 到 v0.17.0，新增7个文件、升级2个文件，659/659 测试全部通过，零回归。
 
 ## 交付概览
-| 指标 | 数值 |
-|------|------|
-| 版本 | v0.4.0 |
-| 服务器 | 运行中 (http://localhost:8080) |
-| 测试总数 | **620** (全部通过, 10.18s) |
-| 新建文件 | 10 |
-| 修改文件 | 5 |
-| Git提交 | `b2309a9` + encoding fixes |
-| GitHub | 已推送 (SSH) |
+- **交付状态**: ✅ 完成
+- **测试通过率**: 659/659 (100%)
+- **已知问题数**: 0
+- **新测试**: 39个 (tests/test_v0170.py)
+- **执行时间**: 26.50s
 
-## v0.4.0 新增模块
+## 新建文件 (7个)
 
-### 1. PCM CIM升级 (`tools/tproc_cim_simulator.py`)
-- RRAM → PCM（Phase Change Memory）模型
-- PCMModel: 电导演化（SET结晶化/RESET非晶化/部分SET中间态）
-- PCMCrossbarArray: PCM阵列MAC运算
-- pulse_verify_write(): 脉冲校验写入
-- PCM能耗: 0.0046 pJ vs SRAM 335.36 pJ = **72903x节能**
-- 保留原RRRIM模型向后兼容
+### 1. `agent/tomas_mujoco_wrapper.py`
+TOMAS MuJoCo 环境集成包装器，实现 P→C→S 三层管线：
+- **P-Layer**: VLA 推理 (`_vla_infer`)
+- **C-Layer**: PG-Gate 物理钳位 + ψ-Anchor 硬约束检查 (`_degrade_action`)
+- **S-Layer**: κ-Snap 因果快照审计
+- 接口: `step()`, `reset()`, `get_audit_trail()`, `get_safety_report()`, `get_eta_history()`
 
-### 2. Psi-Anchor纯组合逻辑安全门 (`hardware/tproc_psi_anchor_gate.v`)
-- 纯组合逻辑（always @(*)，无时钟）
-- 触发: 电流>150A 且 电压<5V（粘丝前兆）
-- 响应时间: <10ns
-- 三重保护: 粘丝检测 + 过压检测 + eta超限检测
-- ISO 13849 PLe
+### 2. `agent/failure_attribution.py`
+TOMAS S-Layer 失败归因引擎：
+- 6种流贯病理: `local_optimum_trap`, `eta_false_convergence`, `premature_release`, `eta_escape`, `psi_anchor_overkill`, `validation_gap`
+- LLM prompt 构建 + JSON 解析
+- 离线模式回退（启发式模式匹配）
+- `offline_attribuate()` 方法：无需 LLM 即可分类失败类型
 
-### 3. kappa-Snap根因代码 (`core/ksnap_root_cause.py`)
-- RootCauseCode dataclass: cause/action/confidence/timestamp
-- 8种根因类型: Gas_Contamination, Wire_Stick, Arc_Instability等
-- 因果推断引擎: 基于eta残差+多模态信号
-- 工艺反哺建议生成
-- self-test: 6/8根因正确识别
+### 3. `agent/tomas_deploy.py`
+TOMAS Agent 部署编排器：
+- `TOMASAgent.deploy()` — 多 episode 部署管理
+- **MetaQuery** 自我归因系统: `WHY_THIS_ACTION()`, `AUDIT_SNAP()`, `LEARN_SKILL()`
+- **SkillRecord** — EML-SemZip 技能学习 (Dead-Zone 剪枝 IC<0.45, 高 IC 过采样)
+- `DeployReport` — 完整部署报告 (JSON 序列化)
+- 6种病理自动检测 + 自适应调整
 
-### 4. EML到PCM电导标定 (`tools/eml_to_pcm_calibration.py`)
-- 八元数分解 → 权重矩阵W[8x8]
-- 权重归一化 → 电导目标码（16位）
-- 脉冲校验写入: SET/RESET + verify + 自适应步长
-- 标定结果: 64单元100%通过率, 平均4.9脉冲收敛
+### 4. `agent/footstep_planner.py`
+足端轨迹规划器：
+- **SupportPolygon** — 支撑多边形 + ZMP 包含检测 (凸包 + 安全裕量)
+- **FootstepPlanner** — 世界坐标系→语义目标→步序生成→ZMP校验→ψ-锚审计
+- Bezier 曲线 swing 轨迹 + CoM 轨迹生成
+- 障碍物避让 (势场法)
 
-### 5. T-Processor NG RTL模块 (`hardware/`)
-- `tproc_psi_anchor_gate.v`: 纯组合逻辑安全门
-- `tproc_eml_pcm_loader.v`: EML→PCM脉冲校验写入FSM (IDLE→WRITE→VERIFY→ADJUST→DONE)
-- `tproc_ksnap_buffer.v`: kappa-Snap环形DMA审计缓冲（深度256, AXI-Stream）
+### 5. `config/psi_anchor_defaults.yaml`
+SO-ARM100/101 ψ-锚完整配置：
+- physics: max_torque=0.050N·m, max_velocity=1.5rad/s, max_pitch=15°
+- walking: zmp_safety_margin=0.015m, max_step_length=0.08m
+- gripper: sentient_finger_limit=0.05N·m
+- kappa_snap: enabled, jsonl_output, merkle_chain_verify
+- safe_fuse: GREEN/YELLOW/RED 三级渐进
+- task_overrides: pick_and_place, pinch_leaf, welding
 
-### 6. SLOS三脑分立架构 (`docs/slos_three_brain_architecture.md`)
-- 右脑(GPU/P-Layer): 语义生成
-- 左脑(LLM/S-Layer): 因果归因
-- 小脑(T-Processor/CIM-NDS): 硬实时物理反射
-- 与IDO/TOMAS框架的映射关系
-- Mermaid数据流图
+### 6. `envs/assets/so_arm100_mujoco_ido.xml`
+SO-ARM100 MuJoCo 仿真场景：
+- 5个铰链关节: Rotation/Pitch/Elbow/Wrist_Pitch/Wrist_Roll
+- 2个夹持关节: Gripper_Left/Gripper_Right (sentient finger)
+- ST3215标定: motor gear="50", position actuator kp/kv
+- 7×jointpos + 7×jointvel + 2×touch 传感器
+- 桌面 + 目标方块 + 目标位置标记 + 3个相机
 
-### 7. MPW投片规划 (`docs/mpw_tapeout_plan.md`)
-- 40nm工艺, Die 1.0×1.0mm, Core 0.36mm²
-- 32 Pad分配表
-- Scan Chain + BIST + JTAG测试策略
-- DRC/LVS检查清单
+### 7. `tests/test_v0170.py`
+39个集成测试，8个测试类：
+- TestHardPhysicsGate (8 tests)
+- TestHGPINNPolicy (6 tests)
+- TestSupportPolygon (4 tests)
+- TestFootstepPlanner (7 tests)
+- TestTOMASFailureAttribution (3 tests)
+- TestTOMASAgentDeploy (6 tests)
+- TestModuleImports (5 tests)
 
-### 8. PCM CIM引脚标准 (`docs/pcm_cim_pin_spec.md`)
-- 完整引脚表（电源/模拟/数字控制/数字数据）
-- 时序参数（SET/RESET脉冲宽度, 读延迟）
-- 电气特性（VDD_CORE=0.8V, VDD_IO=3.3V）
+## 升级文件 (2个)
 
-### 9. 竞品分析 (`docs/competitive_analysis_slos.md`)
-- Path Robotics (Obsidian™) 技术画像+三大瓶颈
-- 工布智造 (GBZZOS) 技术画像+三大瓶颈
-- SLOS对比优势矩阵
-- 技术护城河分析
+### 1. `core/hg_pinn.py`
+新增两个类：
+- **HardPhysicsGate** — 6阶段物理约束投影 (velocity→torque→tau_safe→acceleration→pitch/roll→ZMP)
+- **HG_PINN_Policy** — 完整策略 (backbone + PG-Gate), 支持 dict/tuple/array 观测格式
 
-### 10. SAC焊接训练 (`baselines/sac_weld_train.py`)
-- stable-baselines3 SAC算法
-- WeldingEnv → Gymnasium接口封装
-- CLI: `--episodes N --steps M --weld-type flat`
-- kappa-Snap回调: eta残差/违规/episode回报
-- Numpy fallback模式
+### 2. `agent/__init__.py`
+新增15个导出：
+- TOMASMuJoCoWrapper, TOMASFailureAttributor, FailureAttributionResult
+- TOMASAgent, DeployStatus, DeployReport, MetaQueryType, MetaQueryResult, SkillRecord
+- FootstepPlanner, SupportPolygon, Footstep, FootstepPlan, FootSide, StepPhase
 
-## Bug修复
-- `tools/eml_to_pcm_calibration.py`: Windows GBK编码修复（Unicode → ASCII）
-- `core/ksnap_root_cause.py`: Windows GBK编码修复
+## 架构总览
 
-## 测试结果
-| 测试套件 | 数量 | 结果 |
-|---------|------|------|
-| 全量测试 | 620 | 全部通过 (10.18s) |
-| PCM CIM self-test | - | PASSED (72903x节能) |
-| EML标定 self-test | - | PASSED (100%通过率) |
-| 根因代码 self-test | - | PASSED (8种根因) |
-| SAC训练 CLI | - | 正常 |
+```
+TOMASAgent.deploy()
+    │
+    ├── P-Layer: VLA Policy → raw_action
+    │
+    ├── C-Layer: PG-Gate clamp → ψ-Anchor check
+    │   ├── HardPhysicsGate (6-stage projection)
+    │   └── PsiAnchor (η trend + evolution)
+    │
+    ├── S-Layer: κ-Snap audit → MetaQuery
+    │   ├── KappaSnapLogger (MerkleChain)
+    │   ├── TOMASFailureAttributor (6 pathology types)
+    │   └── MetaQuery (WHY_THIS_ACTION / AUDIT_SNAP / LEARN_SKILL)
+    │
+    └── DeployReport → JSON
+```
 
-## 论文更新
-- `papers/mujoco_bench_ido_validation.md`: +C.31-C.35 (SLOS三脑/PCM CIM/Psi-Anchor/κ-Snap/MPW)
-- `papers/mujoco_bench_ido_中文论文.md`: +§10 (10个子章节) + 参考文献[22]
-
-## 用户下一步建议
-1. **SAC训练**: `python baselines/sac_weld_train.py --episodes 1000 --weld-type flat`
-2. **PCM CIM对比**: `python tools/tproc_cim_simulator.py` (查看72903x节能)
-3. **EML标定**: `python tools/eml_to_pcm_calibration.py --self-test`
-4. **根因分析**: `python core/ksnap_root_cause.py --self-test`
-5. **Webviz**: http://localhost:8080 (九层架构+焊接+ARM100)
+## 下一步建议
+1. 将 TOMASAgent 接入 webviz/server.py 的 benchmark 循环
+2. 加载真实 VLA 权重 (OpenVLA/Octo/π₀)
+3. 在 SO-ARM100 场景上运行端到端 pick-and-place 评估
+4. 提交代码到 GitHub

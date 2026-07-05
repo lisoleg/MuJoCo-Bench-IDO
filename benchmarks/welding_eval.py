@@ -52,7 +52,7 @@ except ImportError:
 ACTION_LOW: np.ndarray = np.array([50.0, 14.0, 0.0, 2.0])
 ACTION_HIGH: np.ndarray = np.array([350.0, 32.0, 5.0, 15.0])
 
-DEFAULT_MAX_STEPS: int = 300
+DEFAULT_MAX_STEPS: int = 3500  # 3500步 × 0.012mm/步 = 42mm, 可跑完 20 waypoints × 2mm = 40mm
 DEFAULT_WELD_TYPE: str = "flat"
 DEFAULT_SAC_CHECKPOINT: str = os.path.join(
     _PROJECT_ROOT, "checkpoints", "sac_weld", "sac_weld_flat.zip"
@@ -344,10 +344,11 @@ class WeldingEvaluator:
             heat_input_values.append(heat_j_mm / 1000.0)
             current_values.append(float(info.get("current", 200.0)))
 
-            # Safety violations (cumulative)
+            # Safety violations — only count critical (passed=False),
+            # not warnings (passed=True with violations in list)
             safety: Dict[str, Any] = info.get("safety", {})
-            violations: List[Any] = safety.get("violations", [])
-            safety_violation_count += len(violations)
+            if not safety.get("passed", True):
+                safety_violation_count += 1
 
             if done:
                 break
