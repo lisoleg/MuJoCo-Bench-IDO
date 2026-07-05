@@ -4392,23 +4392,38 @@ def _launch_welding_viewer(weld_type: str = "flat") -> None:
         env.reset()
         welding_viewer_weld_type = weld_type
 
-        # ── 3. Create or reuse ViserServer (ports 8097-8102) ──
+        # ── 3. Create or reuse ViserServer (ports 8097-8112) ──
         viser_server = None
         actual_port: int = 0
 
         if welding_persistent_server is not None:
             try:
                 _check_port = welding_persistent_server._websock_server._port
-                viser_server = welding_persistent_server
-                actual_port = welding_persistent_port
-                print(f"v0.4.1: Reusing persistent welding ViserServer on port {actual_port}")
+                # Verify the server is actually alive by checking the port
+                import socket as _sock
+                _test_sock = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                _test_sock.settimeout(0.5)
+                _result = _test_sock.connect_ex(("127.0.0.1", _check_port))
+                _test_sock.close()
+                if _result == 0:
+                    viser_server = welding_persistent_server
+                    actual_port = welding_persistent_port
+                    print(f"v0.4.1: Reusing persistent welding ViserServer on port {actual_port}")
+                else:
+                    raise RuntimeError(f"Port {_check_port} not responding")
             except Exception:
+                # Old server is stale — stop it and free the port
+                try:
+                    welding_persistent_server.stop()
+                except Exception:
+                    pass
                 welding_persistent_server = None
                 welding_persistent_port = 0
+                _time.sleep(1.0)  # Wait for ports to be released
 
         if viser_server is None:
-            for _attempt in range(6):
-                _try_port = 8097 + _attempt  # Welding uses 8097-8102
+            for _attempt in range(16):
+                _try_port = 8097 + _attempt  # Welding uses 8097-8112
                 try:
                     viser_server = ViserServer(port=_try_port, verbose=False)
                     actual_port = viser_server._websock_server._port
@@ -4417,11 +4432,11 @@ def _launch_welding_viewer(weld_type: str = "flat") -> None:
                     print(f"v0.4.1: Created welding ViserServer on port {actual_port}")
                     break
                 except (OSError, RuntimeError) as _oe:
-                    print(f"Welding ViserServer port {_try_port} failed (attempt {_attempt+1}/6): {_oe}")
-                    if _attempt < 5:
-                        _time.sleep(2.0)
+                    print(f"Welding ViserServer port {_try_port} failed (attempt {_attempt+1}/16): {_oe}")
+                    if _attempt < 15:
+                        _time.sleep(0.5)
             if viser_server is None:
-                raise RuntimeError("Failed to create welding ViserServer after 6 attempts on ports 8097-8102")
+                raise RuntimeError("Failed to create welding ViserServer after 16 attempts on ports 8097-8112")
 
         actual_port = viser_server._websock_server._port
         welding_viewer_url = f"http://localhost:{actual_port}"
@@ -4573,13 +4588,23 @@ def _launch_welding_viewer(weld_type: str = "flat") -> None:
                 _time.sleep(0.001)
         finally:
             welding_viewer_running = False
-            _welding_running = False
-            print("v0.4.1: Welding viewer loop ended")
+        _welding_running = False
+        print("v0.4.1: Welding viewer loop ended")
+        # NOTE: persistent server intentionally kept alive for reuse on next start
 
     except Exception as e:
         welding_viewer_error = str(e)
         welding_viewer_running = False
         _welding_running = False
+        # Clean up persistent server on error to free ports
+        try:
+            if welding_persistent_server is not None:
+                welding_persistent_server.stop()
+                print("v0.4.1: Cleaned up welding persistent server after error")
+        except Exception:
+            pass
+        welding_persistent_server = None
+        welding_persistent_port = 0
         import traceback
         print(f"v0.4.1: Welding viewer error: {e}")
         traceback.print_exc()
@@ -4709,7 +4734,8 @@ async def welding_start(weld_type: str = "flat") -> JSONResponse:
         return JSONResponse(
             status_code=504,
             content={"status": "timeout",
-                     "error": "Welding viewer startup timed out",
+                     "error": welding_viewer_error or "Welding viewer startup timed out",
+                     "weld_type": weld_type,
                      "available": True},
         )
 
@@ -4729,6 +4755,7 @@ async def welding_stop() -> JSONResponse:
         JSONResponse with status.
     """
     global _welding_running, welding_viewer_running, welding_viewer_url
+    global welding_persistent_server, welding_persistent_port, welding_viewer_error
 
     if not WELDING_AVAILABLE:
         return JSONResponse(
@@ -4739,6 +4766,20 @@ async def welding_stop() -> JSONResponse:
     _welding_running = False
     welding_viewer_running = False
     welding_viewer_url = ""
+
+    # Clean up persistent ViserServer to free ports for next start
+    if welding_persistent_server is not None:
+        try:
+            welding_persistent_server.stop()
+            print("v0.4.1: Welding persistent ViserServer stopped")
+        except Exception as _e:
+            print(f"v0.4.1: Error stopping welding persistent server: {_e}")
+        welding_persistent_server = None
+        welding_persistent_port = 0
+        # Give the OS time to release the sockets
+        time.sleep(1.5)
+
+    welding_viewer_error = ""
     return JSONResponse(content={"status": "stopped"})
 
 

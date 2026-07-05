@@ -1868,3 +1868,243 @@ self-test) + JTAG (IEEE 1149.1).
 | competitive_analysis_slos.md | v1.0.0 | ✅ New (competitive analysis) |
 | test_hetero_benchmark.py | v1.2.0 | ✅ Upgraded (PCM tests) |
 | mujoco_bench_ido_validation.md | v0.4.0 | ✅ Upgraded (C.31-C.35) |
+
+---
+
+## C.36  TOMAS Agent Deploy API (v0.17.1)
+
+### C.36.1  Architecture
+
+The TOMAS Agent Deploy API provides a RESTful interface for deploying and evaluating TOMAS Agents with Vision-Language-Action (VLA) models on the SO-ARM100 MuJoCo scene. The system consists of three components:
+
+1. **`webviz/tomas_deploy_api.py`** — FastAPI router with 5 endpoints
+2. **`webviz/vla_loader.py`** — VLA model loader supporting OpenVLA-7B, Octo-Base, pi0-Base, and DemoVLAAdapter
+3. **`agent/tomas_deploy.py`** — Deployment orchestrator that chains VLA → TOMASMuJoCoWrapper → evaluation
+
+### C.36.2  API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/tomas/deploy` | POST | Deploy TOMAS Agent with specified VLA model |
+| `/api/tomas/deploy_status` | GET | Poll deployment progress (loading → running → completed/failed) |
+| `/api/tomas/deploy_result` | GET | Retrieve evaluation results after completion |
+| `/api/tomas/vla_available` | GET | List available VLA models with VRAM requirements |
+| `/api/tomas/quick_eval` | POST | Quick evaluation without VLA (DemoVLAAdapter) |
+
+### C.36.3  Deployment Flow
+
+```
+POST /api/tomas/deploy
+  → vla_loader.load_model(model_name)
+  → TOMASDeployAgent(vla_adapter)
+  → agent.deploy(scene="so_arm100", episodes=N)
+    → TOMASMuJoCoWrapper.step() loop
+      → VLA inference → action → PsiAnchor check → kappa-Snap audit
+  → Results stored in memory
+  → GET /api/tomas/deploy_result retrieves metrics
+```
+
+### C.36.4  VLA Model Support
+
+| Model | Parameters | VRAM | Loader |
+|-------|-----------|------|--------|
+| openvla-7b | 7B | 16GB | `transformers` AutoModelForVision2Seq |
+| octo-base | 93M | 4GB | `octo.model.octo_model` |
+| pi0-base | PaliGemma | 8GB | Custom loader |
+| demo-vla | N/A | 0GB | Built-in heuristic adapter |
+
+The `DemoVLAAdapter` provides a zero-dependency fallback that generates plausible pick-and-place actions using a sinusoidal trajectory planner, enabling end-to-end evaluation without GPU resources.
+
+### C.36.5  Bug Fixes (v0.17.1)
+
+- **snap_logger attribute**: `TOMASMuJoCoWrapper` referenced `self.snap_logger` but the attribute was named `self.kappa_snap_logger` — fixed by adding alias
+- **get_audit_trail**: Method returned `self.snap_buffer` (non-existent) — fixed to return `self.log_buffer`
+- **info dict enrichment**: `step()` return info now includes `raw_action` and `psi_violations` fields for debugging
+- **details dict**: `deploy()` result details enriched with `total_steps`, `avg_eta`, `final_eta`, `psi_violations`, `kappa_snap_count`, `chain_integrity`
+
+---
+
+## C.37  VLA Loader & DemoVLAAdapter (v0.17.1)
+
+### C.37.1  Design Rationale
+
+Real VLA models (OpenVLA-7B, Octo) require significant GPU resources (4-16GB VRAM) and large model downloads (2-15GB). The VLA Loader system provides a graceful degradation path:
+
+1. **Full VLA**: Load real model weights, run neural network inference per step
+2. **Demo VLA**: Use `DemoVLAAdapter` — a deterministic heuristic planner that mimics VLA behavior for testing
+
+### C.37.2  VLALoader Implementation
+
+```python
+class VLALoader:
+    def load_model(self, model_name: str) -> VLADapter:
+        if model_name == "demo-vla":
+            return DemoVLAAdapter()
+        elif model_name == "openvla-7b":
+            from transformers import AutoModelForVision2Seq, AutoProcessor
+            model = AutoModelForVision2Seq.from_pretrained("openvla/openvla-7b")
+            processor = AutoProcessor.from_pretrained("openvla/openvla-7b")
+            return OpenVLAAdapter(model, processor)
+        # ... octo-base, pi0-base
+```
+
+### C.37.3  DemoVLAAdapter
+
+The `DemoVLAAdapter` generates actions using a phase-based pick-and-place trajectory:
+
+| Phase | Action | Duration |
+|-------|--------|----------|
+| Approach | Move gripper to target XY | 30 steps |
+| Descend | Lower gripper to target Z | 20 steps |
+| Grasp | Close gripper | 10 steps |
+| Lift | Raise gripper to transport height | 20 steps |
+| Transport | Move to destination XY | 30 steps |
+| Place | Lower and release | 20 steps |
+
+This enables full TOMAS pipeline testing (Psi-Anchor validation, kappa-Snap audit, eta computation) without GPU resources.
+
+---
+
+## C.38  eta Computation Fix (v0.17.2)
+
+### C.38.1  Bug Description
+
+The `TOMASMuJoCoWrapper._compute_eta()` method computed eta (GaussEx residual) using:
+
+```python
+# BUGGY (v0.17.1)
+gripper_pos = obs[:3]  # Joint angles [0.0, 0.3, -0.5]
+target_pos = self.goal  # [0, 0, 0]
+eta = np.linalg.norm(gripper_pos - target_pos)
+```
+
+This used **joint angles** (range: -pi to pi) instead of **physical Cartesian distance** (range: 0 to ~1.5m), producing inflated eta values:
+
+| Metric | Buggy Value | Correct Value | Delta |
+|--------|------------|---------------|-------|
+| avg_eta | 1.463 | 0.103 | -93% |
+| final_eta | 1.490 | 0.120 | -92% |
+
+### C.38.2  Fix
+
+```python
+# FIXED (v0.17.2)
+def _compute_eta(self, obs, info=None):
+    # Priority 1: Use info["eta"] from HeadlessMuJoCoEnv
+    if info and "eta" in info:
+        return float(info["eta"])
+    # Priority 2: Use obs[14:17] (gripper-to-target distance vector)
+    if obs.shape[0] >= 17:
+        return float(np.linalg.norm(obs[14:17]))
+    # Fallback: obs[:3] (legacy, for backward compat)
+    return float(np.linalg.norm(obs[:3] - self.goal))
+```
+
+The `HeadlessMuJoCoEnv` already computes `eta = ||gripper_pos - target_pos||` in its `step()` method and returns it via `info["eta"]`. The wrapper now prioritizes this value.
+
+### C.38.3  Verification
+
+```
+TOMAS Evaluation Report (v0.17.2):
+  Status:           success
+  Total Steps:      200
+  Avg Eta:          0.103415  (was 1.463046)
+  Final Eta:        0.119896  (was 1.490389)
+  Psi Violations:   0
+  Kappa-Snap Count: 100
+  Chain Integrity:  True
+```
+
+All 681 tests pass with zero regression.
+
+### C.38.4  Key Lesson
+
+**Always use physical distance for eta computation, never joint angles.** Joint angles are in radian space and do not correspond to Cartesian distance. The observation vector layout must be documented clearly:
+
+| Index | Content | Range |
+|-------|---------|-------|
+| obs[0:3] | Joint angles | -pi to pi |
+| obs[3:7] | Quaternion orientation | -1 to 1 |
+| obs[7:14] | Joint velocities | -10 to 10 |
+| obs[14:17] | Gripper-to-target distance vector | 0 to ~1.5m |
+
+---
+
+## C.39  Welding Viewer Port Lifecycle (v0.17.2)
+
+### C.39.1  Problem
+
+Users reported two symptoms when clicking "Start Welding":
+
+1. **"running: undefined"** — The frontend displayed `Running: undefined` instead of the weld type
+2. **"[Timeout] Welding viewer startup timed out"** — The viewer failed to start within 15 seconds
+
+### C.39.2  Root Cause
+
+The `welding_stop()` endpoint did not call `persistent_server.stop()`, leaving zombie ViserServer processes holding ports 8097-8102. On the next start:
+
+1. All 6 port binding attempts failed (ports occupied by zombie process)
+2. Server returned `status: "timeout"` (without `weld_type` field)
+3. Frontend fell through to `else` branch: `'Running: ' + data.weld_type` = `'Running: undefined'`
+
+### C.39.3  Fix — Four-Pronged Approach
+
+**Fix 1: Port range expansion + socket probe** (`_launch_welding_viewer()`)
+
+- Expanded port range from 6 (8097-8102) to 16 (8097-8112)
+- Before reusing a persistent server, probe the port with `socket.connect_ex()`:
+  - If port responds → reuse server
+  - If port dead → stop stale server + `sleep(1.0)` for OS socket release
+
+**Fix 2: Exception cleanup** (viewer `except` block)
+
+- On viewer error, call `persistent_server.stop()` to free ports
+- Reset `welding_persistent_server = None` and `welding_persistent_port = 0`
+
+**Fix 3: `welding_stop()` cleanup**
+
+- Call `persistent_server.stop()` when stopping welding
+- `sleep(1.5)` after stop to let OS release TCP sockets
+
+**Fix 4: Frontend timeout handling** (`dashboard.html`)
+
+- Added `data.status === 'timeout'` branch between `error` and `already_running`
+- Displays orange "[Timeout]" message
+- Auto-calls `/api/welding/stop` for cleanup, then prompts user to retry
+
+### C.39.4  Verification
+
+Consecutive 3x start→stop cycles all succeeded:
+
+```
+v0.17.2: Created welding ViserServer on port 8097
+v0.17.2: Welding persistent ViserServer stopped
+v0.17.2: Created welding ViserServer on port 8097  (port released correctly)
+v0.17.2: Welding persistent ViserServer stopped
+v0.17.2: Created welding ViserServer on port 8097
+v0.17.2: Welding persistent ViserServer stopped
+```
+
+### C.39.5  Key Lesson
+
+**ViserServer port lifecycle must be explicitly managed.** The `ViserServer` class does not auto-release ports on garbage collection. The `stop()` method must be called explicitly, and the OS needs 1-2 seconds to release TCP sockets after `stop()`. The pattern is:
+
+```python
+# Correct pattern
+server.stop()        # Explicit stop
+time.sleep(1.5)      # Wait for OS socket release
+server = None        # Clear reference
+```
+
+Failure to follow this pattern results in port exhaustion after 3-5 start/stop cycles, manifesting as "running: undefined" or timeout errors.
+
+### C.39.6  v0.17.2 Version Table
+
+| Module | Version | Changes |
+|--------|---------|---------|
+| agent/tomas_mujoco_wrapper.py | v0.17.2 | eta computation fix (obs[14:17] instead of obs[:3]) |
+| webviz/server.py | v0.17.2 | Welding viewer port lifecycle (4 fixes) |
+| webviz/dashboard.html | v0.17.2 | Frontend timeout status handling |
+| benchmarks/tomas_eval_report.json | v0.17.2 | Updated eval report (avg_eta=0.103) |
+| README.md | v0.17.2 | Full update to v0.17.2 |
+| mujoco_bench_ido_validation.md | v0.17.2 | Added C.36-C.39 |

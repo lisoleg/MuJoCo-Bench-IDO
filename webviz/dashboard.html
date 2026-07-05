@@ -2411,6 +2411,15 @@
           addLog('[Welding] Error: ' + errMsg);
           document.getElementById('weldingStatus').textContent = '[Error] ' + errMsg;
           document.getElementById('weldingStatus').style.color = '#ef4444';
+        } else if (data.status === 'timeout') {
+          const errMsg = data.error || 'Viewer startup timed out';
+          addLog('[Welding] Timeout: ' + errMsg);
+          document.getElementById('weldingStatus').textContent = '[Timeout] ' + errMsg;
+          document.getElementById('weldingStatus').style.color = '#f59e0b';
+          // Auto-stop to clean up stale servers, then hint user to retry
+          fetch('/api/welding/stop', { method: 'POST' }).then(() => {
+            addLog('[Welding] Auto-cleanup done. Please click Start again.');
+          });
         } else if (data.status === 'already_running') {
           addLog('[Welding] Already running: ' + data.weld_type);
           document.getElementById('weldingStatus').textContent = 'Running: ' + data.weld_type;
