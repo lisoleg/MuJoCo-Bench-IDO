@@ -22,15 +22,18 @@ Author: MuJoCo-Bench-IDO Welding Module v0.1.0
 
 from typing import Dict, Any, Optional, List
 
-# ── 焊接安全阈值 ──
+# ── 焊接安全阈值 (v0.18: 业界标准收紧) ──
 WELDING_SAFETY_THRESHOLDS: Dict[str, float] = {
-    "STICK_OUT_MIN": 2.0,         # 最小干伸长 (mm) — 仿真放宽
-    "STICK_OUT_MAX": 35.0,        # 最大干伸长 (mm) — 仿真放宽
-    "MAX_CURRENT": 350.0,        # 最大焊接电流 (A)
-    "MIN_VOLTAGE": 5.0,          # 最小焊接电压 (V) — 低于此值视为回烧
-    "ARC_VAR_THRESHOLD": 0.5,    # 电弧长度方差阈值
-    "MAX_HEAT_INPUT": 2.5,       # 最大热输入 (kJ/mm)
-    "SEAM_DEV_MAX": 2.0,         # 最大焊缝偏差 (mm) — 仿真放宽
+    "STICK_OUT_MIN": 8.0,          # 最小干伸长 (mm) — 业界标准 8-10mm
+    "STICK_OUT_MAX": 25.0,         # 最大干伸长 (mm) — 业界标准 20-25mm
+    "MAX_CURRENT": 350.0,          # 最大焊接电流 (A)
+    "MIN_VOLTAGE": 5.0,            # 最小焊接电压 (V) — 低于此值视为回烧
+    "ARC_VAR_THRESHOLD": 0.5,      # 电弧长度方差阈值
+    "MAX_HEAT_INPUT": 2.5,         # 最大热输入 (kJ/mm)
+    "SEAM_DEV_MAX": 2.0,           # 最大焊缝偏差 (mm)
+    "MAX_TEMPERATURE": 1800.0,     # 最大温度 (°C) — 钢的熔点约 1500°C
+    "MAX_TEMPERATURE_WARNING": 800.0,  # 温度警告阈值 (°C)
+    "SPATTER_RATE_MAX": 0.05,      # 最大飞溅率 (5%)
 }
 
 
@@ -195,13 +198,15 @@ class WeldingPsiAnchor:
         voltage: float = float(welding_state.get("voltage", 24.0))
         arc_var: float = float(welding_state.get("arc_length_variance", 0.0))
         seam_dev: float = float(welding_state.get("seam_deviation", 0.0))
+        temperature: float = float(welding_state.get("temperature", 25.0))
+        heat_input: float = float(welding_state.get("heat_input", 0.0))
 
-        # 执行三项检查
+        # 执行检查
         stick_result: Dict[str, Any] = self.check_stick_out(stickout)
         burn_result: Dict[str, Any] = self.check_burn_back(current, voltage, stickout)
         porosity_result: Dict[str, Any] = self.check_porosity_risk(arc_var)
 
-        # 焊缝偏差检查 (附加)
+        # 焊缝偏差检查
         seam_result: Dict[str, Any] = {"passed": True, "violation": None, "severity": "none"}
         if seam_dev > self.thresholds["SEAM_DEV_MAX"]:
             seam_result = {
@@ -211,12 +216,44 @@ class WeldingPsiAnchor:
                 "severity": "warning",
             }
 
+        # v0.18: 热输入检查
+        heat_result: Dict[str, Any] = {"passed": True, "violation": None, "severity": "none"}
+        max_heat: float = self.thresholds.get("MAX_HEAT_INPUT", 2.5)
+        if heat_input > max_heat:
+            heat_result = {
+                "passed": False,
+                "violation": f"Heat input {heat_input:.2f} kJ/mm > {max_heat} — "
+                             f"reduce current or increase speed",
+                "severity": "critical",
+            }
+
+        # v0.18: 温度检查
+        temp_result: Dict[str, Any] = {"passed": True, "violation": None, "severity": "none"}
+        max_temp: float = self.thresholds.get("MAX_TEMPERATURE", 1800.0)
+        warn_temp: float = self.thresholds.get("MAX_TEMPERATURE_WARNING", 800.0)
+        if temperature > max_temp:
+            temp_result = {
+                "passed": False,
+                "violation": f"Temperature {temperature:.0f}°C > {max_temp}°C — "
+                             f"emergency stop (material vaporization risk)",
+                "severity": "critical",
+            }
+        elif temperature > warn_temp:
+            temp_result = {
+                "passed": False,
+                "violation": f"Temperature {temperature:.0f}°C > {warn_temp}°C — "
+                             f"reduce heat input",
+                "severity": "warning",
+            }
+
         # 汇总
         all_results: List[Dict[str, Any]] = [
             ("stick_out", stick_result),
             ("burn_back", burn_result),
             ("porosity", porosity_result),
             ("seam_dev", seam_result),
+            ("heat_input", heat_result),
+            ("temperature", temp_result),
         ]
 
         violations: List[str] = []
@@ -244,6 +281,16 @@ class WeldingPsiAnchor:
                         actions.append("TRIGGER_WEAVE_WELDING")
                 elif check_name == "seam_dev":
                     actions.append("ADJUST_TRACKING")
+                elif check_name == "heat_input":
+                    if result["severity"] == "critical":
+                        actions.append("REDUCE_CURRENT_AND_INCREASE_SPEED")
+                    else:
+                        actions.append("REDUCE_CURRENT")
+                elif check_name == "temperature":
+                    if result["severity"] == "critical":
+                        actions.append("EMERGENCY_STOP_OVERHEATING")
+                    else:
+                        actions.append("REDUCE_HEAT_INPUT")
 
         return {
             "passed": all_passed,
@@ -254,6 +301,8 @@ class WeldingPsiAnchor:
                 "burn_back": burn_result,
                 "porosity": porosity_result,
                 "seam_dev": seam_result,
+                "heat_input": heat_result,
+                "temperature": temp_result,
             },
         }
 

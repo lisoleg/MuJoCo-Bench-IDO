@@ -40,38 +40,38 @@ class TestStickOut:
         assert result["severity"] == "none"
 
     def test_stick_out_too_high(self):
-        """stickout=36mm → violation (warning). 仿真放宽阈值 MAX=35mm."""
-        result = self.anchor.check_stick_out(36.0)
-        assert result["passed"] is False, "36mm stickout should fail"
+        """stickout=26mm → violation (warning). 业界标准阈值 MAX=25mm."""
+        result = self.anchor.check_stick_out(26.0)
+        assert result["passed"] is False, "26mm stickout should fail"
         assert result["severity"] == "warning"
         assert result["violation"] is not None
 
     def test_stick_out_too_low(self):
-        """stickout=1mm → critical violation. 仿真放宽阈值 MIN=2mm."""
+        """stickout=1mm → critical violation. 业界标准阈值 MIN=8mm."""
         result = self.anchor.check_stick_out(1.0)
         assert result["passed"] is False, "1mm stickout should fail"
         assert result["severity"] == "critical"
         assert result["violation"] is not None
 
     def test_stick_out_at_boundary_max(self):
-        """stickout=35mm (边界) → passed."""
-        result = self.anchor.check_stick_out(35.0)
-        assert result["passed"] is True, "35mm (boundary) should pass"
+        """stickout=25mm (边界) → passed. 业界标准 MAX=25mm."""
+        result = self.anchor.check_stick_out(25.0)
+        assert result["passed"] is True, "25mm (boundary) should pass"
 
     def test_stick_out_at_boundary_min(self):
-        """stickout=2mm (边界) → passed."""
-        result = self.anchor.check_stick_out(2.0)
-        assert result["passed"] is True, "2mm (boundary) should pass"
+        """stickout=8mm (边界) → passed. 业界标准 MIN=8mm."""
+        result = self.anchor.check_stick_out(8.0)
+        assert result["passed"] is True, "8mm (boundary) should pass"
 
     def test_stick_out_just_over_max(self):
-        """stickout=35.1mm → warning."""
-        result = self.anchor.check_stick_out(35.1)
+        """stickout=25.1mm → warning."""
+        result = self.anchor.check_stick_out(25.1)
         assert result["passed"] is False
         assert result["severity"] == "warning"
 
     def test_stick_out_just_under_min(self):
-        """stickout=1.9mm → critical."""
-        result = self.anchor.check_stick_out(1.9)
+        """stickout=7.9mm → critical."""
+        result = self.anchor.check_stick_out(7.9)
         assert result["passed"] is False
         assert result["severity"] == "critical"
 
@@ -173,10 +173,10 @@ class TestCheckAll:
         assert len(result["actions"]) == 0
 
     def test_check_all_multiple_violations(self):
-        """多个违规同时触发. 仿真放宽阈值: MAX=35mm, SEAM_DEV_MAX=2.0mm."""
+        """多个违规同时触发. 业界标准阈值: MAX=25mm, SEAM_DEV_MAX=2.0mm."""
         anchor = WeldingPsiAnchor()
         state = {
-            "stickout": 40.0,          # > 35 → warning
+            "stickout": 40.0,          # > 25 → warning
             "current": 360.0,          # > 350
             "voltage": 4.0,            # < 5 → burn-back critical
             "arc_length_variance": 1.2,  # > 2×threshold → critical
@@ -188,7 +188,7 @@ class TestCheckAll:
         assert len(result["actions"]) >= 3, "Should have multiple actions"
 
     def test_check_all_stickout_critical(self):
-        """stickout 过低 → check_all 返回 critical. 仿真阈值 MIN=2mm."""
+        """stickout 过低 → check_all 返回 critical. 业界阈值 MIN=8mm."""
         anchor = WeldingPsiAnchor()
         state = {
             "stickout": 1.0,
@@ -230,7 +230,7 @@ class TestCheckAll:
         """check_all 返回的 actions 包含正确的动作建议."""
         anchor = WeldingPsiAnchor()
         state = {
-            "stickout": 1.0,          # critical (< 2mm) → EMERGENCY_STOP
+            "stickout": 1.0,          # critical (< 8mm) → EMERGENCY_STOP
             "current": 360.0,
             "voltage": 4.0,           # critical → STOP_WIRE_FEED
             "arc_length_variance": 0.1,

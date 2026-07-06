@@ -306,6 +306,9 @@ if _HAS_GYM:
         ) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
             """Step the environment.
 
+            v0.18: Uses WeldingEnv's comprehensive multi-objective reward
+            instead of simplified local reward.
+
             Args:
                 action: Action in [-1, 1] normalized space.
 
@@ -317,10 +320,17 @@ if _HAS_GYM:
 
             if self.welding_env is not None:
                 try:
-                    self.welding_env.step(mapped_action)
+                    result = self.welding_env.step(mapped_action)
+                    obs = np.asarray(result["observation"], dtype=np.float32)
+                    reward = float(result["reward"])
+                    info = result.get("info", {})
+                    terminated = bool(result.get("done", False))
+                    truncated = self.current_step >= self.max_steps
+                    return obs, reward, terminated, truncated, info
                 except Exception:
                     pass
 
+            # Fallback: simplified reward
             reward, info = self._compute_reward(mapped_action)
             obs = self._get_obs()
 
@@ -643,7 +653,7 @@ def train_sac(
                 for i in range(n_envs)
             ]
             try:
-                vec_env = SubprocVecEnv(env_funs)
+                vec_env = SubprocVecEnv(env_fns)
                 if verbose > 0:
                     print(f"  Using SubprocVecEnv with {n_envs} workers")
             except Exception as e:
@@ -665,6 +675,10 @@ def train_sac(
             batch_size=DEFAULT_BATCH_SIZE,
             gamma=DEFAULT_GAMMA,
             tau=DEFAULT_TAU,
+            ent_coef="auto",  # v0.18: Automatic entropy tuning
+            learning_starts=1000,  # v0.18: Collect initial experience
+            train_freq=1,  # v0.18: Train every step
+            gradient_steps=1,  # v0.18: One gradient step per train
             verbose=verbose,
         )
 

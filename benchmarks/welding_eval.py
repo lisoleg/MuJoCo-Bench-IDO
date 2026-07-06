@@ -74,7 +74,8 @@ WELD_TYPE_CHECKPOINT: Dict[str, str] = {
 
 ALL_WELD_TYPES: List[str] = list(WELD_TYPE_OPTIMAL.keys())
 
-# 9 metrics definition: name -> (lower_better, unit, display_name)
+# 14 metrics definition: name -> (lower_better, unit, display_name)
+# v0.18: expanded from 9 to 14 with industry-leading metrics
 METRIC_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "eta_residual": {"lower_better": True, "unit": "", "display": "eta residual"},
     "porosity_risk": {"lower_better": True, "unit": "", "display": "porosity risk"},
@@ -85,6 +86,12 @@ METRIC_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "current_fluctuation": {"lower_better": True, "unit": "A", "display": "current std"},
     "safety_violations": {"lower_better": True, "unit": "", "display": "safety violations"},
     "episode_return": {"lower_better": False, "unit": "", "display": "episode return"},
+    # v0.18: Industry-leading metrics
+    "bead_width": {"lower_better": False, "unit": "mm", "display": "bead width"},
+    "bead_height": {"lower_better": False, "unit": "mm", "display": "bead height"},
+    "spatter_rate": {"lower_better": True, "unit": "", "display": "spatter rate"},
+    "deposition_rate": {"lower_better": False, "unit": "kg/h", "display": "deposition rate"},
+    "arc_stability": {"lower_better": False, "unit": "", "display": "arc stability"},
 }
 
 METRIC_NAMES: List[str] = list(METRIC_DEFINITIONS.keys())
@@ -352,6 +359,12 @@ class WeldingEvaluator:
         safety_violation_count: int = 0
         episode_return: float = 0.0
         steps_taken: int = 0
+        # v0.18: New industry metrics collectors
+        bead_width_values: List[float] = []
+        bead_height_values: List[float] = []
+        spatter_rate_values: List[float] = []
+        deposition_rate_values: List[float] = []
+        arc_stability_values: List[float] = []
 
         for step in range(self.max_steps):
             action: np.ndarray = agent.act(obs)
@@ -371,6 +384,13 @@ class WeldingEvaluator:
             porosity_values.append(float(quality.get("porosity", 0.0)))
             penetration_values.append(float(quality.get("penetration", 0.0)))
             distortion_values.append(float(quality.get("distortion", 0.0)))
+
+            # v0.18: New industry metrics
+            bead_width_values.append(float(quality.get("bead_width", info.get("bead_width", 0.0))))
+            bead_height_values.append(float(quality.get("bead_height", info.get("bead_height", 0.0))))
+            spatter_rate_values.append(float(quality.get("spatter_rate", info.get("spatter_rate", 0.0))))
+            deposition_rate_values.append(float(quality.get("deposition_rate", info.get("deposition_rate", 0.0))))
+            arc_stability_values.append(float(quality.get("arc_stability", info.get("arc_stability", 0.0))))
 
             # Other info metrics
             progress_values.append(float(info.get("weld_progress", 0.0)))
@@ -425,6 +445,12 @@ class WeldingEvaluator:
             "current_fluctuation": _safe_std(current_values),
             "safety_violations": float(safety_violation_count),
             "episode_return": float(episode_return),
+            # v0.18: Industry-leading metrics
+            "bead_width": _safe_mean(bead_width_values),
+            "bead_height": _safe_mean(bead_height_values),
+            "spatter_rate": _safe_mean(spatter_rate_values),
+            "deposition_rate": _safe_mean(deposition_rate_values),
+            "arc_stability": _safe_mean(arc_stability_values),
         }
 
         # Print progress line

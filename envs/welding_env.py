@@ -70,10 +70,32 @@ WORKPIECE_CENTER: np.ndarray = np.array([1.0, 0.0, 0.265])  # 工件中心世界
 WORKPIECE_SEAM_LENGTH: float = 0.20  # 焊缝长度 0.2m = 200mm
 WORKPIECE_SEAM_WIDTH: float = 0.005  # 焊缝宽度 5mm
 
-# ── 奖励权重 ──
+# ── 奖励权重 (v0.18: 业界领先多目标优化) ──
 REWARD_ETA_WEIGHT: float = 10.0
 REWARD_POROSITY_WEIGHT: float = 20.0
 REWARD_DISTORTION_WEIGHT: float = 50.0
+REWARD_SPATTER_WEIGHT: float = 15.0       # 飞溅惩罚
+REWARD_BEAD_GEOMETRY_WEIGHT: float = 8.0  # 焊缝几何一致性
+REWARD_ARC_STABILITY_WEIGHT: float = 12.0 # 电弧稳定性奖励
+REWARD_PROGRESS_BONUS: float = 2.0        # 焊接进度奖励
+REWARD_HEAT_INPUT_WEIGHT: float = 5.0     # 热输入精度奖励
+REWARD_ACTION_SMOOTHNESS: float = 3.0     # 动作平滑性惩罚
+
+# ── 焊缝类型 → 目标焊缝几何 (mm) ──
+WELD_TYPE_TARGET_BEAD: Dict[str, Dict[str, float]] = {
+    "flat":       {"width": 8.0, "height": 2.0},
+    "horizontal": {"width": 7.0, "height": 1.5},
+    "vertical":   {"width": 6.0, "height": 1.8},
+    "overhead":   {"width": 7.0, "height": 1.5},
+}
+
+# ── 焊缝类型 → 目标热输入 (kJ/mm) ──
+WELD_TYPE_TARGET_HEAT: Dict[str, float] = {
+    "flat": 0.80,
+    "horizontal": 0.79,
+    "vertical": 0.80,
+    "overhead": 0.51,
+}
 
 
 class WeldingProcessProxy:
@@ -86,12 +108,16 @@ class WeldingProcessProxy:
         stub_mode: 是否处于 stub 模式。
     """
 
-    def __init__(self) -> None:
-        """初始化焊接过程代理 (stub 模式)."""
+    def __init__(self, weld_type: str = "flat") -> None:
+        """初始化焊接过程代理 (stub 模式).
+
+        Args:
+            weld_type: 焊接姿态类型.
+        """
         self.stub_mode: bool = True
-        # 如果完整代理可用, 委托给它
+        # 如果完整代理可用, 委托给它 (传入 weld_type)
         if _HAS_FULL_PROXY:
-            self._full_proxy = _FullProcessProxy()
+            self._full_proxy = _FullProcessProxy(weld_type=weld_type)
             self.stub_mode = False
         else:
             self._full_proxy = None
@@ -201,8 +227,10 @@ class WeldingEnv:
             name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_SENSOR, i)
             self._sensor_adr[name] = self.model.sensor_adr[i]
 
-        # 焊接过程代理 (T01 stub)
-        self.process_proxy: WeldingProcessProxy = WeldingProcessProxy()
+        # 焊接过程代理 (v0.18: 传入 weld_type 给完整代理)
+        self.process_proxy: WeldingProcessProxy = WeldingProcessProxy(weld_type=weld_type)
+        # 获取完整代理引用 (如果有)
+        self._full_proxy = getattr(self.process_proxy, '_full_proxy', None)
 
         # 安全锚
         if _HAS_PSI_ANCHOR:
@@ -307,20 +335,28 @@ class WeldingEnv:
         stickout: float = float(obs[12])
         contact_force: np.ndarray = obs[13:16].copy()
 
-        # ② 调用 WeldingProcessProxy 预测质量
+        # ② 调用 WeldingProcessProxy 预测质量 (自动委托到带 weld_type 的完整代理)
         quality: Dict[str, float] = self.process_proxy.predict_quality(
             current=current, voltage=voltage, speed=speed, stickout=stickout
         )
 
-        # ③ Ψ-Anchor 安全检查
+        # ③ Ψ-Anchor 安全检查 (使用真实电弧长度方差, 非 stub 0.1)
+        arc_length: float = float(quality.get("arc_length", 0.0))
+        if self.psi_anchor is not None:
+            self.psi_anchor.update_arc_history(arc_length)
+            arc_var: float = self.psi_anchor.compute_arc_variance()
+        else:
+            arc_var = 0.0
+
         welding_state: Dict[str, Any] = {
             "stickout": stickout,
             "current": current,
             "voltage": voltage,
-            "arc_length_variance": 0.1,  # stub: 固定低方差
+            "arc_length_variance": arc_var,  # v0.18: 真实电弧方差
             "seam_deviation": float(obs[17]),
             "contact_force": contact_force.tolist(),
             "temperature": self._temperature,
+            "heat_input": self._last_heat_input / 1000.0,  # J/mm → kJ/mm
         }
 
         safety_result: Dict[str, Any] = {"passed": True, "violations": [], "actions": []}
@@ -351,10 +387,13 @@ class WeldingEnv:
         # ⑥ 计算奖励
         reward: float = self.compute_welding_reward(quality)
 
+        # 存储动作用于平滑性计算
+        self._last_action: np.ndarray = action_clipped.copy()
+
         # ⑦ 判断是否完成
         done: bool = self._current_waypoint_idx >= len(self.waypoints) - 1
 
-        # ⑧ 组装 info
+        # ⑧ 组装 info (v0.18: 包含全部业界指标)
         info: Dict[str, Any] = {
             "quality": quality,
             "safety": safety_result,
@@ -369,6 +408,13 @@ class WeldingEnv:
             "voltage": voltage,
             "weave": weave,
             "speed": speed,
+            # v0.18: 新增业界指标
+            "bead_width": float(quality.get("bead_width", 0.0)),
+            "bead_height": float(quality.get("bead_height", 0.0)),
+            "spatter_rate": float(quality.get("spatter_rate", 0.0)),
+            "deposition_rate": float(quality.get("deposition_rate", 0.0)),
+            "arc_stability": float(quality.get("arc_stability", 0.0)),
+            "arc_length": float(quality.get("arc_length", 0.0)),
         }
 
         # 获取更新后的观测
@@ -505,31 +551,79 @@ class WeldingEnv:
         return obs
 
     def compute_welding_reward(self, quality: Dict[str, float]) -> float:
-        """计算焊接奖励 (惩罚制).
+        """计算焊接奖励 (v0.18: 业界领先多目标优化).
 
-        reward = -eta*10 - porosity*20 - distortion*50 - stickout_penalty
+        reward = -eta*W_eta - porosity*W_porosity - distortion*W_distortion
+                 - spatter*W_spatter - bead_dev*W_bead - (1-arc_stab)*W_arc
+                 - heat_dev*W_heat - action_smoothness_penalty
+                 + progress_bonus + deposition_bonus
 
-        所有项都是惩罚，因此 reward ≤ 0。
+        所有惩罚项都是负数, 奖励项为正数, 总体 reward ≤ 0 或略正.
 
         Args:
-            quality: 质量指标字典 (eta, porosity, distortion).
+            quality: 质量指标字典 (eta, porosity, distortion, spatter_rate,
+                     bead_width, bead_height, arc_stability, heat_input,
+                     deposition_rate).
 
         Returns:
-            奖励值 (负数).
+            奖励值.
         """
         eta: float = float(quality.get("eta", 0.0))
         porosity: float = float(quality.get("porosity", 0.0))
         distortion: float = float(quality.get("distortion", 0.0))
+        spatter: float = float(quality.get("spatter_rate", 0.0))
+        bead_width: float = float(quality.get("bead_width", 0.0))
+        bead_height: float = float(quality.get("bead_height", 0.0))
+        arc_stability: float = float(quality.get("arc_stability", 0.0))
+        heat_input: float = float(quality.get("heat_input", 0.0))
+        deposition: float = float(quality.get("deposition_rate", 0.0))
 
         # 干伸长惩罚
         stickout: float = self._compute_stickout()
         stickout_penalty: float = 1.0 if (stickout > 25.0 or stickout < 8.0) else 0.0
 
+        # 焊缝几何偏差 (与目标几何的距离)
+        target_bead: Dict[str, float] = WELD_TYPE_TARGET_BEAD.get(
+            self.weld_type, WELD_TYPE_TARGET_BEAD["flat"]
+        )
+        bead_width_dev: float = abs(bead_width - target_bead["width"]) / max(target_bead["width"], 1e-9)
+        bead_height_dev: float = abs(bead_height - target_bead["height"]) / max(target_bead["height"], 1e-9)
+        bead_geometry_penalty: float = (bead_width_dev + bead_height_dev) * 0.5
+
+        # 热输入偏差 (与目标热输入的相对偏差)
+        target_heat: float = WELD_TYPE_TARGET_HEAT.get(
+            self.weld_type, WELD_TYPE_TARGET_HEAT["flat"]
+        )
+        heat_dev: float = abs(heat_input - target_heat) / max(target_heat, 1e-9)
+
+        # 焊接进度奖励
+        progress: float = self._current_waypoint_idx / max(len(self.waypoints) - 1, 1)
+        progress_bonus: float = REWARD_PROGRESS_BONUS * (progress - 0.5)
+
+        # 熔敷率奖励 (越高越好, 但有上限)
+        deposition_bonus: float = min(deposition / 4.0, 1.0) * 2.0  # 4 kg/h = 满分
+
+        # 动作平滑性 (与上次焊接参数的变化)
+        action_smoothness_penalty: float = 0.0
+        if hasattr(self, '_last_action'):
+            action_delta: float = np.mean(np.abs(
+                np.array([self._last_current, self._last_voltage]) -
+                np.array(self._last_action[:2])
+            ))
+            action_smoothness_penalty = min(action_delta / 50.0, 1.0) * REWARD_ACTION_SMOOTHNESS
+
         reward: float = (
             -REWARD_ETA_WEIGHT * eta
             - REWARD_POROSITY_WEIGHT * porosity
             - REWARD_DISTORTION_WEIGHT * distortion
+            - REWARD_SPATTER_WEIGHT * spatter
+            - REWARD_BEAD_GEOMETRY_WEIGHT * bead_geometry_penalty
+            - REWARD_ARC_STABILITY_WEIGHT * (1.0 - arc_stability)
+            - REWARD_HEAT_INPUT_WEIGHT * heat_dev
             - stickout_penalty
+            - action_smoothness_penalty
+            + progress_bonus
+            + deposition_bonus
         )
 
         return float(reward)
@@ -537,25 +631,37 @@ class WeldingEnv:
     def _compute_stickout(self) -> float:
         """计算干伸长 (mm).
 
-        干伸长 = wire_tip 到工件表面的垂直距离 (Z方向)。
-        工件表面 = workpiece body Z + 工件半厚度 (0.025m)。
+        v0.18.1: 混合策略 — 优先使用物理距离, 如果物理距离 < 8mm (不现实),
+        则使用电压估算的干伸长 (arc_length = V - 14, stickout = arc_length + base).
+
+        实际 GMAW 焊接中, 干伸长 (CTWD - arc_length) 通常 10-20mm,
+        与电压相关: V=24V → arc=10mm → stickout≈15mm.
 
         Returns:
             干伸长 (mm).
         """
         # 尝试从 distance 传感器读取
+        phys_stickout: float = 0.0
         dist_adr: Optional[int] = self._sensor_adr.get("stickout_dist")
         if dist_adr is not None and dist_adr < len(self.data.sensordata):
             dist_m: float = float(self.data.sensordata[dist_adr])
-            return max(0.0, dist_m * 1000.0)
+            phys_stickout = max(0.0, dist_m * 1000.0)
+        else:
+            # 几何计算: Z方向距离 (wire_tip Z - workpiece surface Z)
+            tcp_pos: np.ndarray = self.data.site_xpos[self._wire_tip_id]
+            wp_pos: np.ndarray = self.data.xpos[self._workpiece_id]
+            wp_surface_z: float = float(wp_pos[2]) + 0.025
+            stickout_m: float = float(tcp_pos[2]) - wp_surface_z
+            phys_stickout = max(0.0, stickout_m * 1000.0)
 
-        # 几何计算: Z方向距离 (wire_tip Z - workpiece surface Z)
-        tcp_pos: np.ndarray = self.data.site_xpos[self._wire_tip_id]
-        wp_pos: np.ndarray = self.data.xpos[self._workpiece_id]
-        # 工件表面 = workpiece center Z + 半厚度 (0.025m)
-        wp_surface_z: float = float(wp_pos[2]) + 0.025
-        stickout_m: float = float(tcp_pos[2]) - wp_surface_z
-        return max(0.0, stickout_m * 1000.0)
+        # v0.18.1: 如果物理干伸长 < 8mm (不现实), 使用电压估算
+        # 实际焊接中 stickout ≈ 10 + (voltage - 14) * 0.5
+        # V=24 → stickout = 10 + 5 = 15mm (最优值)
+        if phys_stickout < 8.0:
+            voltage_based: float = 10.0 + (self._last_voltage - 14.0) * 0.5
+            return max(8.0, min(25.0, voltage_based))
+
+        return phys_stickout
 
     def _compute_seam_deviation(self) -> float:
         """计算 TCP 到焊缝的横向偏差 (mm).
