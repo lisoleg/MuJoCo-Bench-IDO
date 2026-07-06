@@ -164,6 +164,9 @@ class TestPredictQuality:
         """predict_quality值有限."""
         result = proxy.predict_quality(current=200, voltage=24, speed=6, stickout=15)
         for k, v in result.items():
+            # Skip non-numeric values (e.g., microstructure dict)
+            if isinstance(v, dict):
+                continue
             assert np.isfinite(v), f"{k} should be finite"
 
 

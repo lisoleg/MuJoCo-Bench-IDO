@@ -16,11 +16,13 @@ WeldingProcessProxy — 焊接工艺代理模型
   - porosity = base × (1 + gas_coverage_penalty + arc_stability_penalty)
   - angular_distortion = heat_input × material_factor × constraint
 
-Author: MuJoCo-Bench-IDO Welding Module v0.2.0
+v0.19.0: 扩展至18种焊缝类型 + 逼真物理仿真 + 性能优化
+
+Author: MuJoCo-Bench-IDO Welding Module v0.19.0
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import numpy as np
 
 
@@ -63,6 +65,13 @@ class WeldingQuality:
         spatter_rate: 飞溅率 (0-1, 焊丝质量占比).
         deposition_rate: 熔敷率 (kg/h).
         arc_stability: 电弧稳定性指数 (0-1, 越高越稳定).
+        cooling_rate_t85: t8/5冷却时间(s).
+        interpass_temp: 层间温度(°C).
+        haz_width: 热影响区宽度(mm).
+        max_hardness: 最大硬度(HV).
+        residual_stress: 残余应力(MPa).
+        cracking_susceptibility: 凝固裂纹敏感性(0-1).
+        microstructure: 微观组织比例.
     """
     eta_residual: float = 0.0
     porosity_risk: float = 0.0
@@ -76,6 +85,14 @@ class WeldingQuality:
     spatter_rate: float = 0.0
     deposition_rate: float = 0.0
     arc_stability: float = 0.0
+    # v0.19.0: Enhanced physics metrics
+    cooling_rate_t85: float = 0.0        # t8/5冷却时间(s)
+    interpass_temp: float = 0.0          # 层间温度(°C)
+    haz_width: float = 0.0               # 热影响区宽度(mm)
+    max_hardness: float = 0.0            # 最大硬度(HV)
+    residual_stress: float = 0.0         # 残余应力(MPa)
+    cracking_susceptibility: float = 0.0 # 凝固裂纹敏感性(0-1)
+    microstructure: dict = field(default_factory=dict)  # 微观组织比例
 
     def __repr__(self) -> str:
         return (
@@ -89,7 +106,11 @@ class WeldingQuality:
             f"bead_h={self.bead_height:.2f}mm, "
             f"spatter={self.spatter_rate:.4f}, "
             f"deposition={self.deposition_rate:.2f}kg/h, "
-            f"arc_stab={self.arc_stability:.4f})"
+            f"arc_stab={self.arc_stability:.4f}, "
+            f"t85={self.cooling_rate_t85:.1f}s, "
+            f"HAZ={self.haz_width:.2f}mm, "
+            f"HV={self.max_hardness:.0f}, "
+            f"stress={self.residual_stress:.0f}MPa)"
         )
 
     def to_dict(self) -> dict:
@@ -111,6 +132,14 @@ class WeldingQuality:
             "spatter_rate": self.spatter_rate,
             "deposition_rate": self.deposition_rate,
             "arc_stability": self.arc_stability,
+            # v0.19.0: Enhanced physics metrics
+            "cooling_rate_t85": self.cooling_rate_t85,
+            "interpass_temp": self.interpass_temp,
+            "haz_width": self.haz_width,
+            "max_hardness": self.max_hardness,
+            "residual_stress": self.residual_stress,
+            "cracking_susceptibility": self.cracking_susceptibility,
+            "microstructure": self.microstructure,
         }
 
 
@@ -159,6 +188,17 @@ class WeldingProcessProxy:
         "groove":      {"current": 240.0, "voltage": 26.0, "travel_speed": 5.0,  "stickout": 14.0},  # 坡口焊缝: 高电流高电压确保熔透
         "lap":         {"current": 160.0, "voltage": 20.0, "travel_speed": 8.0,  "stickout": 12.0},  # 搭接焊缝: 低电流高速度, 适合薄板
         "pipe":        {"current": 190.0, "voltage": 23.0, "travel_speed": 5.5,  "stickout": 13.0},  # 管道焊缝: 专用参数
+        # v0.19.0: 新增10种焊缝接头类型 (AWS A3.0, AWS D1.1, ISO 15614, EN ISO 4063)
+        "corner":      {"current": 200.0, "voltage": 24.0, "travel_speed": 6.0,  "stickout": 15.0},  # 角接焊缝: L形接头
+        "edge":        {"current": 180.0, "voltage": 22.0, "travel_speed": 7.0,  "stickout": 14.0},  # 边缘焊缝: 两板平行边缘对接
+        "plug":        {"current": 210.0, "voltage": 23.0, "travel_speed": 4.0,  "stickout": 16.0},  # 塞焊焊缝: 圆孔塞焊
+        "slot":        {"current": 200.0, "voltage": 22.0, "travel_speed": 4.5,  "stickout": 15.0},  # 槽焊焊缝: 长孔槽焊
+        "surfacing":   {"current": 230.0, "voltage": 25.0, "travel_speed": 5.0,  "stickout": 16.0},  # 堆焊: 表面堆焊
+        "tack":        {"current": 190.0, "voltage": 23.0, "travel_speed": 8.0,  "stickout": 14.0},  # 定位焊: 短段定位焊
+        "butt":        {"current": 210.0, "voltage": 24.0, "travel_speed": 5.0,  "stickout": 14.0},  # 对接焊缝: 全熔透对接
+        "tee":         {"current": 215.0, "voltage": 24.0, "travel_speed": 5.5,  "stickout": 15.0},  # T形焊缝: T接头
+        "multipass":   {"current": 225.0, "voltage": 25.0, "travel_speed": 5.0,  "stickout": 15.0},  # 多层焊: 多道焊缝
+        "repair":      {"current": 195.0, "voltage": 23.0, "travel_speed": 5.0,  "stickout": 14.0},  # 补焊: 缺陷修复焊缝
     }
 
     # 焊缝类型 → 重力影响因子 (铁水受重力影响的程度)
@@ -172,6 +212,17 @@ class WeldingProcessProxy:
         "groove": 1.0,     # 坡口焊缝: 通常平焊位置执行
         "lap": 1.2,        # 搭接焊缝: 铁水偏向一侧, 重力影响增大
         "pipe": 1.4,       # 管道焊缝: 全位置旋转, 重力影响变化大
+        # v0.19.0: 新增焊缝接头类型
+        "corner": 1.1,     # 角接焊缝: L形接头, 重力影响略增
+        "edge": 1.0,       # 边缘焊缝: 平行边缘, 重力影响标准
+        "plug": 1.0,       # 塞焊焊缝: 孔内填充, 重力影响小
+        "slot": 1.0,       # 槽焊焊缝: 槽内填充, 重力影响小
+        "surfacing": 1.0,  # 堆焊: 表面堆焊, 重力有利
+        "tack": 1.0,       # 定位焊: 短段, 重力影响标准
+        "butt": 1.0,       # 对接焊缝: 平焊位置, 重力影响标准
+        "tee": 1.0,        # T形焊缝: 通常平焊位置
+        "multipass": 1.0,  # 多层焊: 通常平焊位置
+        "repair": 1.0,     # 补焊: 修复位置不定, 取标准值
     }
 
     # 焊缝类型 → 变形因子 (不同位置热变形差异)
@@ -185,6 +236,17 @@ class WeldingProcessProxy:
         "groove": 1.3,     # 坡口焊缝: 收缩变形大
         "lap": 0.8,        # 搭接焊缝: 薄板变形相对小
         "pipe": 1.1,       # 管道焊缝: 管道约束较高
+        # v0.19.0: 新增焊缝接头类型
+        "corner": 1.0,     # 角接焊缝: L形接头, 标准变形
+        "edge": 0.85,      # 边缘焊缝: 变形较小
+        "plug": 0.7,       # 塞焊焊缝: 局部热输入, 变形小
+        "slot": 0.75,      # 槽焊焊缝: 变形较小
+        "surfacing": 0.6,  # 堆焊: 表面堆焊, 变形最小
+        "tack": 0.3,       # 定位焊: 短段, 变形极小
+        "butt": 1.2,       # 对接焊缝: 全熔透, 收缩变形大
+        "tee": 0.95,       # T形焊缝: 变形略低于标准
+        "multipass": 1.15, # 多层焊: 多道累积变形
+        "repair": 1.05,    # 补焊: 局部修复, 变形略增
     }
 
     # 焊缝类型 → 熔深因子 (重力对电弧穿透的影响)
@@ -199,6 +261,17 @@ class WeldingProcessProxy:
         "groove": 1.15,     # 坡口焊缝: 需要深熔透 (全熔透要求)
         "lap": 0.85,        # 搭接焊缝: 熔深受限
         "pipe": 1.05,       # 管道焊缝: 需要良好熔透
+        # v0.19.0: 新增焊缝接头类型
+        "corner": 0.90,     # 角接焊缝: 熔深略浅
+        "edge": 0.88,       # 边缘焊缝: 熔深受限
+        "plug": 0.95,       # 塞焊焊缝: 孔内熔透
+        "slot": 0.92,       # 槽焊焊缝: 槽内熔透
+        "surfacing": 0.70,  # 堆焊: 表面堆焊, 熔深最浅
+        "tack": 0.80,       # 定位焊: 短段, 熔深较浅
+        "butt": 1.10,       # 对接焊缝: 全熔透要求, 熔深深
+        "tee": 0.90,        # T形焊缝: 熔深略浅
+        "multipass": 0.85,  # 多层焊: 逐层累积熔深
+        "repair": 1.08,     # 补焊: 需要深熔透修复缺陷
     }
 
     # 焊缝类型 → 焊缝宽度因子 (重力对熔池铺展的影响)
@@ -213,6 +286,17 @@ class WeldingProcessProxy:
         "groove": 0.90,     # 坡口焊缝: 坡口间隙限制了焊缝宽度
         "lap": 1.10,        # 搭接焊缝: 焊缝铺展宽
         "pipe": 1.0,        # 管道焊缝: 标准焊缝宽度
+        # v0.19.0: 新增焊缝接头类型
+        "corner": 1.05,     # 角接焊缝: L形接头, 焊缝略宽
+        "edge": 0.95,       # 边缘焊缝: 焊缝略窄
+        "plug": 1.20,       # 塞焊焊缝: 孔内填充, 焊缝宽
+        "slot": 1.15,       # 槽焊焊缝: 槽内填充, 焊缝较宽
+        "surfacing": 1.25,  # 堆焊: 表面铺展, 焊缝最宽
+        "tack": 0.90,       # 定位焊: 短段, 焊缝较窄
+        "butt": 0.95,       # 对接焊缝: 坡口限制, 焊缝略窄
+        "tee": 1.10,        # T形焊缝: 焊脚宽度较大
+        "multipass": 1.05,  # 多层焊: 逐道累积, 焊缝略宽
+        "repair": 0.92,     # 补焊: 局部修复, 焊缝略窄
     }
 
     # 焊缝类型 → 焊缝余高因子 (重力对焊缝凸起的影响)
@@ -227,6 +311,17 @@ class WeldingProcessProxy:
         "groove": 0.70,     # 坡口焊缝: 余高控制严格
         "lap": 0.75,        # 搭接焊缝: 余高低
         "pipe": 0.90,       # 管道焊缝: 余高控制
+        # v0.19.0: 新增焊缝接头类型
+        "corner": 0.90,     # 角接焊缝: 余高略低
+        "edge": 0.85,       # 边缘焊缝: 余高低
+        "plug": 1.10,       # 塞焊焊缝: 孔内填充, 余高较高
+        "slot": 1.05,       # 槽焊焊缝: 余高略高
+        "surfacing": 1.30,  # 堆焊: 表面堆高, 余高最高
+        "tack": 0.75,       # 定位焊: 短段, 余高低
+        "butt": 0.80,       # 对接焊缝: 余高控制严格
+        "tee": 0.85,        # T形焊缝: 余高略低
+        "multipass": 1.15,  # 多层焊: 逐层累积, 余高较高
+        "repair": 0.95,     # 补焊: 修复余高, 略低于标准
     }
 
     # 焊缝类型 → 目标热输入 (kJ/mm)
@@ -240,6 +335,28 @@ class WeldingProcessProxy:
         "groove": 1.25,     # 坡口焊缝: (240×26)/(5×1000)=1.248≈1.25
         "lap": 0.40,        # 搭接焊缝: (160×20)/(8×1000)=0.400
         "pipe": 0.79,       # 管道焊缝: (190×23)/(5.5×1000)=0.795≈0.79
+        # v0.19.0: 新增焊缝接头类型
+        "corner": 0.80,     # 角接焊缝: (200×24)/(6×1000)=0.800
+        "edge": 0.56,       # 边缘焊缝: (180×22)/(7×1000)=0.566≈0.56
+        "plug": 1.21,       # 塞焊焊缝: (210×23)/(4×1000)=1.208≈1.21
+        "slot": 0.98,       # 槽焊焊缝: (200×22)/(4.5×1000)=0.978≈0.98
+        "surfacing": 1.15,  # 堆焊: (230×25)/(5×1000)=1.150
+        "tack": 0.55,       # 定位焊: (190×23)/(8×1000)=0.546≈0.55
+        "butt": 1.01,       # 对接焊缝: (210×24)/(5×1000)=1.008≈1.01
+        "tee": 0.94,        # T形焊缝: (215×24)/(5.5×1000)=0.938≈0.94
+        "multipass": 1.13,  # 多层焊: (225×25)/(5×1000)=1.125≈1.13
+        "repair": 0.90,     # 补焊: (195×23)/(5×1000)=0.897≈0.90
+    }
+
+    # v0.19.0: 焊缝类型 → 目标焊缝宽度 (mm) — 用于 eta 计算
+    # 基于最优参数计算: bead_width = k_w * sqrt(I*V/v) + weave*0.5, 然后 * width_factor
+    _TARGET_BEAD_WIDTH: dict = {
+        "flat": 8.0, "horizontal": 7.0, "vertical": 6.0, "overhead": 7.0,
+        "fillet": 9.85, "groove": 8.85, "lap": 6.60, "pipe": 8.05,
+        # v0.19.0: 新增焊缝类型目标宽度
+        "corner": 8.48, "edge": 6.60, "plug": 11.63, "slot": 10.14,
+        "surfacing": 11.85, "tack": 6.16, "butt": 8.49, "tee": 9.52,
+        "multipass": 9.85, "repair": 7.81,
     }
 
     # 最优参数 (用于 eta_residual 计算) — 默认 flat, 动态切换
@@ -263,7 +380,9 @@ class WeldingProcessProxy:
 
         Args:
             weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead",
-                          "fillet", "groove", "lap", "pipe").
+                          "fillet", "groove", "lap", "pipe", "corner", "edge",
+                          "plug", "slot", "surfacing", "tack", "butt", "tee",
+                          "multipass", "repair").
         """
         self.weld_type: str = weld_type
         self._current_history: list[float] = []
@@ -272,6 +391,57 @@ class WeldingProcessProxy:
         # 根据焊缝类型设置最优参数
         type_optimal = self.WELD_TYPE_OPTIMAL_PARAMS.get(weld_type, self.WELD_TYPE_OPTIMAL_PARAMS["flat"])
         self.OPTIMAL_PARAMS = dict(type_optimal)  # 实例属性覆盖类属性
+
+        # v0.19.0: Performance optimizations ──────────────────────────
+        # 预计算参数范围倒数 (避免每次除法)
+        self._param_range_inv: dict = {
+            k: 1.0 / v for k, v in self.PARAM_RANGES.items()
+        }
+        # 将频繁访问的 EMPIRICAL_COEFFS 值提取为实例属性 (减少字典查找)
+        self._arc_length_factor: float = self.EMPIRICAL_COEFFS["arc_length_factor"]
+        self._heat_input_unit: float = self.EMPIRICAL_COEFFS["heat_input_unit"]
+        self._penetration_coeff: float = self.EMPIRICAL_COEFFS["penetration_coeff"]
+        self._porosity_base: float = self.EMPIRICAL_COEFFS["porosity_base"]
+        self._distortion_material_factor: float = self.EMPIRICAL_COEFFS["distortion_material_factor"]
+        self._bead_width_coeff: float = self.EMPIRICAL_COEFFS["bead_width_coeff"]
+        self._bead_height_coeff: float = self.EMPIRICAL_COEFFS["bead_height_coeff"]
+        self._spatter_base: float = self.EMPIRICAL_COEFFS["spatter_base"]
+        self._deposition_coeff: float = self.EMPIRICAL_COEFFS["deposition_coeff"]
+        # 缓存 sqrt(I*V/v) 计算
+        self._cached_sqrt_ivv: float = 0.0
+        self._cached_params: tuple = (0.0, 0.0, 0.0)
+        # ──────────────────────────────────────────────────────────────
+
+    def _get_sqrt_ivv(
+        self,
+        current: float,
+        voltage: float,
+        speed: float,
+    ) -> float:
+        """获取缓存或重新计算的 sqrt(I*V/v).
+
+        如果当前参数与缓存参数匹配, 直接返回缓存值;
+        否则重新计算并更新缓存。
+
+        Args:
+            current: 焊接电流 (A).
+            voltage: 焊接电压 (V).
+            speed: 焊接速度 (mm/s).
+
+        Returns:
+            sqrt(current * voltage / speed) 的值.
+        """
+        if (self._cached_params[0] == current and
+                self._cached_params[1] == voltage and
+                self._cached_params[2] == speed and
+                self._cached_sqrt_ivv > 0.0):
+            return self._cached_sqrt_ivv
+        if speed < 1e-9:
+            return 0.0
+        val: float = float(np.sqrt(current * voltage / speed))
+        self._cached_sqrt_ivv = val
+        self._cached_params = (current, voltage, speed)
+        return val
 
     def predict(
         self,
@@ -295,6 +465,12 @@ class WeldingProcessProxy:
         Returns:
             WeldingQuality 实例.
         """
+        # v0.19.0: 预计算并缓存 sqrt(I*V/v) 供后续方法复用
+        self._cached_params = (current, voltage, travel_speed)
+        self._cached_sqrt_ivv = float(np.sqrt(
+            current * voltage / max(travel_speed, 1e-9)
+        ))
+
         # 更新电流历史 (用于电弧稳定性计算)
         self.update_current_history(current)
         current_variance: float = self.compute_current_variance()
@@ -306,32 +482,28 @@ class WeldingProcessProxy:
         heat_input: float = self.compute_heat_input(current, voltage, travel_speed)
 
         # 3. 综合工艺偏差 eta_residual
-        # optimal: current=200, voltage=24, speed=6, stickout=15
         eta: float = self._compute_eta_residual(
             current, voltage, travel_speed, stickout
         )
 
         # 4. 气孔风险
-        # 电弧稳定性 = 1 / (1 + arc_length_variance)
         arc_stability: float = 1.0 / (1.0 + current_variance / 100.0)
-        # 气体保护覆盖率: 干伸长越长保护越差
         gas_coverage: float = 1.0 - max(0.0, (stickout - 15.0) / 10.0)
         gas_coverage = max(0.0, min(1.0, gas_coverage))
 
         porosity: float = self.compute_porosity(
             stickout, current_variance / 10.0, gas_flow=15.0
         )
-        # 考虑电弧稳定性的额外气孔风险
-        porosity += self.EMPIRICAL_COEFFS["porosity_base"] * (1.0 - arc_stability) * 2.0
+        porosity += self._porosity_base * (1.0 - arc_stability) * 2.0
         porosity = max(0.0, min(1.0, porosity))
 
-        # 5. 角变形 (加入焊缝类型因子)
+        # 5. 角变形
         distortion: float = self.compute_distortion(heat_input)
 
         # 6. 熔深
         penetration: float = self.compute_penetration(current, voltage, travel_speed)
 
-        # 7. 焊缝几何 (宽度, 余高, 截面积)
+        # 7. 焊缝几何
         bead_width, bead_height, bead_area = self.compute_bead_geometry(
             current, voltage, travel_speed, weave
         )
@@ -343,6 +515,17 @@ class WeldingProcessProxy:
 
         # 9. 熔敷率
         deposition: float = self.compute_deposition_rate(current, travel_speed)
+
+        # v0.19.0: 逼真物理仿真指标
+        t85: float = self.compute_cooling_rate(current, voltage, travel_speed)
+        interpass: float = self.compute_interpass_temp(heat_input=heat_input)
+        microstruct: dict = self.compute_microstructure(t85)
+        haz_w: float = self.compute_haz_width(current, voltage, travel_speed)
+        hardness: float = self.compute_hardness(t85)
+        res_stress: float = self.compute_residual_stress(heat_input)
+        crack_suscept: float = self.compute_solidification_cracking(
+            current, travel_speed, bead_width
+        )
 
         return WeldingQuality(
             eta_residual=eta,
@@ -357,6 +540,14 @@ class WeldingProcessProxy:
             spatter_rate=spatter,
             deposition_rate=deposition,
             arc_stability=arc_stability,
+            # v0.19.0: Enhanced physics metrics
+            cooling_rate_t85=t85,
+            interpass_temp=interpass,
+            haz_width=haz_w,
+            max_hardness=hardness,
+            residual_stress=res_stress,
+            cracking_susceptibility=crack_suscept,
+            microstructure=microstruct,
         )
 
     def predict_quality(
@@ -398,6 +589,8 @@ class WeldingProcessProxy:
         改为衡量 agent 可控参数 (current/voltage/speed) 与最优值的偏差,
         加上热输入偏差和焊缝几何偏差, 形成真正的"工艺质量偏差".
 
+        v0.19.0: 向量化计算 (用 numpy 替代 for 循环)
+
         eta = sqrt(sum(((param - optimal) / range)²)) × 0.3
             + heat_dev × 0.2
             + bead_dev × 0.1
@@ -411,33 +604,30 @@ class WeldingProcessProxy:
         Returns:
             综合偏差值 (越低越好, 0 = 完美匹配最优工艺).
         """
-        # Agent 可控参数偏差 (current, voltage, speed — 不含 stickout)
-        controllable_params: dict = {
-            "current": current,
-            "voltage": voltage,
-            "travel_speed": travel_speed,
-        }
+        # v0.19.0: 向量化参数偏差计算
+        params = np.array([current, voltage, travel_speed])
+        optimal = np.array([
+            self.OPTIMAL_PARAMS["current"],
+            self.OPTIMAL_PARAMS["voltage"],
+            self.OPTIMAL_PARAMS["travel_speed"],
+        ])
+        ranges = np.array([
+            self.PARAM_RANGES["current"],
+            self.PARAM_RANGES["voltage"],
+            self.PARAM_RANGES["travel_speed"],
+        ])
+        param_eta: float = float(
+            np.sqrt(np.sum(((params - optimal) / ranges) ** 2)) * 0.3
+        )
 
-        sum_sq: float = 0.0
-        for key, value in controllable_params.items():
-            optimal: float = self.OPTIMAL_PARAMS[key]
-            rng: float = self.PARAM_RANGES[key]
-            normalized_dev: float = (value - optimal) / max(rng, 1e-9)
-            sum_sq += normalized_dev ** 2
-
-        param_eta: float = float(np.sqrt(sum_sq) * 0.3)
-
-        # 热输入偏差 (与目标热输入的相对偏差)
+        # 热输入偏差
         heat_input: float = self.compute_heat_input(current, voltage, travel_speed)
         target_heat: float = self.WELD_TYPE_TARGET_HEAT_INPUT.get(self.weld_type, 0.80)
         heat_dev: float = abs(heat_input - target_heat) / max(target_heat, 1e-9)
         heat_eta: float = heat_dev * 0.2
 
         # 焊缝几何偏差 (与目标焊缝宽度的相对偏差)
-        target_bead_w: float = {
-            "flat": 8.0, "horizontal": 7.0, "vertical": 6.0, "overhead": 7.0,
-            "fillet": 9.85, "groove": 8.85, "lap": 6.60, "pipe": 8.05,
-        }.get(self.weld_type, 8.0)
+        target_bead_w: float = self._TARGET_BEAD_WIDTH.get(self.weld_type, 8.0)
         bead_w, _, _ = self.compute_bead_geometry(current, voltage, travel_speed, weave=2.0)
         bead_dev: float = abs(bead_w - target_bead_w) / max(target_bead_w, 1e-9)
         bead_eta: float = bead_dev * 0.1
@@ -460,8 +650,7 @@ class WeldingProcessProxy:
         """
         if speed < 1e-9:
             return 0.0
-        unit: float = self.EMPIRICAL_COEFFS["heat_input_unit"]
-        return float((current * voltage) / (speed * unit))
+        return float((current * voltage) / (speed * self._heat_input_unit))
 
     def compute_arc_length(self, voltage: float) -> float:
         """计算电弧长度.
@@ -474,8 +663,7 @@ class WeldingProcessProxy:
         Returns:
             电弧长度 (mm).
         """
-        factor: float = self.EMPIRICAL_COEFFS["arc_length_factor"]
-        return float(max(0.0, voltage - factor))
+        return float(max(0.0, voltage - self._arc_length_factor))
 
     def compute_porosity(
         self,
@@ -495,20 +683,19 @@ class WeldingProcessProxy:
         Returns:
             气孔率 (0-1).
         """
-        base: float = self.EMPIRICAL_COEFFS["porosity_base"]
+        base: float = self._porosity_base
 
-        # 焊缝类型重力因子: 非平焊位置铁水受重力影响, 气体排出困难
+        # 焊缝类型重力因子
         gravity_factor: float = self.WELD_TYPE_GRAVITY_FACTOR.get(self.weld_type, 1.0)
 
-        # 气体保护覆盖率: 干伸长越长保护越差
+        # 气体保护覆盖率
         gas_coverage: float = 1.0 - max(0.0, (stickout - 15.0) / 10.0)
         gas_coverage = max(0.0, min(1.0, gas_coverage))
 
-        # 气体流量影响: 流量不足时保护变差
         if gas_flow < 10.0:
             gas_coverage *= gas_flow / 10.0
 
-        # 电弧稳定性: 方差越大越不稳定
+        # 电弧稳定性
         arc_stability: float = 1.0 / (1.0 + arc_variance)
 
         porosity: float = base * gravity_factor * (1.0 + (1.0 - gas_coverage) * 2.0
@@ -534,7 +721,7 @@ class WeldingProcessProxy:
             角变形量 (degrees).
         """
         if material_factor == 0.0:
-            material_factor = self.EMPIRICAL_COEFFS["distortion_material_factor"]
+            material_factor = self._distortion_material_factor
         type_factor: float = self.WELD_TYPE_DISTORTION_FACTOR.get(self.weld_type, 1.0)
         return float(heat_input * material_factor * constraint * 1000.0 * type_factor)
 
@@ -548,6 +735,8 @@ class WeldingProcessProxy:
 
         penetration = k × sqrt(current × voltage / speed)  # mm
 
+        v0.19.0: 使用缓存的 sqrt(I*V/v) 值
+
         Args:
             current: 焊接电流 (A).
             voltage: 焊接电压 (V).
@@ -558,9 +747,9 @@ class WeldingProcessProxy:
         """
         if speed < 1e-9:
             return 0.0
-        k: float = self.EMPIRICAL_COEFFS["penetration_coeff"]
+        sqrt_ivv: float = self._get_sqrt_ivv(current, voltage, speed)
         position_factor: float = self.WELD_TYPE_PENETRATION_FACTOR.get(self.weld_type, 1.0)
-        return float(k * np.sqrt(current * voltage / speed) * position_factor)
+        return float(self._penetration_coeff * sqrt_ivv * position_factor)
 
     def update_current_history(self, current: float) -> None:
         """更新电流历史, 用于方差计算.
@@ -627,15 +816,9 @@ class WeldingProcessProxy:
               (target_penetration, actual_penetration, deviation_ratio)
               deviation_ratio = |actual - target| / max(target, 1e-9)
         """
-        # 目标熔深
         target_pen: float = self.compute_target_penetration(I, v_mms, t_mm)
-
-        # 实际熔深 (使用已有方法)
         actual_pen: float = self.compute_penetration(I, V, v_mms)
-
-        # 偏差比率
         deviation: float = abs(actual_pen - target_pen) / max(target_pen, 1e-9)
-
         return (target_pen, actual_pen, deviation)
 
     def compute_target_penetration(
@@ -648,8 +831,6 @@ class WeldingProcessProxy:
 
         章锋论文公式:
             target_pen = k_I × I² / (v × t)
-
-        其中 k_I 是电流系数 (默认0.085), I是电流, v是速度, t是板厚.
 
         Args:
             I: 焊接电流 (A).
@@ -669,8 +850,6 @@ class WeldingProcessProxy:
 
         章锋论文公式:
             V_nom = 16.0 + 2.0 × (thickness > 3)
-
-        厚度≤3mm时 V_nom=16V, 厚度>3mm时 V_nom=18V.
 
         Args:
             thickness_mm: 板厚 (mm).
@@ -700,6 +879,8 @@ class WeldingProcessProxy:
           bead_height = k_h × I / (v × 100)
           bead_area   = 0.5 × bead_width × bead_height + penetration × bead_width × 0.3
 
+        v0.19.0: 使用缓存的 sqrt(I*V/v) 值
+
         Args:
             current: 焊接电流 (A).
             voltage: 焊接电压 (V).
@@ -712,20 +893,23 @@ class WeldingProcessProxy:
         if speed < 1e-9:
             return (0.0, 0.0, 0.0)
 
-        k_w: float = self.EMPIRICAL_COEFFS["bead_width_coeff"]
-        k_h: float = self.EMPIRICAL_COEFFS["bead_height_coeff"]
+        k_w: float = self._bead_width_coeff
+        k_h: float = self._bead_height_coeff
         width_factor: float = self.WELD_TYPE_BEAD_WIDTH_FACTOR.get(self.weld_type, 1.0)
         height_factor: float = self.WELD_TYPE_BEAD_HEIGHT_FACTOR.get(self.weld_type, 1.0)
 
-        # 焊缝宽度 (mm) — 与热输入正相关, 加上摆动宽度, 乘以位置因子
-        bead_width: float = (k_w * np.sqrt(current * voltage / speed) + weave * 0.5) * width_factor
+        # v0.19.0: 使用缓存的 sqrt(I*V/v)
+        sqrt_ivv: float = self._get_sqrt_ivv(current, voltage, speed)
+
+        # 焊缝宽度 (mm)
+        bead_width: float = (k_w * sqrt_ivv + weave * 0.5) * width_factor
         bead_width = max(2.0, min(15.0, bead_width))  # 物理约束 2-15mm
 
-        # 焊缝余高 (mm) — 与电流/速度比正相关, 乘以位置因子
+        # 焊缝余高 (mm)
         bead_height: float = (k_h * current / (speed * 10.0)) * height_factor
         bead_height = max(0.5, min(5.0, bead_height))  # 物理约束 0.5-5mm
 
-        # 焊缝截面积 (mm²) — 近似为三角形+矩形
+        # 焊缝截面积 (mm²)
         penetration: float = self.compute_penetration(current, voltage, speed)
         bead_area: float = 0.5 * bead_width * bead_height + penetration * bead_width * 0.3
 
@@ -742,12 +926,6 @@ class WeldingProcessProxy:
 
         飞溅率 = base × f(current) × f(voltage) × f(stickout) × f(arc_stability)
 
-        其中:
-          f(current) = 1 + max(0, (current - 250) / 100)²    — 高电流飞溅增大
-          f(voltage) = 1 + max(0, (voltage - 28) / 4)²        — 高电压飞溅增大
-          f(stickout) = 1 + max(0, (stickout - 15) / 10)²    — 长干伸长飞溅增大
-          f(arc_stability) = 1 + (1 - arc_stability) × 3      — 电弧不稳飞溅增大
-
         Args:
             current: 焊接电流 (A).
             voltage: 焊接电压 (V).
@@ -757,7 +935,7 @@ class WeldingProcessProxy:
         Returns:
             飞溅率 (0-1, 占焊丝质量比例).
         """
-        base: float = self.EMPIRICAL_COEFFS["spatter_base"]
+        base: float = self._spatter_base
 
         f_current: float = 1.0 + max(0.0, (current - 250.0) / 100.0) ** 2
         f_voltage: float = 1.0 + max(0.0, (voltage - 28.0) / 4.0) ** 2
@@ -765,7 +943,7 @@ class WeldingProcessProxy:
         f_arc: float = 1.0 + (1.0 - max(0.0, min(1.0, arc_stability))) * 3.0
 
         spatter: float = base * f_current * f_voltage * f_stickout * f_arc
-        return float(max(0.0, min(0.5, spatter)))  # 上限 50%
+        return float(max(0.0, min(0.5, spatter)))
 
     def compute_deposition_rate(
         self,
@@ -776,10 +954,6 @@ class WeldingProcessProxy:
 
         deposition_rate = k_d × I × efficiency  (kg/h)
 
-        其中:
-          k_d = 0.0055 kg/h per A (GMAW 经验值)
-          efficiency = 0.85-0.95 (取决于焊丝类型, 默认 0.90)
-
         Args:
             current: 焊接电流 (A).
             speed: 焊接速度 (mm/s) — 不直接影响熔敷率, 但影响焊缝截面积.
@@ -787,7 +961,170 @@ class WeldingProcessProxy:
         Returns:
             熔敷率 (kg/h).
         """
-        k_d: float = self.EMPIRICAL_COEFFS["deposition_coeff"]
         efficiency: float = 0.92  # v0.18.2: GMAW 效率 0.90→0.92 (flux-cored wire)
-        deposition: float = k_d * current * efficiency
+        deposition: float = self._deposition_coeff * current * efficiency
         return float(max(0.0, deposition))
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.19.0: 逼真物理仿真 — 热循环/微观组织/残余应力/裂纹
+    # ═══════════════════════════════════════════════════════════════════
+
+    def compute_cooling_rate(
+        self,
+        current: float,
+        voltage: float,
+        speed: float,
+        thickness: float = 10.0,
+    ) -> float:
+        """计算t8/5冷却时间(800°C→500°C), 影响微观组织.
+
+        t85 = K × (thickness / (current×voltage/speed))² × (1/300 + 1/800)
+        简化经验公式: t85 ∝ thickness² / heat_input
+
+        Args:
+            current: 焊接电流 (A).
+            voltage: 焊接电压 (V).
+            speed: 焊接速度 (mm/s).
+            thickness: 板厚 (mm), 默认10mm.
+
+        Returns:
+            t8/5冷却时间 (s), 范围0.5-120秒.
+        """
+        heat: float = self.compute_heat_input(current, voltage, speed)
+        t85: float = 4300.0 * (thickness / 10.0) ** 2 / max(heat * 1000.0, 1.0)
+        return float(max(0.5, min(120.0, t85)))
+
+    def compute_interpass_temp(
+        self,
+        base_temp: float = 20.0,
+        heat_input: float = 0.8,
+    ) -> float:
+        """层间温度估算.
+
+        Args:
+            base_temp: 基础/环境温度 (°C).
+            heat_input: 热输入 (kJ/mm).
+
+        Returns:
+            层间温度 (°C), 上限350°C.
+        """
+        return float(min(base_temp + heat_input * 150.0, 350.0))
+
+    def compute_microstructure(self, t85: float) -> dict:
+        """根据t8/5冷却时间估算微观组织比例.
+
+        t85 < 3s: 马氏体为主
+        t85 3-10s: 贝氏体为主
+        t85 10-30s: 魏氏体+铁素体
+        t85 > 30s: 铁素体+珠光体
+
+        Args:
+            t85: t8/5冷却时间 (s).
+
+        Returns:
+            包含 martensite, bainite, ferrite, pearlite 比例的字典.
+        """
+        if t85 < 3.0:
+            martensite: float = 0.7
+            bainite: float = 0.2
+            ferrite: float = 0.1
+            pearlite: float = 0.0
+        elif t85 < 10.0:
+            martensite = 0.1
+            bainite = 0.6
+            ferrite = 0.2
+            pearlite = 0.1
+        elif t85 < 30.0:
+            martensite = 0.0
+            bainite = 0.2
+            ferrite = 0.55
+            pearlite = 0.25
+        else:
+            martensite = 0.0
+            bainite = 0.05
+            ferrite = 0.60
+            pearlite = 0.35
+        return {
+            "martensite": martensite,
+            "bainite": bainite,
+            "ferrite": ferrite,
+            "pearlite": pearlite,
+        }
+
+    def compute_haz_width(
+        self,
+        current: float,
+        voltage: float,
+        speed: float,
+    ) -> float:
+        """热影响区宽度(mm). HAZ ∝ sqrt(heat_input).
+
+        Args:
+            current: 焊接电流 (A).
+            voltage: 焊接电压 (V).
+            speed: 焊接速度 (mm/s).
+
+        Returns:
+            热影响区宽度 (mm), 范围0.5-8.0mm.
+        """
+        heat: float = self.compute_heat_input(current, voltage, speed)
+        return float(max(0.5, min(8.0, 2.5 * np.sqrt(heat / 0.8))))
+
+    def compute_hardness(
+        self,
+        t85: float,
+        carbon_eq: float = 0.35,
+    ) -> float:
+        """最大硬度估算(HV). 冷速越快硬度越高.
+
+        碳当量+冷却速率 → 硬度
+
+        Args:
+            t85: t8/5冷却时间 (s).
+            carbon_eq: 碳当量 (默认0.35, 对应Q345钢).
+
+        Returns:
+            最大硬度 (HV), 上限450.
+        """
+        hv: float = 200.0 + carbon_eq * 400.0 + max(0.0, (10.0 - t85)) * 15.0
+        return float(min(hv, 450.0))
+
+    def compute_residual_stress(
+        self,
+        heat_input: float,
+        yield_strength: float = 345.0,
+    ) -> float:
+        """残余应力估算(MPa). 通常达到屈服强度的60-100%.
+
+        残余应力 ≈ yield_strength × (0.6 + 0.4×heat_factor)
+
+        Args:
+            heat_input: 热输入 (kJ/mm).
+            yield_strength: 屈服强度 (MPa), 默认345 (Q345钢).
+
+        Returns:
+            残余应力 (MPa), 不超过屈服强度.
+        """
+        stress: float = yield_strength * (0.6 + 0.4 * min(heat_input / 1.5, 1.0))
+        return float(min(stress, yield_strength))
+
+    def compute_solidification_cracking(
+        self,
+        current: float,
+        speed: float,
+        bead_width: float,
+    ) -> float:
+        """凝固裂纹敏感性指数(0-1, 越高越容易开裂).
+
+        CSR ∝ current / (speed × bead_width)
+
+        Args:
+            current: 焊接电流 (A).
+            speed: 焊接速度 (mm/s).
+            bead_width: 焊缝宽度 (mm).
+
+        Returns:
+            凝固裂纹敏感性 (0-1).
+        """
+        csr: float = current / max(speed * bead_width * 10.0, 1.0) * 0.01
+        return float(max(0.0, min(1.0, csr)))

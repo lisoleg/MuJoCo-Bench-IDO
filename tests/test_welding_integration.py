@@ -111,39 +111,41 @@ class TestWeldingIntegration:
         """WeldingSensorSuite读取功能."""
         from core.welding_sensors import WeldingSensorSuite, SENSOR_CONFIGS
 
-        # 验证7类传感器配置
-        assert len(SENSOR_CONFIGS) == 7
+        # v0.19.0: 验证16种传感器配置
+        assert len(SENSOR_CONFIGS) == 16
 
         suite = WeldingSensorSuite()
 
         # 验证默认启用所有传感器
-        assert len(suite.sensor_types) == 7
+        assert len(suite.sensor_types) == 16
 
-        # 测试自适应采样率
-        suite.adapt_sample_rate(0.8)  # > 0.5 → 2x
-        rates = suite.get_effective_sample_rates()
-        for sensor_name, rate in rates.items():
-            base_rate = SENSOR_CONFIGS[sensor_name].sample_rate_hz
-            assert rate >= base_rate * 1.5  # 应该被提升 (2x)
+        # 验证传感器名称列表
+        names = suite.get_sensor_names()
+        assert len(names) == 16
+        assert "arc_voltage" in names
+        assert "arc_current" in names
+        assert "bead_profile" in names
 
-        suite.adapt_sample_rate(0.05)  # < 0.1 → 0.5x
-        rates = suite.get_effective_sample_rates()
-        for sensor_name, rate in rates.items():
-            base_rate = SENSOR_CONFIGS[sensor_name].sample_rate_hz
-            assert rate <= base_rate * 0.6  # 应该被降低 (0.5x)
+        # 测试 read_all (无 env 参数, 使用默认值)
+        readings = suite.read_all()
+        assert len(readings) == 16
+        for sensor_name in names:
+            assert sensor_name in readings
 
-        # 测试温度和电流读取
-        temp = suite.read_temperature(150.0)
-        assert temp == 150.0
+        # 测试历史记录
+        hist = suite.get_history("arc_current", n=1)
+        assert len(hist) == 1
 
-        current = suite.read_arc_current(200.0)
-        assert current == 200.0
+        # 测试趋势 (数据不足时应返回 "unknown")
+        trend = suite.get_trend("arc_current")
+        assert trend == "unknown"
 
         # 测试部分传感器启用
         suite_partial = WeldingSensorSuite(
-            sensor_types=["tcp_pose", "temperature"]
+            sensor_types=["arc_voltage", "arc_current"]
         )
         assert len(suite_partial.sensor_types) == 2
+        assert len(suite_partial.get_sensor_names()) == 2
 
     def test_tomas_axioms(self):
         """TOMAS公理检查功能."""

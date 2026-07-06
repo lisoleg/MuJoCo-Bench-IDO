@@ -69,6 +69,17 @@ WELD_TYPE_OPTIMAL: Dict[str, np.ndarray] = {
     "groove":      np.array([240.0, 26.0, 2.0, 5.0]),   # 坡口焊缝: 高参数全熔透
     "lap":         np.array([160.0, 20.0, 3.0, 8.0]),   # 搭接焊缝: 低电流高速度
     "pipe":        np.array([190.0, 23.0, 2.0, 5.5]),   # 管道焊缝: 专用参数
+    # v0.19.0: 新增10种焊缝接头类型 (AWS A3.0, AWS D1.1, ISO 15614, EN ISO 4063)
+    "corner":      np.array([200.0, 24.0, 2.0, 6.0]),   # 角接焊缝: L形接头
+    "edge":        np.array([180.0, 22.0, 2.0, 7.0]),   # 边缘焊缝: 平行边缘对接
+    "plug":        np.array([210.0, 23.0, 2.0, 4.0]),   # 塞焊焊缝: 圆孔塞焊
+    "slot":        np.array([200.0, 22.0, 2.0, 4.5]),   # 槽焊焊缝: 长孔槽焊
+    "surfacing":   np.array([230.0, 25.0, 2.0, 5.0]),   # 堆焊: 表面堆焊
+    "tack":        np.array([190.0, 23.0, 2.0, 8.0]),   # 定位焊: 短段定位焊
+    "butt":        np.array([210.0, 24.0, 2.0, 5.0]),   # 对接焊缝: 全熔透对接
+    "tee":         np.array([215.0, 24.0, 2.0, 5.5]),   # T形焊缝: T接头
+    "multipass":   np.array([225.0, 25.0, 2.0, 5.0]),   # 多层焊: 多道焊缝
+    "repair":      np.array([195.0, 23.0, 2.0, 5.0]),   # 补焊: 缺陷修复焊缝
 }
 
 # ── 焊缝类型 → SAC checkpoint 路径 ──
@@ -703,7 +714,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--all-types", action="store_true",
-        help="Evaluate all 8 weld types (flat, horizontal, vertical, overhead, fillet, groove, lap, pipe)",
+        help="Evaluate all 18 weld types",
     )
     parser.add_argument(
         "--max-steps", type=int, default=DEFAULT_MAX_STEPS,

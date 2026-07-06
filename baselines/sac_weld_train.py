@@ -795,7 +795,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--weld-type", type=str, default=DEFAULT_WELD_TYPE,
         choices=["flat", "horizontal", "vertical", "overhead",
-                 "fillet", "groove", "lap", "pipe"],
+                 "fillet", "groove", "lap", "pipe",
+                 "corner", "edge", "plug", "slot", "surfacing",
+                 "tack", "butt", "tee", "multipass", "repair"],
         help=f"Weld type (default: {DEFAULT_WELD_TYPE})",
     )
     parser.add_argument(

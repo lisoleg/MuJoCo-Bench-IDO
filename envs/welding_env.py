@@ -64,6 +64,17 @@ WELD_TYPE_KEYFRAMES: Dict[str, str] = {
     "groove": "flat",
     "lap": "flat",
     "pipe": "flat",
+    # v0.19.0: New joint types use flat keyframe (no dedicated XML keyframe)
+    "corner": "flat",
+    "edge": "flat",
+    "plug": "flat",
+    "slot": "flat",
+    "surfacing": "flat",
+    "tack": "flat",
+    "butt": "flat",
+    "tee": "flat",
+    "multipass": "flat",
+    "repair": "flat",
 }
 
 # ── 焊缝 waypoint 配置 ──
@@ -97,6 +108,17 @@ WELD_TYPE_TARGET_BEAD: Dict[str, Dict[str, float]] = {
     "groove":     {"width": 8.0, "height": 1.5},   # 坡口焊缝: 标准宽度, 严格余高
     "lap":        {"width": 7.0, "height": 1.0},   # 搭接焊缝: 适中宽度, 低余高
     "pipe":       {"width": 8.0, "height": 1.8},   # 管道焊缝: 标准宽度
+    # v0.19.0: New joint types (based on optimal params computation)
+    "corner":     {"width": 8.5, "height": 1.8},   # 角接焊缝
+    "edge":       {"width": 6.6, "height": 1.3},   # 边缘焊缝
+    "plug":       {"width": 11.6, "height": 3.5},  # 塞焊焊缝
+    "slot":       {"width": 10.1, "height": 2.8},  # 槽焊焊缝
+    "surfacing":  {"width": 11.8, "height": 3.6},  # 堆焊
+    "tack":       {"width": 6.2, "height": 1.1},   # 定位焊
+    "butt":       {"width": 8.5, "height": 2.0},   # 对接焊缝
+    "tee":        {"width": 9.5, "height": 2.0},   # T形焊缝
+    "multipass":  {"width": 9.9, "height": 3.1},   # 多层焊
+    "repair":     {"width": 7.8, "height": 2.2},   # 补焊
 }
 
 # ── 焊缝类型 → 目标热输入 (kJ/mm) ──
@@ -110,6 +132,17 @@ WELD_TYPE_TARGET_HEAT: Dict[str, float] = {
     "groove": 1.25,
     "lap": 0.40,
     "pipe": 0.79,
+    # v0.19.0: New joint types (match welding_process_proxy.py)
+    "corner": 0.80,
+    "edge": 0.56,
+    "plug": 1.21,
+    "slot": 0.98,
+    "surfacing": 1.15,
+    "tack": 0.55,
+    "butt": 1.01,
+    "tee": 0.94,
+    "multipass": 1.13,
+    "repair": 0.90,
 }
 
 
