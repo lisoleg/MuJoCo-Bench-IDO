@@ -152,8 +152,8 @@ class WeldingProcessProxy:
     WELD_TYPE_OPTIMAL_PARAMS: dict = {
         "flat":        {"current": 200.0, "voltage": 24.0, "travel_speed": 6.0,  "stickout": 15.0},
         "horizontal":  {"current": 180.0, "voltage": 22.0, "travel_speed": 5.0,  "stickout": 14.0},
-        "vertical":    {"current": 160.0, "voltage": 20.0, "travel_speed": 4.0,  "stickout": 12.0},
-        "overhead":    {"current": 170.0, "voltage": 21.0, "travel_speed": 7.0,  "stickout": 13.0},
+        "vertical":    {"current": 170.0, "voltage": 20.0, "travel_speed": 4.0,  "stickout": 12.0},  # v0.18.3: 160→170A (目标>1.0kg/h熔敷率)
+        "overhead":    {"current": 180.0, "voltage": 22.0, "travel_speed": 6.0,  "stickout": 13.0},  # v0.18.3: 170/21/7→180/22/6 (目标>2.5mm熔深)
     }
 
     # 焊缝类型 → 重力影响因子 (铁水受重力影响的程度)
@@ -172,12 +172,39 @@ class WeldingProcessProxy:
         "overhead": 1.1,   # 仰焊: 变形较小 (重力反向)
     }
 
+    # 焊缝类型 → 熔深因子 (重力对电弧穿透的影响)
+    # 仰焊: 重力使熔池下坠脱离电弧, 电弧直接作用于母材, 穿透更深
+    WELD_TYPE_PENETRATION_FACTOR: dict = {
+        "flat": 1.0,        # 平焊: 基准
+        "horizontal": 1.0,  # 横焊: 无显著影响
+        "vertical": 1.0,    # 立焊: 无显著影响
+        "overhead": 1.12,   # 仰焊: 重力辅助电弧穿透 +12%
+    }
+
+    # 焊缝类型 → 焊缝宽度因子 (重力对熔池铺展的影响)
+    # 仰焊: 表面张力抵抗重力, 熔池更集中, 焊缝更窄
+    WELD_TYPE_BEAD_WIDTH_FACTOR: dict = {
+        "flat": 1.0,        # 平焊: 基准
+        "horizontal": 1.0,  # 横焊: 无显著影响
+        "vertical": 1.0,    # 立焊: 无显著影响
+        "overhead": 0.95,   # 仰焊: 表面张力限制铺展 -5%
+    }
+
+    # 焊缝类型 → 焊缝余高因子 (重力对焊缝凸起的影响)
+    # 仰焊: 重力使熔池下垂, 余高降低
+    WELD_TYPE_BEAD_HEIGHT_FACTOR: dict = {
+        "flat": 1.0,        # 平焊: 基准
+        "horizontal": 1.0,  # 横焊: 无显著影响
+        "vertical": 1.0,    # 立焊: 无显著影响
+        "overhead": 0.85,   # 仰焊: 熔池下垂降低余高 -15%
+    }
+
     # 焊缝类型 → 目标热输入 (kJ/mm)
     WELD_TYPE_TARGET_HEAT_INPUT: dict = {
         "flat": 0.80,
         "horizontal": 0.79,
-        "vertical": 0.80,
-        "overhead": 0.51,
+        "vertical": 0.85,   # v0.18.3: 0.80→0.85 (匹配170A/20V/4mm/s)
+        "overhead": 0.66,   # v0.18.3: 0.51→0.66 (匹配180A/22V/6mm/s)
     }
 
     # 最优参数 (用于 eta_residual 计算) — 默认 flat, 动态切换
@@ -495,7 +522,8 @@ class WeldingProcessProxy:
         if speed < 1e-9:
             return 0.0
         k: float = self.EMPIRICAL_COEFFS["penetration_coeff"]
-        return float(k * np.sqrt(current * voltage / speed))
+        position_factor: float = self.WELD_TYPE_PENETRATION_FACTOR.get(self.weld_type, 1.0)
+        return float(k * np.sqrt(current * voltage / speed) * position_factor)
 
     def update_current_history(self, current: float) -> None:
         """更新电流历史, 用于方差计算.
@@ -649,13 +677,15 @@ class WeldingProcessProxy:
 
         k_w: float = self.EMPIRICAL_COEFFS["bead_width_coeff"]
         k_h: float = self.EMPIRICAL_COEFFS["bead_height_coeff"]
+        width_factor: float = self.WELD_TYPE_BEAD_WIDTH_FACTOR.get(self.weld_type, 1.0)
+        height_factor: float = self.WELD_TYPE_BEAD_HEIGHT_FACTOR.get(self.weld_type, 1.0)
 
-        # 焊缝宽度 (mm) — 与热输入正相关, 加上摆动宽度
-        bead_width: float = k_w * np.sqrt(current * voltage / speed) + weave * 0.5
+        # 焊缝宽度 (mm) — 与热输入正相关, 加上摆动宽度, 乘以位置因子
+        bead_width: float = (k_w * np.sqrt(current * voltage / speed) + weave * 0.5) * width_factor
         bead_width = max(2.0, min(15.0, bead_width))  # 物理约束 2-15mm
 
-        # 焊缝余高 (mm) — 与电流/速度比正相关
-        bead_height: float = k_h * current / (speed * 10.0)
+        # 焊缝余高 (mm) — 与电流/速度比正相关, 乘以位置因子
+        bead_height: float = (k_h * current / (speed * 10.0)) * height_factor
         bead_height = max(0.5, min(5.0, bead_height))  # 物理约束 0.5-5mm
 
         # 焊缝截面积 (mm²) — 近似为三角形+矩形

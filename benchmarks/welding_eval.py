@@ -62,8 +62,8 @@ DEFAULT_SAC_CHECKPOINT: str = os.path.join(
 WELD_TYPE_OPTIMAL: Dict[str, np.ndarray] = {
     "flat":        np.array([200.0, 24.0, 2.0, 6.0]),   # 平焊: 标准参数
     "horizontal":  np.array([180.0, 22.0, 3.0, 5.0]),   # 横焊: 降电流防铁水下淌
-    "vertical":    np.array([160.0, 20.0, 4.0, 4.0]),   # 立焊: 更低电流+大摆动
-    "overhead":    np.array([170.0, 21.0, 2.0, 7.0]),   # 仰焊: 高速防滴落
+    "vertical":    np.array([170.0, 20.0, 4.0, 4.0]),   # v0.18.3: 立焊 160→170A (提升熔敷率>1.0)
+    "overhead":    np.array([180.0, 22.0, 2.0, 6.0]),   # v0.18.3: 仰焊 170/21/7→180/22/6 (提升熔深>2.5mm)
 }
 
 # ── 焊缝类型 → SAC checkpoint 路径 ──
