@@ -80,6 +80,14 @@ WELD_TYPE_OPTIMAL: Dict[str, np.ndarray] = {
     "tee":         np.array([215.0, 24.0, 2.0, 5.5]),   # T形焊缝: T接头
     "multipass":   np.array([225.0, 25.0, 2.0, 5.0]),   # 多层焊: 多道焊缝
     "repair":      np.array([195.0, 23.0, 2.0, 5.0]),   # 补焊: 缺陷修复焊缝
+    # v0.20.0: 新增6种焊缝类型 + generic兜底 (DIKWP-IDO跨材质融合)
+    "seam":        np.array([180.0, 15.0, 2.0, 3.0]),   # 缝焊: 电阻缝焊, 低电压
+    "spot":        np.array([150.0, 12.0, 2.0, 2.0]),   # 点焊: 电阻点焊, 极低电压
+    "flange":      np.array([200.0, 24.0, 2.0, 6.0]),   # 法兰焊: 类似角焊
+    "projection":  np.array([170.0, 14.0, 2.0, 2.5]),   # 凸焊: 电阻凸焊
+    "stud":        np.array([250.0, 28.0, 2.0, 4.0]),   # 螺柱焊: 高电流短时焊
+    "seal":        np.array([160.0, 20.0, 2.0, 7.0]),   # 密封焊: 低电流薄板密封
+    "generic":     np.array([200.0, 24.0, 2.0, 6.0]),   # 通用兜底: 未知类型降级
 }
 
 # ── 焊缝类型 → SAC checkpoint 路径 ──
@@ -714,7 +722,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--all-types", action="store_true",
-        help="Evaluate all 18 weld types",
+        help="Evaluate all 25 weld types",
     )
     parser.add_argument(
         "--max-steps", type=int, default=DEFAULT_MAX_STEPS,

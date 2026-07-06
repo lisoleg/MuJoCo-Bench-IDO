@@ -25,7 +25,7 @@ v0.19.0: 从7类传感器扩展到16种完整传感器套件, 每种传感器用
 15. seam_tracking    — 焊缝跟踪传感器 (mm偏差)
 16. bead_profile     — 焊缝轮廓扫描传感器 (3D profile)
 
-Author: MuJoCo-Bench-IDO Welding Module v0.19.0
+Author: MuJoCo-Bench-IDO Welding Module v0.20.0
 """
 
 from dataclasses import dataclass, field

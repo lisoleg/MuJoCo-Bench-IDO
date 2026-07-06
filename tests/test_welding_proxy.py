@@ -202,6 +202,139 @@ class TestPenetration:
         result_high = proxy.predict(current=300, voltage=28, travel_speed=6)
         assert result_high.penetration_depth > result_low.penetration_depth
 
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.20.1: 非标场景 + DIKWP规则库 + η-PID自适应 测试
+    # ═══════════════════════════════════════════════════════════════════
+
+    def test_classify_non_standard_clean(self, proxy):
+        """标准场景→空列表."""
+        result = proxy.classify_non_standard(misalignment=0.0, gap=0.0, has_cad=True,
+                                              surface_condition="clean", confined_space=False,
+                                              batch_size=100)
+        assert result == []
+
+    def test_classify_non_standard_geometric(self, proxy):
+        """错边>2mm→geometric非标."""
+        result = proxy.classify_non_standard(misalignment=4.0, gap=1.0)
+        assert "geometric" in result
+
+    def test_classify_non_standard_semantic(self, proxy):
+        """无CAD→semantic非标."""
+        result = proxy.classify_non_standard(has_cad=False)
+        assert "semantic" in result
+
+    def test_classify_non_standard_environmental(self, proxy):
+        """锈蚀表面→environmental非标."""
+        result = proxy.classify_non_standard(surface_condition="rusty")
+        assert "environmental" in result
+
+    def test_classify_non_standard_production(self, proxy):
+        """批次<10→production非标."""
+        result = proxy.classify_non_standard(batch_size=5)
+        assert "production" in result
+
+    def test_classify_non_standard_multiple(self, proxy):
+        """多维度非标→多类别."""
+        result = proxy.classify_non_standard(
+            misalignment=5.0, gap=5.0, has_cad=False,
+            surface_condition="oily", confined_space=True, batch_size=3,
+        )
+        assert len(result) == 4  # 全部四种
+
+    def test_dikwp_rules_no_match(self, proxy):
+        """无偏差→无规则匹配."""
+        result = proxy.apply_dikwp_rules(misalignment=0.0, gap=0.0)
+        assert len(result["matched_rules"]) == 0
+        assert result["adjust_current_A"] == 0.0
+
+    def test_dikwp_rules_steel_misalign(self):
+        """钢错边→R003匹配."""
+        proxy = WeldingProcessProxy("flat", material="steel")
+        result = proxy.apply_dikwp_rules(misalignment=3.0, gap=1.0)
+        assert "R003_steel_misalign" in result["matched_rules"]
+
+    def test_dikwp_rules_aluminum_gap(self):
+        """铝间隙→R002匹配."""
+        proxy = WeldingProcessProxy("flat", material="aluminum")
+        result = proxy.apply_dikwp_rules(misalignment=0.0, gap=4.0)
+        assert "R002_aluminum_gap" in result["matched_rules"]
+
+    def test_dikwp_rules_returns_adjustments(self, proxy):
+        """规则返回参数调整量."""
+        result = proxy.apply_dikwp_rules(misalignment=3.0, gap=1.0)
+        assert "adjust_current_A" in result
+        assert "adjust_voltage_V" in result
+        assert "adjust_weave_mm" in result
+        assert "scenario_type" in result
+
+    def test_eta_pid_no_trigger(self, proxy):
+        """η低于阈值→不触发."""
+        # 最优参数下η≈0
+        result = proxy.eta_pid_adjust(200.0, 24.0, 6.0, 2.0, eta=0.001)
+        assert result["triggered"] is False
+        assert result["delta_current"] == 0.0
+
+    def test_eta_pid_trigger(self, proxy):
+        """η高于阈值→触发调整."""
+        # 大偏差参数→高η
+        result = proxy.eta_pid_adjust(300.0, 32.0, 3.0, 1.0, eta=0.5)
+        assert result["triggered"] is True
+        assert result["delta_current"] != 0.0
+
+    def test_eta_pid_adjustment_direction(self, proxy):
+        """η-PID调整方向: 参数向最优值靠拢."""
+        # 电流过高(300 vs 200), 调整应为负
+        result = proxy.eta_pid_adjust(300.0, 24.0, 6.0, 2.0, eta=0.3)
+        if result["triggered"]:
+            # 电流过高时, 调整应使电流降低 (向最优200靠拢)
+            assert result["adjusted_current"] <= 300.0
+
+    def test_eta_pid_limited_adjustment(self, proxy):
+        """调整幅度受限: 不超过原参数的15%."""
+        result = proxy.eta_pid_adjust(200.0, 24.0, 6.0, 2.0, eta=1.0)
+        if result["triggered"]:
+            assert abs(result["delta_current"]) <= 200.0 * 0.15 + 0.01
+            assert abs(result["delta_voltage"]) <= 24.0 * 0.15 + 0.01
+
+    def test_intent_safety_safe(self, proxy):
+        """正常参数→SAFE."""
+        level, label = proxy.classify_intent_safety(200.0, 24.0, 6.0)
+        assert level == 0
+        assert label == "SAFE"
+
+    def test_intent_safety_suspicious(self, proxy):
+        """边界参数→SUSPICIOUS."""
+        level, label = proxy.classify_intent_safety(250.0, 30.0, 6.0)
+        assert level >= 1
+
+    def test_intent_safety_dangerous(self, proxy):
+        """超限参数→DANGEROUS."""
+        level, label = proxy.classify_intent_safety(350.0, 40.0, 6.0)
+        assert level >= 2
+
+    def test_intent_safety_critical(self, proxy):
+        """严重超限→CRITICAL."""
+        level, label = proxy.classify_intent_safety(500.0, 60.0, 6.0)
+        assert level == 3
+        assert label == "CRITICAL"
+
+    def test_material_affects_cooling(self):
+        """不同材料→不同冷却速率."""
+        steel = WeldingProcessProxy("flat", material="steel")
+        aluminum = WeldingProcessProxy("flat", material="aluminum")
+        t85_steel = steel.compute_cooling_rate(200, 24, 6)
+        t85_al = aluminum.compute_cooling_rate(200, 24, 6)
+        # 铝热导率(167) > 钢(50), 所以铝冷却更快(t85更短)
+        assert t85_al < t85_steel
+
+    def test_weld_type_count_25(self, proxy):
+        """焊缝类型总数=25."""
+        assert len(proxy.WELD_TYPE_OPTIMAL_PARAMS) == 25
+
+    def test_generic_fallback_exists(self, proxy):
+        """generic类型存在."""
+        assert "generic" in proxy.WELD_TYPE_OPTIMAL_PARAMS
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

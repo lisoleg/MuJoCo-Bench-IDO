@@ -797,7 +797,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         choices=["flat", "horizontal", "vertical", "overhead",
                  "fillet", "groove", "lap", "pipe",
                  "corner", "edge", "plug", "slot", "surfacing",
-                 "tack", "butt", "tee", "multipass", "repair"],
+                 "tack", "butt", "tee", "multipass", "repair",
+                 "seam", "spot", "flange", "projection", "stud", "seal",
+                 "generic"],
         help=f"Weld type (default: {DEFAULT_WELD_TYPE})",
     )
     parser.add_argument(

@@ -75,6 +75,14 @@ WELD_TYPE_KEYFRAMES: Dict[str, str] = {
     "tee": "flat",
     "multipass": "flat",
     "repair": "flat",
+    # v0.20.0: 新增焊缝类型 (seam/spot/flange/projection/stud/seal/generic) 使用flat keyframe
+    "seam": "flat",
+    "spot": "flat",
+    "flange": "flat",
+    "projection": "flat",
+    "stud": "flat",
+    "seal": "flat",
+    "generic": "flat",
 }
 
 # ── 焊缝 waypoint 配置 ──
@@ -119,6 +127,14 @@ WELD_TYPE_TARGET_BEAD: Dict[str, Dict[str, float]] = {
     "tee":        {"width": 9.5, "height": 2.0},   # T形焊缝
     "multipass":  {"width": 9.9, "height": 3.1},   # 多层焊
     "repair":     {"width": 7.8, "height": 2.2},   # 补焊
+    # v0.20.0: 新增焊缝类型 (使用flat的target值作为基准)
+    "seam":       {"width": 8.0, "height": 2.0},   # 缝焊
+    "spot":       {"width": 8.0, "height": 2.0},   # 点焊
+    "flange":     {"width": 8.0, "height": 2.0},   # 法兰焊
+    "projection": {"width": 8.0, "height": 2.0},   # 凸焊
+    "stud":       {"width": 8.0, "height": 2.0},   # 螺柱焊
+    "seal":       {"width": 8.0, "height": 2.0},   # 密封焊
+    "generic":    {"width": 8.0, "height": 2.0},   # 通用兜底
 }
 
 # ── 焊缝类型 → 目标热输入 (kJ/mm) ──
@@ -143,6 +159,14 @@ WELD_TYPE_TARGET_HEAT: Dict[str, float] = {
     "tee": 0.94,
     "multipass": 1.13,
     "repair": 0.90,
+    # v0.20.0: 新增焊缝类型 (match welding_process_proxy.py)
+    "seam": 0.90,
+    "spot": 0.90,
+    "flange": 0.80,
+    "projection": 0.95,
+    "stud": 1.75,
+    "seal": 0.46,
+    "generic": 0.80,
 }
 
 
@@ -241,12 +265,13 @@ class WeldingEnv:
         self._random_seed: int = random_seed
         np.random.seed(random_seed)
 
-        # 焊接类型验证
+        # 焊接类型验证 (v0.20.0: 未知类型优雅降级到generic)
         if weld_type not in WELD_TYPE_KEYFRAMES:
-            raise ValueError(
-                f"Invalid weld_type '{weld_type}'. "
-                f"Must be one of {list(WELD_TYPE_KEYFRAMES.keys())}"
+            import warnings
+            warnings.warn(
+                f"Unknown weld_type '{weld_type}', falling back to 'generic'"
             )
+            weld_type = "generic"
         self.weld_type: str = weld_type
 
         # 加载 MuJoCo 模型

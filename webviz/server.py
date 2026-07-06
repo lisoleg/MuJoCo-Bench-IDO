@@ -4348,6 +4348,236 @@ async def welding_safety() -> JSONResponse:
         )
 
 
+# ═══════════════════════════════════════════════════════════════════
+# v0.20.1: 非标场景 + DIKWP规则库 + η-PID自适应 API端点
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/welding/non_standard")
+async def welding_non_standard(
+    misalignment: float = 0.0,
+    gap: float = 0.0,
+    has_cad: bool = True,
+    surface: str = "clean",
+    confined: bool = False,
+    batch: int = 100,
+) -> JSONResponse:
+    """非标场景分类 (从播放器到工匠 — 因果自适应).
+
+    Query Parameters:
+        misalignment: 错边量 (mm).
+        gap: 间隙 (mm).
+        has_cad: 是否有CAD (true/false).
+        surface: 表面状态 (clean/rusty/oily).
+        confined: 是否受限空间 (true/false).
+        batch: 批次数量.
+
+    Returns:
+        非标类别列表 + 描述.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+    try:
+        from core.welding_process_proxy import WeldingProcessProxy
+        proxy = WeldingProcessProxy("flat")
+        types = proxy.classify_non_standard(
+            misalignment=misalignment, gap=gap,
+            has_cad=has_cad, surface_condition=surface,
+            confined_space=confined, batch_size=batch,
+        )
+        descriptions = {t: proxy.NON_STANDARD_TYPES.get(t, t) for t in types}
+        return JSONResponse(content={
+            "non_standard_types": types,
+            "descriptions": descriptions,
+            "is_standard": len(types) == 0,
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
+
+@app.get("/api/welding/dikwp_rules")
+async def welding_dikwp_rules(
+    misalignment: float = 0.0,
+    gap: float = 0.0,
+    material: str = "steel",
+    weld_type: str = "flat",
+) -> JSONResponse:
+    """DIKWP K-层焊接规则库 — 基于因果规则的参数调整建议.
+
+    Query Parameters:
+        misalignment: 错边量 (mm).
+        gap: 间隙 (mm).
+        material: 材料 (steel/aluminum/stainless/titanium).
+        weld_type: 焊缝类型.
+
+    Returns:
+        参数调整建议 + 匹配的规则 + 非标场景分类.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+    try:
+        from core.welding_process_proxy import WeldingProcessProxy
+        proxy = WeldingProcessProxy(weld_type, material=material)
+        result = proxy.apply_dikwp_rules(misalignment=misalignment, gap=gap)
+        return JSONResponse(content={
+            "status": "ok",
+            "material": material,
+            "weld_type": weld_type,
+            "misalignment_mm": misalignment,
+            "gap_mm": gap,
+            "adjustments": result,
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
+
+@app.get("/api/welding/eta_pid")
+async def welding_eta_pid(
+    current: float = 200.0,
+    voltage: float = 24.0,
+    speed: float = 6.0,
+    weave: float = 2.0,
+    weld_type: str = "flat",
+    material: str = "steel",
+    eta_threshold: float = 0.05,
+) -> JSONResponse:
+    """η-PID自适应参数调整 (从播放器到工匠 — 因果闭环控制).
+
+    Query Parameters:
+        current: 当前电流 (A).
+        voltage: 当前电压 (V).
+        speed: 当前速度 (mm/s).
+        weave: 当前摆动 (mm).
+        weld_type: 焊缝类型.
+        material: 材料.
+        eta_threshold: η触发阈值.
+
+    Returns:
+        调整后的参数 + 原始η + 是否触发.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+    try:
+        from core.welding_process_proxy import WeldingProcessProxy
+        proxy = WeldingProcessProxy(weld_type, material=material)
+        # 计算当前η
+        quality = proxy.predict(current, voltage, speed, stickout=15.0, weave=weave)
+        eta = quality.eta_residual
+        # η-PID调整
+        result = proxy.eta_pid_adjust(
+            current, voltage, speed, weave, eta, eta_threshold=eta_threshold,
+        )
+        # 计算调整后的η
+        if result["triggered"]:
+            q_adj = proxy.predict(
+                result["adjusted_current"], result["adjusted_voltage"], speed,
+                stickout=15.0, weave=result["adjusted_weave"],
+            )
+            eta_after = q_adj.eta_residual
+        else:
+            eta_after = eta
+        return JSONResponse(content={
+            "status": "ok",
+            "eta_before": eta,
+            "eta_after": eta_after,
+            "eta_improvement": max(0.0, eta - eta_after),
+            "triggered": result["triggered"],
+            "original_params": {"current": current, "voltage": voltage, "weave": weave},
+            "adjusted_params": {
+                "current": result["adjusted_current"],
+                "voltage": result["adjusted_voltage"],
+                "weave": result["adjusted_weave"],
+            },
+            "deltas": {
+                "delta_current": result["delta_current"],
+                "delta_voltage": result["delta_voltage"],
+                "delta_weave": result["delta_weave"],
+            },
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
+
+@app.get("/api/welding/intent_safety")
+async def welding_intent_safety(
+    current: float = 200.0,
+    voltage: float = 24.0,
+    speed: float = 6.0,
+    weld_type: str = "flat",
+) -> JSONResponse:
+    """IntentGuard四级安全分类.
+
+    Query Parameters:
+        current: 焊接电流 (A).
+        voltage: 焊接电压 (V).
+        speed: 焊接速度 (mm/s).
+        weld_type: 焊缝类型.
+
+    Returns:
+        安全等级 (0=SAFE, 1=SUSPICIOUS, 2=DANGEROUS, 3=CRITICAL).
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+    try:
+        from core.welding_process_proxy import WeldingProcessProxy
+        proxy = WeldingProcessProxy(weld_type)
+        level, label = proxy.classify_intent_safety(current, voltage, speed)
+        return JSONResponse(content={
+            "level": level,
+            "label": label,
+            "current_A": current,
+            "voltage_V": voltage,
+            "weld_type": weld_type,
+            "description": {
+                0: "SAFE: 正常焊接参数",
+                1: "SUSPICIOUS: 边界值, 降速+增强监控",
+                2: "DANGEROUS: 超出安全上限, Ψ-Anchor硬拦截",
+                3: "CRITICAL: 严重超限, 立即断弧+急停",
+            }.get(level, "UNKNOWN"),
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
+
+@app.get("/api/welding/types")
+async def welding_types() -> JSONResponse:
+    """列出所有支持的焊缝类型和材料.
+
+    Returns:
+        焊缝类型列表 + 材料列表 + 数量统计.
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+    try:
+        from core.welding_process_proxy import WeldingProcessProxy
+        proxy = WeldingProcessProxy("flat")
+        types = sorted(proxy.WELD_TYPE_OPTIMAL_PARAMS.keys())
+        materials = sorted(proxy.MATERIAL_PROPERTIES.keys())
+        return JSONResponse(content={
+            "weld_types": types,
+            "weld_type_count": len(types),
+            "materials": materials,
+            "material_count": len(materials),
+            "version": "v0.20.1",
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
+
 def _launch_welding_viewer(weld_type: str = "flat") -> None:
     """Launch the welding robot 3D viewer with ViserServer + mjviser.
 

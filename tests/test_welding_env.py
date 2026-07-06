@@ -45,9 +45,16 @@ class TestWeldingEnvCreation:
         assert env.model is not None
 
     def test_invalid_weld_type(self):
-        """无效焊接类型应抛出 ValueError."""
-        with pytest.raises(ValueError):
-            WeldingEnv(weld_type="invalid_type")
+        """v0.20.0: 无效焊接类型应降级到 generic 而非抛出 ValueError."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            env = WeldingEnv(weld_type="invalid_type")
+            # 应该发出警告
+            assert len(w) >= 1, "Should emit a warning for unknown weld_type"
+            assert "falling back to 'generic'" in str(w[0].message)
+            # weld_type 应该被降级为 generic
+            assert env.weld_type == "generic"
 
 
 class TestWeldingEnvReset:
@@ -274,6 +281,20 @@ class TestWeldTypes:
         action = np.array([200.0, 24.0, 2.0, 8.0])
         result = env.step(action)
         assert result["info"]["weld_type"] == "vertical"
+
+    @pytest.mark.parametrize("weld_type", [
+        "seam", "spot", "flange", "projection", "stud", "seal", "generic"
+    ])
+    def test_v0200_new_weld_types(self, weld_type):
+        """v0.20.0: 新增6种焊缝类型 + generic 都能正确初始化和step."""
+        env = WeldingEnv(weld_type=weld_type)
+        obs = env.reset()
+        assert obs.shape == (OBS_DIM,), f"Failed for weld_type={weld_type}"
+        assert env.weld_type == weld_type
+        action = np.array([200.0, 24.0, 2.0, 6.0])
+        result = env.step(action)
+        assert "observation" in result
+        assert result["info"]["weld_type"] == weld_type
 
 
 class TestWaypoints:

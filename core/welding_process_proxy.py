@@ -16,9 +16,11 @@ WeldingProcessProxy — 焊接工艺代理模型
   - porosity = base × (1 + gas_coverage_penalty + arc_stability_penalty)
   - angular_distortion = heat_input × material_factor × constraint
 
+v0.20.1: 非标场景分类 + DIKWP K-层规则库 + η-PID自适应控制 (从播放器到工匠)
+v0.20.0: 扩展至25种焊缝类型 + 跨材质支持(Al6061/SS304/Ti6Al4V/Q235) + IntentGuard四级安全分类
 v0.19.0: 扩展至18种焊缝类型 + 逼真物理仿真 + 性能优化
 
-Author: MuJoCo-Bench-IDO Welding Module v0.19.0
+Author: MuJoCo-Bench-IDO Welding Module v0.20.1
 """
 
 from dataclasses import dataclass, field
@@ -199,6 +201,14 @@ class WeldingProcessProxy:
         "tee":         {"current": 215.0, "voltage": 24.0, "travel_speed": 5.5,  "stickout": 15.0},  # T形焊缝: T接头
         "multipass":   {"current": 225.0, "voltage": 25.0, "travel_speed": 5.0,  "stickout": 15.0},  # 多层焊: 多道焊缝
         "repair":      {"current": 195.0, "voltage": 23.0, "travel_speed": 5.0,  "stickout": 14.0},  # 补焊: 缺陷修复焊缝
+        # v0.20.0: 新增6种焊缝类型 (电阻焊/特殊焊缝) + generic兜底 (DIKWP-IDO跨材质融合)
+        "seam":        {"current": 180.0, "voltage": 15.0, "travel_speed": 3.0,  "stickout": 10.0},  # 缝焊: 电阻缝焊, 电压低
+        "spot":        {"current": 150.0, "voltage": 12.0, "travel_speed": 2.0,  "stickout": 8.0},   # 点焊: 电阻点焊, 极低电压
+        "flange":      {"current": 200.0, "voltage": 24.0, "travel_speed": 6.0,  "stickout": 15.0},  # 法兰焊: 类似角焊
+        "projection":  {"current": 170.0, "voltage": 14.0, "travel_speed": 2.5,  "stickout": 10.0},  # 凸焊: 电阻凸焊
+        "stud":        {"current": 250.0, "voltage": 28.0, "travel_speed": 4.0,  "stickout": 18.0},  # 螺柱焊: 高电流短时焊
+        "seal":        {"current": 160.0, "voltage": 20.0, "travel_speed": 7.0,  "stickout": 13.0},  # 密封焊: 低电流薄板密封
+        "generic":     {"current": 200.0, "voltage": 24.0, "travel_speed": 6.0,  "stickout": 15.0},  # 通用兜底: 未知类型优雅降级
     }
 
     # 焊缝类型 → 重力影响因子 (铁水受重力影响的程度)
@@ -223,6 +233,14 @@ class WeldingProcessProxy:
         "tee": 1.0,        # T形焊缝: 通常平焊位置
         "multipass": 1.0,  # 多层焊: 通常平焊位置
         "repair": 1.0,     # 补焊: 修复位置不定, 取标准值
+        # v0.20.0: 新增焊缝类型 (电阻焊类用1.0)
+        "seam": 1.0,       # 缝焊: 电阻焊, 重力影响小
+        "spot": 1.0,       # 点焊: 电阻焊, 重力影响小
+        "flange": 1.0,     # 法兰焊: 类似角焊, 平焊位置
+        "projection": 1.0, # 凸焊: 电阻焊, 重力影响小
+        "stud": 1.0,       # 螺柱焊: 垂直方向, 重力影响标准
+        "seal": 1.0,       # 密封焊: 薄板平焊, 重力影响小
+        "generic": 1.0,    # 通用兜底: 标准值
     }
 
     # 焊缝类型 → 变形因子 (不同位置热变形差异)
@@ -247,6 +265,14 @@ class WeldingProcessProxy:
         "tee": 0.95,       # T形焊缝: 变形略低于标准
         "multipass": 1.15, # 多层焊: 多道累积变形
         "repair": 1.05,    # 补焊: 局部修复, 变形略增
+        # v0.20.0: 新增焊缝类型
+        "seam": 0.80,      # 缝焊: 电阻焊, 热输入集中, 变形较小
+        "spot": 0.50,      # 点焊: 极局部热输入, 变形最小
+        "flange": 0.90,    # 法兰焊: 类似角焊, 约束较高
+        "projection": 0.70,# 凸焊: 局部凸点, 变形较小
+        "stud": 1.00,      # 螺柱焊: 集中高热, 标准变形
+        "seal": 0.70,      # 密封焊: 低热输入薄板, 变形较小
+        "generic": 1.0,    # 通用兜底: 标准变形
     }
 
     # 焊缝类型 → 熔深因子 (重力对电弧穿透的影响)
@@ -272,6 +298,14 @@ class WeldingProcessProxy:
         "tee": 0.90,        # T形焊缝: 熔深略浅
         "multipass": 0.85,  # 多层焊: 逐层累积熔深
         "repair": 1.08,     # 补焊: 需要深熔透修复缺陷
+        # v0.20.0: 新增焊缝类型
+        "seam": 0.90,       # 缝焊: 电阻焊, 熔深较浅
+        "spot": 0.70,       # 点焊: 熔核形成, 非深熔透
+        "flange": 0.92,     # 法兰焊: 类似角焊, 熔深略浅
+        "projection": 0.85, # 凸焊: 局部凸点熔透
+        "stud": 1.10,       # 螺柱焊: 高电流, 熔深深
+        "seal": 0.80,       # 密封焊: 薄板浅熔深
+        "generic": 1.0,     # 通用兜底: 基准
     }
 
     # 焊缝类型 → 焊缝宽度因子 (重力对熔池铺展的影响)
@@ -297,6 +331,14 @@ class WeldingProcessProxy:
         "tee": 1.10,        # T形焊缝: 焊脚宽度较大
         "multipass": 1.05,  # 多层焊: 逐道累积, 焊缝略宽
         "repair": 0.92,     # 补焊: 局部修复, 焊缝略窄
+        # v0.20.0: 新增焊缝类型
+        "seam": 1.0,        # 缝焊: 标准焊缝宽度
+        "spot": 0.80,       # 点焊: 熔核小, 焊缝窄
+        "flange": 1.10,     # 法兰焊: 类似角焊, 焊缝略宽
+        "projection": 0.90, # 凸焊: 局部凸点, 焊缝较窄
+        "stud": 1.0,        # 螺柱焊: 集中熔化, 标准宽度
+        "seal": 1.0,        # 密封焊: 标准宽度
+        "generic": 1.0,     # 通用兜底: 基准
     }
 
     # 焊缝类型 → 焊缝余高因子 (重力对焊缝凸起的影响)
@@ -322,6 +364,14 @@ class WeldingProcessProxy:
         "tee": 0.85,        # T形焊缝: 余高略低
         "multipass": 1.15,  # 多层焊: 逐层累积, 余高较高
         "repair": 0.95,     # 补焊: 修复余高, 略低于标准
+        # v0.20.0: 新增焊缝类型
+        "seam": 0.90,       # 缝焊: 低余高强化
+        "spot": 1.10,       # 点焊: 熔核凸出, 余高较高
+        "flange": 0.85,     # 法兰焊: 类似角焊, 余高略低
+        "projection": 1.0,  # 凸焊: 标准余高
+        "stud": 1.20,       # 螺柱焊: 螺柱凸出, 余高最高
+        "seal": 0.80,       # 密封焊: 薄板低余高
+        "generic": 1.0,     # 通用兜底: 基准
     }
 
     # 焊缝类型 → 目标热输入 (kJ/mm)
@@ -346,6 +396,14 @@ class WeldingProcessProxy:
         "tee": 0.94,        # T形焊缝: (215×24)/(5.5×1000)=0.938≈0.94
         "multipass": 1.13,  # 多层焊: (225×25)/(5×1000)=1.125≈1.13
         "repair": 0.90,     # 补焊: (195×23)/(5×1000)=0.897≈0.90
+        # v0.20.0: 新增焊缝类型 (按公式 (I×V)/(v×1000) 计算)
+        "seam": 0.90,       # 缝焊: (180×15)/(3×1000)=0.900
+        "spot": 0.90,       # 点焊: (150×12)/(2×1000)=0.900
+        "flange": 0.80,     # 法兰焊: (200×24)/(6×1000)=0.800
+        "projection": 0.95, # 凸焊: (170×14)/(2.5×1000)=0.952≈0.95
+        "stud": 1.75,       # 螺柱焊: (250×28)/(4×1000)=1.750
+        "seal": 0.46,       # 密封焊: (160×20)/(7×1000)=0.457≈0.46
+        "generic": 0.80,    # 通用兜底: 同flat基准
     }
 
     # v0.19.0: 焊缝类型 → 目标焊缝宽度 (mm) — 用于 eta 计算
@@ -357,6 +415,9 @@ class WeldingProcessProxy:
         "corner": 8.48, "edge": 6.60, "plug": 11.63, "slot": 10.14,
         "surfacing": 11.85, "tack": 6.16, "butt": 8.49, "tee": 9.52,
         "multipass": 9.85, "repair": 7.81,
+        # v0.20.0: 新增焊缝类型目标宽度
+        "seam": 8.50, "spot": 6.80, "flange": 8.88, "projection": 7.84,
+        "stud": 11.46, "seal": 6.35, "generic": 8.0,
     }
 
     # 最优参数 (用于 eta_residual 计算) — 默认 flat, 动态切换
@@ -375,22 +436,44 @@ class WeldingProcessProxy:
         "stickout": 17.0,       # 8-25
     }
 
-    def __init__(self, weld_type: str = "flat") -> None:
+    # v0.20.0: 材料属性表 (DIKWP-IDO跨材质支持: Al6061/SS304/Ti6Al4V/Q235)
+    MATERIAL_PROPERTIES: dict = {
+        "steel":      {"thermal_conductivity": 50.0, "melting_point": 1500.0, "density": 7850.0, "specific_heat": 470.0, "thermal_expansion": 12e-6},
+        "aluminum":   {"thermal_conductivity": 167.0, "melting_point": 660.0, "density": 2700.0, "specific_heat": 900.0, "thermal_expansion": 23e-6},
+        "stainless":  {"thermal_conductivity": 16.0, "melting_point": 1450.0, "density": 8000.0, "specific_heat": 500.0, "thermal_expansion": 16e-6},
+        "titanium":   {"thermal_conductivity": 7.0, "melting_point": 1668.0, "density": 4500.0, "specific_heat": 520.0, "thermal_expansion": 9e-6},
+    }
+
+    def __init__(self, weld_type: str = "flat", material: str = "steel") -> None:
         """初始化焊接工艺代理模型.
 
         Args:
             weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead",
                           "fillet", "groove", "lap", "pipe", "corner", "edge",
                           "plug", "slot", "surfacing", "tack", "butt", "tee",
-                          "multipass", "repair").
+                          "multipass", "repair", "seam", "spot", "flange",
+                          "projection", "stud", "seal", "generic").
+            material: 焊接材料 ("steel", "aluminum", "stainless", "titanium").
+                      默认 "steel" (Q235碳钢).
         """
         self.weld_type: str = weld_type
+        self.material: str = material
         self._current_history: list[float] = []
         self.stub_mode: bool = False  # 完整版, 非 stub
 
         # 根据焊缝类型设置最优参数
         type_optimal = self.WELD_TYPE_OPTIMAL_PARAMS.get(weld_type, self.WELD_TYPE_OPTIMAL_PARAMS["flat"])
         self.OPTIMAL_PARAMS = dict(type_optimal)  # 实例属性覆盖类属性
+
+        # v0.20.0: 提取材料属性到实例变量 (DIKWP-IDO跨材质支持)
+        mat_props: dict = self.MATERIAL_PROPERTIES.get(
+            material, self.MATERIAL_PROPERTIES["steel"]
+        )
+        self._thermal_conductivity: float = mat_props["thermal_conductivity"]
+        self._melting_point: float = mat_props["melting_point"]
+        self._material_density: float = mat_props["density"]
+        self._specific_heat: float = mat_props["specific_heat"]
+        self._thermal_expansion: float = mat_props["thermal_expansion"]
 
         # v0.19.0: Performance optimizations ──────────────────────────
         # 预计算参数范围倒数 (避免每次除法)
@@ -981,6 +1064,9 @@ class WeldingProcessProxy:
         t85 = K × (thickness / (current×voltage/speed))² × (1/300 + 1/800)
         简化经验公式: t85 ∝ thickness² / heat_input
 
+        v0.20.0: 引入材料热导率影响 — 热导率高的材料散热更快, t85更短。
+        以钢的热导率(50 W/m·K)为基准归一化: t85 × (50 / thermal_conductivity)
+
         Args:
             current: 焊接电流 (A).
             voltage: 焊接电压 (V).
@@ -991,7 +1077,10 @@ class WeldingProcessProxy:
             t8/5冷却时间 (s), 范围0.5-120秒.
         """
         heat: float = self.compute_heat_input(current, voltage, speed)
+        # 基准 t85 (以钢的热导率50 W/m·K为基准)
         t85: float = 4300.0 * (thickness / 10.0) ** 2 / max(heat * 1000.0, 1.0)
+        # v0.20.0: 材料热导率修正 — 热导率越高, 冷却越快, t85越短
+        t85 *= (50.0 / max(self._thermal_conductivity, 1e-9))
         return float(max(0.5, min(120.0, t85)))
 
     def compute_interpass_temp(
@@ -1128,3 +1217,312 @@ class WeldingProcessProxy:
         """
         csr: float = current / max(speed * bead_width * 10.0, 1.0) * 0.01
         return float(max(0.0, min(1.0, csr)))
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.20.1: 非标场景分类 (从播放器到工匠 — 因果自适应)
+    # ═══════════════════════════════════════════════════════════════════
+
+    # 非标场景类型 (参考《从播放器到工匠》论文)
+    NON_STANDARD_TYPES: dict = {
+        "geometric":     "几何非标: 工件变形、错边、间隙不均",
+        "semantic":      "语义非标: 无完整CAD图纸、现场临时切割/修补",
+        "environmental": "环境非标: 空间受限(仰焊/死角)、表面状态恶劣(锈蚀/油污)",
+        "production":    "生产非标: 频繁换型, 单批次数量极少",
+    }
+
+    def classify_non_standard(
+        self,
+        misalignment: float = 0.0,
+        gap: float = 0.0,
+        has_cad: bool = True,
+        surface_condition: str = "clean",
+        confined_space: bool = False,
+        batch_size: int = 100,
+    ) -> list:
+        """非标场景分类器 (参考《从播放器到工匠》论文 1.2节).
+
+        判定输入工况属于哪些非标类别, 为后续因果自适应提供决策依据。
+
+        Args:
+            misalignment: 错边量 (mm), >2mm 视为几何非标.
+            gap: 间隙 (mm), >3mm 视为几何非标.
+            has_cad: 是否有完整CAD图纸, False 视为语义非标.
+            surface_condition: 表面状态 ("clean"/"rusty"/"oily"),
+                               非"clean" 视为环境非标.
+            confined_space: 是否在受限空间作业, True 视为环境非标.
+            batch_size: 批次数量, <10 视为生产非标.
+
+        Returns:
+            非标类别列表 (可能为空列表表示完全标准场景).
+            元素来自 ["geometric", "semantic", "environmental", "production"].
+        """
+        non_standard: list = []
+
+        # 几何非标: 错边>2mm 或 间隙>3mm
+        if misalignment > 2.0 or gap > 3.0:
+            non_standard.append("geometric")
+
+        # 语义非标: 无CAD图纸
+        if not has_cad:
+            non_standard.append("semantic")
+
+        # 环境非标: 表面恶劣 或 受限空间
+        if surface_condition != "clean" or confined_space:
+            non_standard.append("environmental")
+
+        # 生产非标: 单批次极少
+        if batch_size < 10:
+            non_standard.append("production")
+
+        return non_standard
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.20.1: DIKWP K-层焊接规则库 (因果知识 → 参数调整)
+    # ═══════════════════════════════════════════════════════════════════
+
+    # DIKWP焊接规则库 — 基于经验的因果规则 (参考论文附录A JSON Schema)
+    # 条件: material + misalignment + gap → 动作: adjust_current/voltage/weave
+    DIKWP_RULE_BASE: list = [
+        {
+            "rule_id": "R001_aluminum_misalign",
+            "condition": {"material": "aluminum", "misalignment_min": 2.0, "gap_max": 3.0},
+            "action": {"adjust_current_A": -10.0, "adjust_voltage_V": -0.3, "adjust_weave_mm": 0.5},
+        },
+        {
+            "rule_id": "R002_aluminum_gap",
+            "condition": {"material": "aluminum", "gap_min": 3.0},
+            "action": {"adjust_current_A": -15.0, "adjust_voltage_V": -0.5, "adjust_weave_mm": 1.0},
+        },
+        {
+            "rule_id": "R003_steel_misalign",
+            "condition": {"material": "steel", "misalignment_min": 2.0, "gap_max": 3.0},
+            "action": {"adjust_current_A": 5.0, "adjust_voltage_V": -0.2, "adjust_weave_mm": 0.3},
+        },
+        {
+            "rule_id": "R004_steel_gap_large",
+            "condition": {"material": "steel", "gap_min": 4.0},
+            "action": {"adjust_current_A": -20.0, "adjust_voltage_V": -1.0, "adjust_weave_mm": 1.5},
+        },
+        {
+            "rule_id": "R005_titanium_thin_gap",
+            "condition": {"material": "titanium", "gap_min": 2.0},
+            "action": {"adjust_current_A": -15.0, "adjust_voltage_V": -0.4, "adjust_weave_mm": 0.8},
+        },
+        {
+            "rule_id": "R006_stainless_rusty_surface",
+            "condition": {"material": "stainless", "misalignment_min": 1.5},
+            "action": {"adjust_current_A": 10.0, "adjust_voltage_V": 0.5, "adjust_weave_mm": 0.0},
+        },
+    ]
+
+    def apply_dikwp_rules(
+        self,
+        misalignment: float = 0.0,
+        gap: float = 0.0,
+    ) -> dict:
+        """应用DIKWP K-层焊接规则库, 返回参数调整建议.
+
+        参考论文《从播放器到工匠》附录A — DIKWP焊接规则库JSON Schema。
+        根据材料属性和几何偏差, 匹配因果规则, 生成参数调整量。
+
+        Args:
+            misalignment: 错边量 (mm).
+            gap: 间隙 (mm).
+
+        Returns:
+            参数调整字典:
+            {
+                "adjust_current_A": float,
+                "adjust_voltage_V": float,
+                "adjust_weave_mm": float,
+                "matched_rules": list[str],
+                "scenario_type": list[str],
+            }
+        """
+        # 分类非标场景
+        scenario = self.classify_non_standard(
+            misalignment=misalignment, gap=gap,
+            has_cad=True, surface_condition="clean",
+            confined_space=False, batch_size=100,
+        )
+
+        # 匹配规则
+        matched: list = []
+        total_adjust = {"adjust_current_A": 0.0, "adjust_voltage_V": 0.0, "adjust_weave_mm": 0.0}
+
+        for rule in self.DIKWP_RULE_BASE:
+            cond = rule["condition"]
+            # 材料匹配
+            if cond.get("material", self.material) != self.material:
+                continue
+            # 错边匹配
+            if "misalignment_min" in cond and misalignment < cond["misalignment_min"]:
+                continue
+            # 间隙上限匹配
+            if "gap_max" in cond and gap > cond["gap_max"]:
+                continue
+            # 间隙下限匹配
+            if "gap_min" in cond and gap < cond["gap_min"]:
+                continue
+            # 规则匹配
+            matched.append(rule["rule_id"])
+            for key, val in rule["action"].items():
+                total_adjust[key] += val
+
+        return {
+            "adjust_current_A": total_adjust["adjust_current_A"],
+            "adjust_voltage_V": total_adjust["adjust_voltage_V"],
+            "adjust_weave_mm": total_adjust["adjust_weave_mm"],
+            "matched_rules": matched,
+            "scenario_type": scenario,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.20.1: η-PID 自适应控制 (从播放器到工匠 — 因果闭环)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def eta_pid_adjust(
+        self,
+        current: float,
+        voltage: float,
+        travel_speed: float,
+        weave: float,
+        eta: float,
+        eta_threshold: float = 0.05,
+        kp: float = 0.8,
+        ki: float = 0.1,
+        kd: float = 0.2,
+    ) -> dict:
+        """η-PID自适应参数调整 (参考论文第四章 算法1).
+
+        当η残差超过阈值时, 基于PID控制律动态调整焊接参数,
+        使系统状态重新逼近Goal-EML陪集。
+
+        算法:
+            if η > η_threshold:
+                ΔI = -kp × ∂η/∂I × η
+                ΔV = -kp × ∂η/∂V × η
+                ΔW = -kp × ∂η/∂W × η
+            (偏导用有限差分近似)
+
+        Args:
+            current: 当前电流 (A).
+            voltage: 当前电压 (V).
+            travel_speed: 当前速度 (mm/s).
+            weave: 当前摆动 (mm).
+            eta: 当前η残差.
+            eta_threshold: η阈值, 超过则触发调整.
+            kp: 比例增益.
+            ki: 积分增益 (保留接口, 当前不累积).
+            kd: 微分增益 (保留接口, 当前不微分).
+
+        Returns:
+            调整后的参数字典:
+            {
+                "adjusted_current": float,
+                "adjusted_voltage": float,
+                "adjusted_weave": float,
+                "delta_current": float,
+                "delta_voltage": float,
+                "delta_weave": float,
+                "eta_before": float,
+                "triggered": bool,
+            }
+        """
+        if eta <= eta_threshold:
+            return {
+                "adjusted_current": current,
+                "adjusted_voltage": voltage,
+                "adjusted_weave": weave,
+                "delta_current": 0.0,
+                "delta_voltage": 0.0,
+                "delta_weave": 0.0,
+                "eta_before": eta,
+                "triggered": False,
+            }
+
+        # 有限差分近似偏导 ∂η/∂I, ∂η/∂V, ∂η/∂W
+        h: float = 0.01  # 差分步长
+
+        # ∂η/∂current
+        q1 = self.predict_quality(current + h, voltage, travel_speed, 15.0)
+        q0 = self.predict_quality(current - h, voltage, travel_speed, 15.0)
+        deta_di: float = (q1["eta"] - q0["eta"]) / (2.0 * h)
+
+        # ∂η/∂voltage
+        q1 = self.predict_quality(current, voltage + h, travel_speed, 15.0)
+        q0 = self.predict_quality(current, voltage - h, travel_speed, 15.0)
+        deta_dv: float = (q1["eta"] - q0["eta"]) / (2.0 * h)
+
+        # ∂η/∂weave (通过摆动影响焊缝宽度, 间接影响eta)
+        # 近似: weave变化影响bead_width, bead_width影响eta
+        bw1 = self.compute_bead_geometry(current, voltage, travel_speed, weave + h)
+        bw0 = self.compute_bead_geometry(current, voltage, travel_speed, weave - h)
+        deta_dw: float = (bw1[0] - bw0[0]) / (2.0 * h) * 0.01
+
+        # PID控制律: Δparam = -kp × (∂η/∂param) × η
+        delta_current: float = -kp * deta_di * eta
+        delta_voltage: float = -kp * deta_dv * eta
+        delta_weave: float = -kd * deta_dw * eta
+
+        # 限幅: 调整幅度不超过原参数的15%
+        max_curr_adj: float = abs(current) * 0.15
+        max_volt_adj: float = abs(voltage) * 0.15
+        max_weave_adj: float = abs(weave) * 0.15 + 0.5
+
+        delta_current = max(-max_curr_adj, min(max_curr_adj, delta_current))
+        delta_voltage = max(-max_volt_adj, min(max_volt_adj, delta_voltage))
+        delta_weave = max(-max_weave_adj, min(max_weave_adj, delta_weave))
+
+        return {
+            "adjusted_current": current + delta_current,
+            "adjusted_voltage": voltage + delta_voltage,
+            "adjusted_weave": weave + delta_weave,
+            "delta_current": delta_current,
+            "delta_voltage": delta_voltage,
+            "delta_weave": delta_weave,
+            "eta_before": eta,
+            "triggered": True,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.20.0: IntentGuard 四级安全分类 (DIKWP-IDO融合)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def classify_intent_safety(
+        self,
+        current: float,
+        voltage: float,
+        travel_speed: float,
+    ) -> Tuple[int, str]:
+        """IntentGuard四级安全分类 (参考DIKWP-IDO文章).
+
+        基于焊接参数与最优参数的偏差比例进行四级安全判定:
+          0 = SAFE: 正常焊接参数
+          1 = SUSPICIOUS: 边界值, 降速+增强监控
+          2 = DANGEROUS: 超出安全上限, Ψ-Anchor硬拦截
+          3 = CRITICAL: 严重超限, 立即断弧+急停
+
+        Args:
+            current: 焊接电流 (A).
+            voltage: 焊接电压 (V).
+            travel_speed: 焊接速度 (mm/s).
+
+        Returns:
+            (level, label): level 0-3, label为安全等级描述字符串.
+        """
+        opt: dict = self.OPTIMAL_PARAMS
+        # 计算偏差比例
+        curr_ratio: float = current / opt["current"] if opt["current"] > 0 else 1.0
+        volt_ratio: float = voltage / opt["voltage"] if opt["voltage"] > 0 else 1.0
+
+        max_ratio: float = max(curr_ratio, volt_ratio)
+
+        if max_ratio > 2.0:
+            return (3, "CRITICAL")
+        elif max_ratio > 1.5:
+            return (2, "DANGEROUS")
+        elif max_ratio > 1.2:
+            return (1, "SUSPICIOUS")
+        else:
+            return (0, "SAFE")
