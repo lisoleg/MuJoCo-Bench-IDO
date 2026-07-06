@@ -1,0 +1,158 @@
+{
+  "agents": {
+    "Random": {
+      "eta_residual": 0.3948429402494363,
+      "porosity_risk": 0.10488970540217432,
+      "penetration_depth": 1.8945896907381337,
+      "angular_distortion": 0.022754463075383285,
+      "weld_progress": 0.0,
+      "heat_input": 0.7110769711057277,
+      "current_fluctuation": 86.47888871128772,
+      "safety_violations": 3499.0,
+      "episode_return": -110525.91140201282,
+      "bead_width": 7.880834926550886,
+      "bead_height": 1.3940585547334967,
+      "spatter_rate": 0.04924171895660543,
+      "deposition_rate": 1.1835240100659004,
+      "arc_stability": 0.01404679390938812
+    },
+    "Constant": {
+      "eta_residual": 1.3457248783335231e-17,
+      "porosity_risk": 0.01843574539416992,
+      "penetration_depth": 1.5299999999999996,
+      "angular_distortion": 0.012800000000000004,
+      "weld_progress": 0.47410526315789475,
+      "heat_input": 0.4,
+      "current_fluctuation": 0.0,
+      "safety_violations": 0.0,
+      "episode_return": -3267.770599474336,
+      "bead_width": 6.6,
+      "bead_height": 0.9,
+      "spatter_rate": 0.01036955930930777,
+      "deposition_rate": 0.9568,
+      "arc_stability": 1.0
+    },
+    "SAC": {
+      "eta_residual": 1.3457248783335231e-17,
+      "porosity_risk": 0.01843574539416992,
+      "penetration_depth": 1.5299999999999996,
+      "angular_distortion": 0.012800000000000004,
+      "weld_progress": 0.47410526315789475,
+      "heat_input": 0.4,
+      "current_fluctuation": 0.0,
+      "safety_violations": 0.0,
+      "episode_return": -3267.770599474336,
+      "bead_width": 6.6,
+      "bead_height": 0.9,
+      "spatter_rate": 0.01036955930930777,
+      "deposition_rate": 0.9568,
+      "arc_stability": 1.0
+    },
+    "Expert": {
+      "eta_residual": 0.04043055759373065,
+      "porosity_risk": 0.08185979491150928,
+      "penetration_depth": 1.5310128588149647,
+      "angular_distortion": 0.012850588938529812,
+      "weld_progress": 0.38461654135338347,
+      "heat_input": 0.4015809043290566,
+      "current_fluctuation": 9.977529429623177,
+      "safety_violations": 1677.0,
+      "episode_return": -35572.4735707138,
+      "bead_width": 6.6036409957400695,
+      "bead_height": 0.9037322454950871,
+      "spatter_rate": 0.0253481634795718,
+      "deposition_rate": 0.9565525412528078,
+      "arc_stability": 0.5092856304495624
+    }
+  },
+  "metrics": [
+    "eta_residual",
+    "porosity_risk",
+    "penetration_depth",
+    "angular_distortion",
+    "weld_progress",
+    "heat_input",
+    "current_fluctuation",
+    "safety_violations",
+    "episode_return",
+    "bead_width",
+    "bead_height",
+    "spatter_rate",
+    "deposition_rate",
+    "arc_stability"
+  ],
+  "metric_info": {
+    "eta_residual": {
+      "lower_better": true,
+      "unit": "",
+      "display": "eta residual"
+    },
+    "porosity_risk": {
+      "lower_better": true,
+      "unit": "",
+      "display": "porosity risk"
+    },
+    "penetration_depth": {
+      "lower_better": false,
+      "unit": "mm",
+      "display": "penetration"
+    },
+    "angular_distortion": {
+      "lower_better": true,
+      "unit": "deg",
+      "display": "distortion"
+    },
+    "weld_progress": {
+      "lower_better": false,
+      "unit": "",
+      "display": "weld progress"
+    },
+    "heat_input": {
+      "lower_better": true,
+      "unit": "kJ/mm",
+      "display": "heat input"
+    },
+    "current_fluctuation": {
+      "lower_better": true,
+      "unit": "A",
+      "display": "current std"
+    },
+    "safety_violations": {
+      "lower_better": true,
+      "unit": "",
+      "display": "safety violations"
+    },
+    "episode_return": {
+      "lower_better": false,
+      "unit": "",
+      "display": "episode return"
+    },
+    "bead_width": {
+      "lower_better": false,
+      "unit": "mm",
+      "display": "bead width"
+    },
+    "bead_height": {
+      "lower_better": false,
+      "unit": "mm",
+      "display": "bead height"
+    },
+    "spatter_rate": {
+      "lower_better": true,
+      "unit": "",
+      "display": "spatter rate"
+    },
+    "deposition_rate": {
+      "lower_better": false,
+      "unit": "kg/h",
+      "display": "deposition rate"
+    },
+    "arc_stability": {
+      "lower_better": false,
+      "unit": "",
+      "display": "arc stability"
+    }
+  },
+  "best_agent": "Constant",
+  "timestamp": "2026-07-06T08:42:41.645185"
+}

@@ -64,6 +64,11 @@ WELD_TYPE_OPTIMAL: Dict[str, np.ndarray] = {
     "horizontal":  np.array([180.0, 22.0, 3.0, 5.0]),   # 横焊: 降电流防铁水下淌
     "vertical":    np.array([170.0, 20.0, 4.0, 4.0]),   # v0.18.3: 立焊 160→170A (提升熔敷率>1.0)
     "overhead":    np.array([180.0, 22.0, 2.0, 6.0]),   # v0.18.3: 仰焊 170/21/7→180/22/6 (提升熔深>2.5mm)
+    # v0.18.4: 新增4种焊缝接头类型 (AWS D1.1 / ISO 15614)
+    "fillet":      np.array([220.0, 25.0, 3.0, 6.0]),   # 角焊缝: 高电流确保熔合
+    "groove":      np.array([240.0, 26.0, 2.0, 5.0]),   # 坡口焊缝: 高参数全熔透
+    "lap":         np.array([160.0, 20.0, 3.0, 8.0]),   # 搭接焊缝: 低电流高速度
+    "pipe":        np.array([190.0, 23.0, 2.0, 5.5]),   # 管道焊缝: 专用参数
 }
 
 # ── 焊缝类型 → SAC checkpoint 路径 ──
@@ -294,7 +299,8 @@ class WeldingEvaluator:
     per agent, and returns a structured comparison result.
 
     Attributes:
-        weld_type: Type of weld (flat, horizontal, vertical, overhead).
+        weld_type: Type of weld (flat, horizontal, vertical, overhead,
+                   fillet, groove, lap, pipe).
         max_steps: Maximum steps per episode.
         agents: List of agent instances to evaluate.
     """
@@ -586,7 +592,8 @@ def run_evaluation(
     and returns the result dictionary.
 
     Args:
-        weld_type: Welding posture type (flat, horizontal, vertical, overhead).
+        weld_type: Welding posture type (flat, horizontal, vertical, overhead,
+                   fillet, groove, lap, pipe).
         max_steps: Maximum simulation steps per agent.
         sac_checkpoint: Path to SAC checkpoint file. If empty, auto-resolve.
 
@@ -609,7 +616,7 @@ def run_multi_type_evaluation(
     """Run evaluation across multiple weld types and generate cross-type comparison.
 
     Args:
-        weld_types: List of weld types to evaluate. If None, evaluates all 4 types.
+        weld_types: List of weld types to evaluate. If None, evaluates all 8 types.
         max_steps: Maximum simulation steps per agent.
 
     Returns:
@@ -677,8 +684,8 @@ def main() -> int:
     Runs the evaluation, prints JSON and Markdown table to stdout.
 
     Supports:
-      --weld-type flat|horizontal|vertical|overhead  (default: flat)
-      --all-types                                    (evaluate all 4 types)
+      --weld-type TYPE  (default: flat, choices: 8 types)
+      --all-types                                    (evaluate all 8 types)
       --max-steps N                                  (default: 3500)
 
     Returns:
@@ -696,7 +703,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--all-types", action="store_true",
-        help="Evaluate all 4 weld types (flat, horizontal, vertical, overhead)",
+        help="Evaluate all 8 weld types (flat, horizontal, vertical, overhead, fillet, groove, lap, pipe)",
     )
     parser.add_argument(
         "--max-steps", type=int, default=DEFAULT_MAX_STEPS,

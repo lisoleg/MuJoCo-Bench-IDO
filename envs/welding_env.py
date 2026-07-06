@@ -59,6 +59,11 @@ WELD_TYPE_KEYFRAMES: Dict[str, str] = {
     "horizontal": "horizontal",
     "vertical": "vertical",
     "overhead": "overhead",
+    # v0.18.4: New joint types use flat keyframe (default position)
+    "fillet": "flat",
+    "groove": "flat",
+    "lap": "flat",
+    "pipe": "flat",
 }
 
 # ── 焊缝 waypoint 配置 ──
@@ -87,6 +92,11 @@ WELD_TYPE_TARGET_BEAD: Dict[str, Dict[str, float]] = {
     "horizontal": {"width": 7.0, "height": 1.5},
     "vertical":   {"width": 6.0, "height": 1.8},
     "overhead":   {"width": 7.0, "height": 1.5},
+    # v0.18.4: New joint types
+    "fillet":     {"width": 9.0, "height": 1.5},   # 角焊缝: 焊脚宽度大
+    "groove":     {"width": 8.0, "height": 1.5},   # 坡口焊缝: 标准宽度, 严格余高
+    "lap":        {"width": 7.0, "height": 1.0},   # 搭接焊缝: 适中宽度, 低余高
+    "pipe":       {"width": 8.0, "height": 1.8},   # 管道焊缝: 标准宽度
 }
 
 # ── 焊缝类型 → 目标热输入 (kJ/mm) ──
@@ -95,6 +105,11 @@ WELD_TYPE_TARGET_HEAT: Dict[str, float] = {
     "horizontal": 0.79,
     "vertical": 0.80,
     "overhead": 0.51,
+    # v0.18.4: New joint types (match welding_process_proxy.py)
+    "fillet": 0.92,
+    "groove": 1.25,
+    "lap": 0.40,
+    "pipe": 0.79,
 }
 
 

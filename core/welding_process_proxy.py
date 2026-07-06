@@ -154,6 +154,11 @@ class WeldingProcessProxy:
         "horizontal":  {"current": 180.0, "voltage": 22.0, "travel_speed": 5.0,  "stickout": 14.0},
         "vertical":    {"current": 170.0, "voltage": 20.0, "travel_speed": 4.0,  "stickout": 12.0},  # v0.18.3: 160→170A (目标>1.0kg/h熔敷率)
         "overhead":    {"current": 180.0, "voltage": 22.0, "travel_speed": 6.0,  "stickout": 13.0},  # v0.18.3: 170/21/7→180/22/6 (目标>2.5mm熔深)
+        # v0.18.4: 新增4种焊缝接头类型 (AWS D1.1 / ISO 15614)
+        "fillet":      {"current": 220.0, "voltage": 25.0, "travel_speed": 6.0,  "stickout": 15.0},  # 角焊缝: 略高电流确保熔合
+        "groove":      {"current": 240.0, "voltage": 26.0, "travel_speed": 5.0,  "stickout": 14.0},  # 坡口焊缝: 高电流高电压确保熔透
+        "lap":         {"current": 160.0, "voltage": 20.0, "travel_speed": 8.0,  "stickout": 12.0},  # 搭接焊缝: 低电流高速度, 适合薄板
+        "pipe":        {"current": 190.0, "voltage": 23.0, "travel_speed": 5.5,  "stickout": 13.0},  # 管道焊缝: 专用参数
     }
 
     # 焊缝类型 → 重力影响因子 (铁水受重力影响的程度)
@@ -162,6 +167,11 @@ class WeldingProcessProxy:
         "horizontal": 1.3, # 横焊: 重力导致铁水下淌
         "vertical": 1.8,   # 立焊: 重力最大影响, 铁水下淌严重
         "overhead": 1.5,   # 仰焊: 重力使铁水滴落
+        # v0.18.4: 新增焊缝接头类型
+        "fillet": 1.0,     # 角焊缝: 通常平焊位置执行, 重力影响小
+        "groove": 1.0,     # 坡口焊缝: 通常平焊位置执行
+        "lap": 1.2,        # 搭接焊缝: 铁水偏向一侧, 重力影响增大
+        "pipe": 1.4,       # 管道焊缝: 全位置旋转, 重力影响变化大
     }
 
     # 焊缝类型 → 变形因子 (不同位置热变形差异)
@@ -170,6 +180,11 @@ class WeldingProcessProxy:
         "horizontal": 1.2, # 横焊: 不对称变形增大
         "vertical": 1.4,   # 立焊: 垂直方向变形增大
         "overhead": 1.1,   # 仰焊: 变形较小 (重力反向)
+        # v0.18.4: 新增焊缝接头类型
+        "fillet": 0.9,     # 角焊缝: 约束较高, 变形较小
+        "groove": 1.3,     # 坡口焊缝: 收缩变形大
+        "lap": 0.8,        # 搭接焊缝: 薄板变形相对小
+        "pipe": 1.1,       # 管道焊缝: 管道约束较高
     }
 
     # 焊缝类型 → 熔深因子 (重力对电弧穿透的影响)
@@ -179,6 +194,11 @@ class WeldingProcessProxy:
         "horizontal": 1.0,  # 横焊: 无显著影响
         "vertical": 1.0,    # 立焊: 无显著影响
         "overhead": 1.12,   # 仰焊: 重力辅助电弧穿透 +12%
+        # v0.18.4: 新增焊缝接头类型
+        "fillet": 0.92,     # 角焊缝: 熔深较浅, 焊脚尺寸为主
+        "groove": 1.15,     # 坡口焊缝: 需要深熔透 (全熔透要求)
+        "lap": 0.85,        # 搭接焊缝: 熔深受限
+        "pipe": 1.05,       # 管道焊缝: 需要良好熔透
     }
 
     # 焊缝类型 → 焊缝宽度因子 (重力对熔池铺展的影响)
@@ -188,6 +208,11 @@ class WeldingProcessProxy:
         "horizontal": 1.0,  # 横焊: 无显著影响
         "vertical": 1.0,    # 立焊: 无显著影响
         "overhead": 0.95,   # 仰焊: 表面张力限制铺展 -5%
+        # v0.18.4: 新增焊缝接头类型
+        "fillet": 1.15,     # 角焊缝: 焊脚宽度较大
+        "groove": 0.90,     # 坡口焊缝: 坡口间隙限制了焊缝宽度
+        "lap": 1.10,        # 搭接焊缝: 焊缝铺展宽
+        "pipe": 1.0,        # 管道焊缝: 标准焊缝宽度
     }
 
     # 焊缝类型 → 焊缝余高因子 (重力对焊缝凸起的影响)
@@ -197,6 +222,11 @@ class WeldingProcessProxy:
         "horizontal": 1.0,  # 横焊: 无显著影响
         "vertical": 1.0,    # 立焊: 无显著影响
         "overhead": 0.85,   # 仰焊: 熔池下垂降低余高 -15%
+        # v0.18.4: 新增焊缝接头类型
+        "fillet": 0.80,     # 角焊缝: 凸度控制
+        "groove": 0.70,     # 坡口焊缝: 余高控制严格
+        "lap": 0.75,        # 搭接焊缝: 余高低
+        "pipe": 0.90,       # 管道焊缝: 余高控制
     }
 
     # 焊缝类型 → 目标热输入 (kJ/mm)
@@ -205,6 +235,11 @@ class WeldingProcessProxy:
         "horizontal": 0.79,
         "vertical": 0.85,   # v0.18.3: 0.80→0.85 (匹配170A/20V/4mm/s)
         "overhead": 0.66,   # v0.18.3: 0.51→0.66 (匹配180A/22V/6mm/s)
+        # v0.18.4: 新增焊缝接头类型
+        "fillet": 0.92,     # 角焊缝: (220×25)/(6×1000)=0.917≈0.92
+        "groove": 1.25,     # 坡口焊缝: (240×26)/(5×1000)=1.248≈1.25
+        "lap": 0.40,        # 搭接焊缝: (160×20)/(8×1000)=0.400
+        "pipe": 0.79,       # 管道焊缝: (190×23)/(5.5×1000)=0.795≈0.79
     }
 
     # 最优参数 (用于 eta_residual 计算) — 默认 flat, 动态切换
@@ -227,7 +262,8 @@ class WeldingProcessProxy:
         """初始化焊接工艺代理模型.
 
         Args:
-            weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead").
+            weld_type: 焊接姿态类型 ("flat", "horizontal", "vertical", "overhead",
+                          "fillet", "groove", "lap", "pipe").
         """
         self.weld_type: str = weld_type
         self._current_history: list[float] = []
@@ -399,7 +435,8 @@ class WeldingProcessProxy:
 
         # 焊缝几何偏差 (与目标焊缝宽度的相对偏差)
         target_bead_w: float = {
-            "flat": 8.0, "horizontal": 7.0, "vertical": 6.0, "overhead": 7.0
+            "flat": 8.0, "horizontal": 7.0, "vertical": 6.0, "overhead": 7.0,
+            "fillet": 9.85, "groove": 8.85, "lap": 6.60, "pipe": 8.05,
         }.get(self.weld_type, 8.0)
         bead_w, _, _ = self.compute_bead_geometry(current, voltage, travel_speed, weave=2.0)
         bead_dev: float = abs(bead_w - target_bead_w) / max(target_bead_w, 1e-9)

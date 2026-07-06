@@ -626,7 +626,8 @@ def train_sac(
     Args:
         episodes: Number of training episodes.
         max_steps: Maximum steps per episode.
-        weld_type: Type of weld (flat, horizontal, vertical, overhead).
+        weld_type: Type of weld (flat, horizontal, vertical, overhead,
+                   fillet, groove, lap, pipe).
         learning_rate: Learning rate.
         checkpoint_dir: Directory for checkpoints.
         n_envs: Number of parallel environments (1=single, >1=parallel).
@@ -793,7 +794,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument(
         "--weld-type", type=str, default=DEFAULT_WELD_TYPE,
-        choices=["flat", "horizontal", "vertical", "overhead"],
+        choices=["flat", "horizontal", "vertical", "overhead",
+                 "fillet", "groove", "lap", "pipe"],
         help=f"Weld type (default: {DEFAULT_WELD_TYPE})",
     )
     parser.add_argument(
