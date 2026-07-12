@@ -4572,8 +4572,51 @@ async def welding_types() -> JSONResponse:
             "weld_type_count": len(types),
             "materials": materials,
             "material_count": len(materials),
-            "version": "v0.20.1",
+            "version": "v0.21.0",
         })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
+
+@app.get("/api/welding/identify_material")
+async def welding_identify_material(
+    thermal_conductivity: Optional[float] = None,
+    density: Optional[float] = None,
+    melting_point: Optional[float] = None,
+) -> JSONResponse:
+    """MUS多假设材质辨识器 — 基于可观测物理属性匹配最可能的材料.
+
+    参考 EML超图文章5.3节 epistemic humility: 当材料参数未知时，
+    输出多假设η演化而非硬猜单值。置信度 < 0.6 时启用 MUS 模式。
+
+    Query Parameters:
+        thermal_conductivity: 观测热导率 (W/m·K).
+        density: 观测密度 (kg/m³).
+        melting_point: 观测熔点 (°C).
+
+    Returns:
+        MUS 辨识结果:
+        {
+            "best_match": str, "confidence": float,
+            "mus_mode": bool, "hypotheses": list[dict],
+            "version": str
+        }
+    """
+    if not WELDING_AVAILABLE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "Welding modules not available"},
+        )
+    try:
+        from core.welding_process_proxy import WeldingProcessProxy
+        proxy = WeldingProcessProxy("flat")
+        result = proxy.identify_material(
+            observed_thermal_conductivity=thermal_conductivity,
+            observed_density=density,
+            observed_melting_point=melting_point,
+        )
+        result["version"] = "v0.21.0"
+        return JSONResponse(content=result)
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
 

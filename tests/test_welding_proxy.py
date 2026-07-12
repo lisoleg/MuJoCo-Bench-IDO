@@ -335,6 +335,142 @@ class TestPenetration:
         """generic类型存在."""
         assert "generic" in proxy.WELD_TYPE_OPTIMAL_PARAMS
 
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.21.0: 材质库扩展 + MUS多假设材质辨识器 测试
+    # ═══════════════════════════════════════════════════════════════════
+
+    def test_material_count_11(self, proxy):
+        """材料总数=11 (10种+generic兜底)."""
+        assert len(proxy.MATERIAL_PROPERTIES) == 11
+
+    def test_new_materials_present(self, proxy):
+        """新增6种材料均存在."""
+        expected_new = ["copper", "nickel", "cast_iron", "inconel",
+                        "magnesium", "bronze", "generic"]
+        for mat in expected_new:
+            assert mat in proxy.MATERIAL_PROPERTIES, f"Missing material: {mat}"
+
+    def test_copper_cooling_fast(self):
+        """铜热导率高(398), t85应比钢(50)短 — 散热更快."""
+        steel = WeldingProcessProxy("flat", material="steel")
+        copper = WeldingProcessProxy("flat", material="copper")
+        t85_steel = steel.compute_cooling_rate(200, 24, 6)
+        t85_copper = copper.compute_cooling_rate(200, 24, 6)
+        assert t85_copper < t85_steel, \
+            f"Copper t85 ({t85_copper:.1f}s) should be < steel t85 ({t85_steel:.1f}s)"
+
+    def test_inconel_cooling_slow(self):
+        """Inconel热导率低(9.8), t85应比钢(50)长 — 散热更慢."""
+        steel = WeldingProcessProxy("flat", material="steel")
+        inconel = WeldingProcessProxy("flat", material="inconel")
+        t85_steel = steel.compute_cooling_rate(200, 24, 6)
+        t85_inconel = inconel.compute_cooling_rate(200, 24, 6)
+        assert t85_inconel > t85_steel, \
+            f"Inconel t85 ({t85_inconel:.1f}s) should be > steel t85 ({t85_steel:.1f}s)"
+
+    def test_generic_material_fallback(self):
+        """未知材料名不报错, 用generic兜底."""
+        proxy = WeldingProcessProxy("flat", material="unknown_alloy_xyz")
+        # 应该不报错, 且热导率应等于generic (=50.0)
+        assert proxy._thermal_conductivity == 50.0
+        # 应该能正常预测
+        result = proxy.predict(current=200, voltage=24, travel_speed=6)
+        assert np.isfinite(result.eta_residual)
+
+    def test_identify_material_exact(self):
+        """精确匹配已知材料属性 — 高置信度, mus_mode=False."""
+        proxy = WeldingProcessProxy("flat")
+        # 精确提供copper的属性值
+        result = proxy.identify_material(
+            observed_thermal_conductivity=398.0,
+            observed_density=8960.0,
+            observed_melting_point=1085.0,
+        )
+        assert result["best_match"] == "copper"
+        assert result["confidence"] > 0.9
+        assert result["mus_mode"] is False
+        # mus_mode=False 时只保留1个假设
+        assert len(result["hypotheses"]) == 1
+
+    def test_identify_material_mus_mode(self):
+        """低置信度时mus_mode=True, 保留top-3假设."""
+        proxy = WeldingProcessProxy("flat")
+        # 提供远离所有已知材料的极端值, 确保最高置信度 < 0.6
+        # k=1000 远超铜(398), density=1500 低于所有材料, mp=200 远低于所有材料
+        result = proxy.identify_material(
+            observed_thermal_conductivity=1000.0,
+            observed_density=1500.0,
+            observed_melting_point=200.0,
+        )
+        assert result["mus_mode"] is True
+        assert result["confidence"] < 0.6
+        assert len(result["hypotheses"]) <= 3
+        assert len(result["hypotheses"]) >= 1
+
+    def test_identify_material_no_input(self):
+        """无输入返回generic + mus_mode=True."""
+        proxy = WeldingProcessProxy("flat")
+        result = proxy.identify_material()
+        assert result["best_match"] == "generic"
+        assert result["confidence"] == 0.0
+        assert result["mus_mode"] is True
+        assert result["hypotheses"] == []
+
+    def test_identify_material_partial_input(self):
+        """仅提供部分属性也能辨识."""
+        proxy = WeldingProcessProxy("flat")
+        # 仅提供铝的热导率
+        result = proxy.identify_material(
+            observed_thermal_conductivity=167.0,
+        )
+        assert result["best_match"] == "aluminum"
+        assert result["confidence"] > 0.5
+
+    def test_identify_material_generic_excluded(self):
+        """generic不出现在hypotheses中."""
+        proxy = WeldingProcessProxy("flat")
+        result = proxy.identify_material(
+            observed_thermal_conductivity=50.0,
+            observed_density=7850.0,
+            observed_melting_point=1500.0,
+        )
+        mat_names = [h["material"] for h in result["hypotheses"]]
+        assert "generic" not in mat_names
+
+    def test_identify_material_returns_correct_structure(self):
+        """identify_material返回正确的字典结构."""
+        proxy = WeldingProcessProxy("flat")
+        result = proxy.identify_material(
+            observed_thermal_conductivity=50.0,
+            observed_density=7850.0,
+        )
+        assert "best_match" in result
+        assert "confidence" in result
+        assert "mus_mode" in result
+        assert "hypotheses" in result
+        assert isinstance(result["best_match"], str)
+        assert isinstance(result["confidence"], float)
+        assert isinstance(result["mus_mode"], bool)
+        assert isinstance(result["hypotheses"], list)
+
+    def test_dikwp_rule_copper(self):
+        """铜材料规则R007匹配."""
+        proxy = WeldingProcessProxy("flat", material="copper")
+        result = proxy.apply_dikwp_rules(misalignment=2.0, gap=1.0)
+        assert "R007_copper_high_k" in result["matched_rules"]
+        assert result["adjust_current_A"] == 15.0
+
+    def test_dikwp_rule_inconel(self):
+        """Inconel规则R009匹配."""
+        proxy = WeldingProcessProxy("flat", material="inconel")
+        result = proxy.apply_dikwp_rules(misalignment=1.5, gap=1.0)
+        assert "R009_inconel_low_k" in result["matched_rules"]
+        assert result["adjust_current_A"] == -5.0
+
+    def test_dikwp_rule_count_10(self, proxy):
+        """DIKWP规则库应有10条规则."""
+        assert len(proxy.DIKWP_RULE_BASE) == 10
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -16,11 +16,21 @@ WeldingProcessProxy — 焊接工艺代理模型
   - porosity = base × (1 + gas_coverage_penalty + arc_stability_penalty)
   - angular_distortion = heat_input × material_factor × constraint
 
+v0.21.0: 材质库扩展至10种+generic兜底 + MUS多假设材质辨识器 (参考EML超图文章5.3节 epistemic humility)
 v0.20.1: 非标场景分类 + DIKWP K-层规则库 + η-PID自适应控制 (从播放器到工匠)
 v0.20.0: 扩展至25种焊缝类型 + 跨材质支持(Al6061/SS304/Ti6Al4V/Q235) + IntentGuard四级安全分类
 v0.19.0: 扩展至18种焊缝类型 + 逼真物理仿真 + 性能优化
 
-Author: MuJoCo-Bench-IDO Welding Module v0.20.1
+Changelog:
+  v0.21.0 (2026-07-04):
+    - MATERIAL_PROPERTIES: 4→11种 (新增 copper/nickel/cast_iron/inconel/magnesium/bronze + generic兜底)
+    - 新增 identify_material() MUS多假设材质辨识器 (epistemic humility)
+    - DIKWP_RULE_BASE: 6→10条规则 (新增 copper/nickel/inconel/cast_iron 规则)
+  v0.20.1: 非标场景 + DIKWP规则库 + η-PID
+  v0.20.0: 25焊缝类型 + 跨材质 + IntentGuard
+  v0.19.0: 18焊缝类型 + 逼真物理
+
+Author: MuJoCo-Bench-IDO Welding Module v0.21.0
 """
 
 from dataclasses import dataclass, field
@@ -436,12 +446,25 @@ class WeldingProcessProxy:
         "stickout": 17.0,       # 8-25
     }
 
-    # v0.20.0: 材料属性表 (DIKWP-IDO跨材质支持: Al6061/SS304/Ti6Al4V/Q235)
+    # v0.21.0: 材料属性表 (扩展至10种+generic兜底)
+    # 标准工程数据来源: ASM Handbook / 中国材料工程大典 / welding metallurgy
+    # 属性: thermal_conductivity (W/m·K), melting_point (°C), density (kg/m³),
+    #        specific_heat (J/kg·K), thermal_expansion (1/K)
     MATERIAL_PROPERTIES: dict = {
+        # ── 原有4种材料 (v0.20.0) ──
         "steel":      {"thermal_conductivity": 50.0, "melting_point": 1500.0, "density": 7850.0, "specific_heat": 470.0, "thermal_expansion": 12e-6},
         "aluminum":   {"thermal_conductivity": 167.0, "melting_point": 660.0, "density": 2700.0, "specific_heat": 900.0, "thermal_expansion": 23e-6},
         "stainless":  {"thermal_conductivity": 16.0, "melting_point": 1450.0, "density": 8000.0, "specific_heat": 500.0, "thermal_expansion": 16e-6},
         "titanium":   {"thermal_conductivity": 7.0, "melting_point": 1668.0, "density": 4500.0, "specific_heat": 520.0, "thermal_expansion": 9e-6},
+        # ── v0.21.0 新增6种材料 ──
+        "copper":     {"thermal_conductivity": 398.0, "melting_point": 1085.0, "density": 8960.0, "specific_heat": 385.0, "thermal_expansion": 17e-6},   # 纯铜 T2
+        "nickel":     {"thermal_conductivity": 90.0, "melting_point": 1455.0, "density": 8900.0, "specific_heat": 445.0, "thermal_expansion": 13e-6},    # 纯镍 N6
+        "cast_iron":  {"thermal_conductivity": 50.0, "melting_point": 1200.0, "density": 7200.0, "specific_heat": 540.0, "thermal_expansion": 10e-6},   # 灰铸铁 HT250
+        "inconel":    {"thermal_conductivity": 9.8, "melting_point": 1350.0, "density": 8440.0, "specific_heat": 410.0, "thermal_expansion": 12.8e-6},  # Inconel 625
+        "magnesium":  {"thermal_conductivity": 156.0, "melting_point": 650.0, "density": 1810.0, "specific_heat": 1020.0, "thermal_expansion": 25e-6},  # 镁合金 AZ91D
+        "bronze":     {"thermal_conductivity": 75.0, "melting_point": 950.0, "density": 8800.0, "specific_heat": 380.0, "thermal_expansion": 18e-6},    # 锡青铜 QSn6.5-0.1
+        # ── 通用兜底 (未知材料优雅降级, 同steel基准) ──
+        "generic":    {"thermal_conductivity": 50.0, "melting_point": 1500.0, "density": 7850.0, "specific_heat": 470.0, "thermal_expansion": 12e-6},
     }
 
     def __init__(self, weld_type: str = "flat", material: str = "steel") -> None:
@@ -453,8 +476,10 @@ class WeldingProcessProxy:
                           "plug", "slot", "surfacing", "tack", "butt", "tee",
                           "multipass", "repair", "seam", "spot", "flange",
                           "projection", "stud", "seal", "generic").
-            material: 焊接材料 ("steel", "aluminum", "stainless", "titanium").
-                      默认 "steel" (Q235碳钢).
+            material: 焊接材料 ("steel", "aluminum", "stainless", "titanium",
+                          "copper", "nickel", "cast_iron", "inconel",
+                          "magnesium", "bronze", "generic").
+                      默认 "steel" (Q235碳钢). 未知材料自动回退到 "generic".
         """
         self.weld_type: str = weld_type
         self.material: str = material
@@ -466,8 +491,9 @@ class WeldingProcessProxy:
         self.OPTIMAL_PARAMS = dict(type_optimal)  # 实例属性覆盖类属性
 
         # v0.20.0: 提取材料属性到实例变量 (DIKWP-IDO跨材质支持)
+        # v0.21.0: 未知材料回退到 generic 兜底
         mat_props: dict = self.MATERIAL_PROPERTIES.get(
-            material, self.MATERIAL_PROPERTIES["steel"]
+            material, self.MATERIAL_PROPERTIES["generic"]
         )
         self._thermal_conductivity: float = mat_props["thermal_conductivity"]
         self._melting_point: float = mat_props["melting_point"]
@@ -1313,6 +1339,27 @@ class WeldingProcessProxy:
             "condition": {"material": "stainless", "misalignment_min": 1.5},
             "action": {"adjust_current_A": 10.0, "adjust_voltage_V": 0.5, "adjust_weave_mm": 0.0},
         },
+        # v0.21.0: 新增4条规则覆盖新材质
+        {
+            "rule_id": "R007_copper_high_k",
+            "condition": {"material": "copper", "misalignment_min": 1.5},
+            "action": {"adjust_current_A": 15.0, "adjust_voltage_V": 0.5, "adjust_weave_mm": 0.0},
+        },
+        {
+            "rule_id": "R008_nickel_thin",
+            "condition": {"material": "nickel", "gap_min": 2.0},
+            "action": {"adjust_current_A": -10.0, "adjust_voltage_V": -0.3, "adjust_weave_mm": 0.5},
+        },
+        {
+            "rule_id": "R009_inconel_low_k",
+            "condition": {"material": "inconel", "misalignment_min": 1.0},
+            "action": {"adjust_current_A": -5.0, "adjust_voltage_V": -0.2, "adjust_weave_mm": 0.3},
+        },
+        {
+            "rule_id": "R010_cast_iron_cold_crack",
+            "condition": {"material": "cast_iron", "gap_min": 3.0},
+            "action": {"adjust_current_A": 20.0, "adjust_voltage_V": 1.0, "adjust_weave_mm": -0.5},
+        },
     ]
 
     def apply_dikwp_rules(
@@ -1483,6 +1530,107 @@ class WeldingProcessProxy:
             "delta_weave": delta_weave,
             "eta_before": eta,
             "triggered": True,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v0.21.0: MUS 多假设材质辨识器 (参考EML超图文章5.3节 epistemic humility)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def identify_material(
+        self,
+        observed_thermal_conductivity: Optional[float] = None,
+        observed_density: Optional[float] = None,
+        observed_melting_point: Optional[float] = None,
+    ) -> dict:
+        """MUS多假设材质辨识器 (参考文章5.3节 epistemic humility).
+
+        当材料未知时，基于可观测物理属性匹配最可能的材料。
+        置信度低时启用MUS模式（多假设并行η演化）。
+
+        匹配算法: 对每个已知材料，计算归一化属性距离 d_i = |obs - known| / known，
+        取平均距离的倒数作为置信度。
+
+        Args:
+            observed_thermal_conductivity: 观测热导率 (W/m·K).
+            observed_density: 观测密度 (kg/m³).
+            observed_melting_point: 观测熔点 (°C).
+
+        Returns:
+            {
+                "best_match": str,          # 最可能材料名
+                "confidence": float,        # 置信度 0-1
+                "mus_mode": bool,           # True = 多假设模式
+                "hypotheses": list[dict],   # 按置信度排序的假设列表
+                # 每个 hypothesis: {"material": str, "confidence": float, "distance": float}
+            }
+        """
+        # 收集非None的观测属性
+        observed: dict = {}
+        if observed_thermal_conductivity is not None:
+            observed["thermal_conductivity"] = observed_thermal_conductivity
+        if observed_density is not None:
+            observed["density"] = observed_density
+        if observed_melting_point is not None:
+            observed["melting_point"] = observed_melting_point
+
+        # 如果没有提供任何观测值，返回 generic + confidence=0 + mus_mode=True
+        if not observed:
+            return {
+                "best_match": "generic",
+                "confidence": 0.0,
+                "mus_mode": True,
+                "hypotheses": [],
+            }
+
+        # 对每个已知材料（排除generic），计算归一化距离
+        hypotheses: list = []
+        for mat_name, mat_props in self.MATERIAL_PROPERTIES.items():
+            if mat_name == "generic":
+                continue  # generic 是兜底，不参与辨识
+            distances: list = []
+            for prop_name, obs_val in observed.items():
+                known_val: float = mat_props.get(prop_name, 0.0)
+                if known_val > 1e-9:
+                    rel_dist: float = abs(obs_val - known_val) / known_val
+                    distances.append(rel_dist)
+            if not distances:
+                continue
+            mean_distance: float = sum(distances) / len(distances)
+            confidence: float = 1.0 / (1.0 + mean_distance)
+            hypotheses.append({
+                "material": mat_name,
+                "confidence": confidence,
+                "distance": mean_distance,
+            })
+
+        # 按置信度降序排序
+        hypotheses.sort(key=lambda h: h["confidence"], reverse=True)
+
+        if not hypotheses:
+            # 所有材料都不匹配（理论上不会发生，除非observed中的属性名不存在）
+            return {
+                "best_match": "generic",
+                "confidence": 0.0,
+                "mus_mode": True,
+                "hypotheses": [],
+            }
+
+        best_match: str = hypotheses[0]["material"]
+        best_confidence: float = hypotheses[0]["confidence"]
+
+        # 如果 best_match confidence < 0.6，mus_mode=True（保留top-3假设）
+        # 如果 best_match confidence >= 0.6，mus_mode=False（单假设足够）
+        mus_mode: bool = best_confidence < 0.6
+        if mus_mode:
+            hypotheses = hypotheses[:3]
+        else:
+            hypotheses = hypotheses[:1]
+
+        return {
+            "best_match": best_match,
+            "confidence": best_confidence,
+            "mus_mode": mus_mode,
+            "hypotheses": hypotheses,
         }
 
     # ═══════════════════════════════════════════════════════════════════

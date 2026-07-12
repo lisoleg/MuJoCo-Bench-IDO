@@ -1885,6 +1885,167 @@ v0.19.0 是焊接系统迄今为止最大规模的增强版本，在四个维度
 
 ---
 
+## 14. v0.20.x: 焊缝类型全覆盖 + IntentGuard安全 + DIKWP因果自适应
+
+### 14.1 焊缝类型18→25种 + generic兜底
+
+v0.19.0的18种焊缝类型已覆盖AWS A3.0位置类型和ISO 2553接头类型的主要分类，但仍缺少6种工业常见类型。v0.20.0新增：
+
+| 新增类型 | ISO编码 | 工艺特征 | 最优参数(I/V/W/S) |
+|---------|---------|---------|------------------|
+| seam(缝焊) | ISO 73 | 滚轮电极连续焊 | 210/24/2/5 |
+| spot(点焊) | ISO 21 | 点状熔核 | 250/28/0/3 |
+| flange(法兰焊) | ISO 451 | 法兰边缘熔合 | 200/23/2/6 |
+| projection(凸焊) | ISO 23 | 凸点集中加热 | 240/26/0/4 |
+| stud(螺柱焊) | ISO 781 | 螺柱端面焊 | 260/30/0/8 |
+| seal(密封焊) | ISO 455 | 连续密封通道 | 200/23/2/5.5 |
+| generic(通用兜底) | — | 未知类型降级 | 200/24/2/6 |
+
+**关键改进**: 未知焊缝类型不再raise ValueError，WeldingEnv自动降级到generic类型优雅处理。这解决了"焊缝不属于任何已知类型怎么办"的工程鲁棒性问题。
+
+### 14.2 跨材质物理建模
+
+v0.20.0引入4种材料的5维热物理属性（热导率k、熔点Tm、密度ρ、比热cp、热膨胀系数α），材料热导率直接影响t8/5冷却速率计算：
+
+$$t_{8/5} \mathrel{\times}= \frac{50.0}{k_{material}}$$
+
+该公式来自Rosenthal热传导方程的简化形式，热导率高的材料（如铝k=167）冷却更快，热导率低的材料（如钛k=7）冷却更慢，直接影响HAZ宽度和微观组织。
+
+### 14.3 IntentGuard四级安全分类
+
+参考DIKWP-IDO融合文章的意图安全概念，实现基于参数偏差比例的四级安全分类器：
+
+| 等级 | 标签 | 判定条件 | 响应动作 |
+|------|------|---------|---------|
+| 0 | SAFE | 偏差 < 20% | 正常焊接 |
+| 1 | SUSPICIOUS | 偏差 20-50% | 降速 + 增强监控 |
+| 2 | DANGEROUS | 偏差 50-100% | Ψ-Anchor硬拦截 |
+| 3 | CRITICAL | 偏差 > 100% | 立即断弧 + 急停 |
+
+IntentGuard作为软件层安全网，与硬件层Ψ-Anchor形成纵深防御。
+
+### 14.4 非标场景因果分类器
+
+参考《从播放器到工匠》论文，实现4类非标焊接场景的分类器：
+
+- **geometric(几何非标)**: 错边 > 2mm 或 间隙 > 3mm
+- **semantic(语义非标)**: 无完整CAD图纸
+- **environmental(环境非标)**: 表面锈蚀/油污 或 受限空间
+- **production(生产非标)**: 单批次 < 10件
+
+### 14.5 DIKWP K-层焊接规则库
+
+基于DIKWP（Data-Information-Knowledge-Wisdom-Purpose）因果推理框架，实现6条焊接工艺规则。每条规则包含条件（材料+几何偏差）和动作（电流/电压/摆动调整）：
+
+```python
+R001: if material==aluminum and misalignment>2.0 then current-=10A, voltage-=0.3V, weave+=0.5mm
+R002: if material==aluminum and gap>3.0 then current-=15A, voltage-=0.5V, weave+=1.0mm
+R003: if material==steel and misalignment>2.0 then current+=5A, voltage-=0.2V, weave+=0.3mm
+R004: if material==steel and gap>4.0 then current-=20A, voltage-=1.0V, weave+=1.5mm
+R005: if material==titanium and gap>2.0 then current-=15A, voltage-=0.4V, weave+=0.8mm
+R006: if material==stainless and misalignment>1.5 then current+=10A, voltage+=0.5V
+```
+
+规则匹配采用条件阈值触发机制，多条规则可同时命中并叠加调整量。
+
+### 14.6 η-PID自适应控制
+
+基于η残差（GaussEx残差，衡量焊接状态偏离最优流形的程度）的PID闭环控制：
+
+1. **有限差分梯度估计**: $\frac{\partial \eta}{\partial I} \approx \frac{\eta(I+\Delta I) - \eta(I)}{\Delta I}$，同理对V和W
+2. **PID控制律**: $\Delta param = -k_p \cdot \frac{\partial \eta}{\partial param} \cdot \eta - k_i \cdot \int \eta \, dt - k_d \cdot \frac{d\eta}{dt}$
+3. **15%限幅保护**: $|\Delta param| \leq 0.15 \times param_{optimal}$
+4. **触发阈值**: η > 0.05时自动启动PID调整
+
+该算法在接近最优参数时梯度趋零（安全保守），在大偏差时梯度大（快速修正），符合焊接工艺"微调不突变"的安全要求。
+
+### 14.7 验证结果
+
+- **测试通过率**: 709/709 (100%)，零回归
+- **25种焊缝类型**: 全部物理指标合理
+- **5个新API端点**: /non_standard, /dikwp_rules, /eta_pid, /intent_safety, /types
+- **IntentGuard**: 4级分类全部验证通过
+
+---
+
+## 15. v0.21.0: 材质库扩展 + MUS多假设材质辨识器
+
+### 15.1 材质库4→10种 + generic兜底
+
+v0.20.x的4种材料（steel/aluminum/stainless/titanium）覆盖了最常见的焊接场景，但工业实际中铜、镍、铸铁、高温合金、镁合金、青铜等材料同样常见。v0.21.0将材质库扩展至10种+generic兜底：
+
+| 材料 | k(W/m·K) | Tm(°C) | ρ(kg/m³) | cp(J/kg·K) | α(1/K) | 典型牌号 |
+|------|---------|--------|---------|-----------|--------|---------|
+| steel | 50 | 1500 | 7850 | 470 | 12e-6 | Q235碳钢 |
+| aluminum | 167 | 660 | 2700 | 900 | 23e-6 | Al6061 |
+| stainless | 16 | 1450 | 8000 | 500 | 16e-6 | SS304 |
+| titanium | 7 | 1668 | 4500 | 520 | 9e-6 | Ti-6Al-4V |
+| copper | 398 | 1085 | 8960 | 385 | 17e-6 | T2纯铜 |
+| nickel | 90 | 1455 | 8900 | 445 | 13e-6 | N6纯镍 |
+| cast_iron | 50 | 1200 | 7200 | 540 | 10e-6 | HT250灰铸铁 |
+| inconel | 9.8 | 1350 | 8440 | 410 | 12.8e-6 | Inconel 625 |
+| magnesium | 156 | 650 | 1810 | 1020 | 25e-6 | AZ91D |
+| bronze | 75 | 950 | 8800 | 380 | 18e-6 | QSn6.5-0.1 |
+| generic | 50 | 1500 | 7850 | 470 | 12e-6 | 未知材料兜底 |
+
+数据来源: ASM Handbook Volume 2 / 中国材料工程大典 / Welding Metallurgy (Linnert).
+
+**关键改进**: 未知材料自动回退到generic（而非v0.20.x的steel），语义上更准确——steel是一种具体材料，generic明确表示"未知"。
+
+### 15.2 MUS多假设材质辨识器
+
+参考EML超图文章5.3节的**epistemic humility**（认知谦逊）概念：当材料参数未知时，模型不应硬猜单一材料，而应输出多假设η演化。
+
+#### 算法
+
+1. **输入**: 可观测量（热导率k、密度ρ、熔点Tm），均可选
+2. **距离计算**: 对每个已知材料（排除generic），计算归一化属性距离：
+$$d_i = \frac{1}{|P|} \sum_{p \in P} \frac{|obs_p - known_p|}{known_p}$$
+3. **置信度**: $confidence = \frac{1}{1 + d_i}$
+4. **MUS模式判定**:
+   - confidence ≥ 0.6: 单假设模式（mus_mode=False），使用best_match
+   - confidence < 0.6: 多假设模式（mus_mode=True），保留top-3假设并行演化
+   - 无输入: 返回generic + mus_mode=True
+
+#### 工程意义
+
+MUS辨识器解决了实际焊接场景中"材料参数不完整"的常见问题。例如：
+- 只有密度计读数 → 部分匹配，可能多候选
+- 热导率测量噪声大 → 置信度低，启用MUS
+- 完全未知材料 → generic兜底 + MUS模式
+
+### 15.3 DIKWP规则库扩展至10条
+
+在v0.20.x的6条规则基础上新增4条，覆盖新材质的典型工艺调整：
+
+| 规则ID | 材料 | 条件 | 电流调整 | 电压调整 | 摆动调整 | 冶金依据 |
+|--------|------|------|---------|---------|---------|---------|
+| R007 | copper | 错边>1.5mm | +15A | +0.5V | 0 | 高热导率需预热补偿 |
+| R008 | nickel | 间隙>2.0mm | -10A | -0.3V | +0.5mm | 低热输入防热裂 |
+| R009 | inconel | 错边>1.0mm | -5A | -0.2V | +0.3mm | 低热导率防过热 |
+| R010 | cast_iron | 间隙>3.0mm | +20A | +1.0V | -0.5mm | 高碳当量防冷裂 |
+
+### 15.4 验证结果
+
+- **测试通过率**: 723/723 (100%)，零回归
+- **新增14个测试用例**:
+  - 材料数量验证(11种含generic)
+  - 新材料冷却速率差异(copper快/inconel慢)
+  - generic材料兜底
+  - MUS辨识器(精确匹配/模糊匹配/无输入/部分输入/generic排除/结构验证)
+  - DIKWP规则匹配(copper/inconel/规则总数10)
+- **新增API端点**: /api/welding/identify_material
+- **服务验证**: 全部端点curl测试通过
+
+### 15.5 经验教训
+
+1. **材质库设计需要generic兜底**: 工业现场材料种类远超实验室覆盖范围，generic兜底比默认steel更安全
+2. **epistemic humility优于硬猜**: MUS多假设模式在低置信度时保留多个候选，比强制选择单一材料更符合工程实际
+3. **DIKWP规则需要冶金学依据**: 每条规则的参数调整方向必须基于材料的热物理特性（热导率/碳当量/裂纹敏感性），不能随意设定
+4. **属性距离归一化是关键**: 使用相对距离(|obs-known|/known)而非绝对距离，使不同量纲的属性（热导率50-400 vs 密度1800-9000）可统一比较
+
+---
+
 ## 参考文献
 
 [1] 章锋. 从显式物理到隐式流贯：VG-Pair, C-IPP, GEL与双引擎AGI. 2026.
@@ -1906,6 +2067,8 @@ v0.19.0 是焊接系统迄今为止最大规模的增强版本，在四个维度
 [9] Harness Engineering. Structured Confidence Level (SCL) and Longitudinal Evaluation Protocol. 2024-2026.
 
 [10] IDO/TOMAS architecture (tomas-arc3-solver v7.2): κ-Snap, Noether gate, NARLA motor primitives, Oracle replay, Critique stall detection. 2026.
+
+[11] 章锋. 超越像素自回归——基于κ-流形驻留与EML超图的世界模型记忆评测框架. 2026. (MUS多假设/epistemic humility/material params编码)
 
 [11] 毕伟豪. 语言模型+具身智能，双引擎驱动人工智能走向AGI时刻. 机器人前瞻, 2026.
 
